@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys
 import gc
 from types import ModuleType
-import pympler.asizeof
+from .asizeof import asizeof
 from typing import Set, Dict
 import warnings
 import functools
@@ -18,7 +18,8 @@ class DataSize(IntEnum):
     PB = 1024 ** 5
     
 
-asizeof = functools.lru_cache(maxsize=None)(pympler.asizeof.asizeof)
+asizeof = functools.lru_cache(maxsize=None)(asizeof)
+sys_size = asizeof(sys)
 
 def _good_module_name(module_name:str, module_sizes:Dict[str, int])->bool:
     return (
@@ -56,7 +57,8 @@ def _get_module_sizes(module:ModuleType, module_sizes:Dict[str, int])->Dict[str,
 
     return module_sizes
 
+@functools.lru_cache(maxsize=None)
 def get_module_sizes(module:ModuleType)->Dict[str, int]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return _get_module_sizes(module, {})
+        return _get_module_sizes(module, {"sys": sys_size})

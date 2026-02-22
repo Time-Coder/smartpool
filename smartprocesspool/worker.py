@@ -52,8 +52,15 @@ class Worker:
 
     def overlap_modules_size(self, task:Task)->int:
         result = 0
-        for module_name, module_size in self.module_sizes.items():
-            if module_name in task.module_sizes:
+        if len(task.module_sizes) < len(self.module_sizes):
+            less_module_sizes = task.module_sizes
+            more_module_sizes = self.module_sizes
+        else:
+            less_module_sizes = self.module_sizes
+            more_module_sizes = task.module_sizes
+
+        for module_name, module_size in less_module_sizes.items():
+            if module_name in more_module_sizes:
                 result += module_size
 
         return result
@@ -81,7 +88,8 @@ class Worker:
                 target=Worker.run,
                 args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
                 kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
-                name=f"SmartProcessPool.worker:{self.index}"
+                name=f"SmartProcessPool.worker:{self.index}",
+                daemon=True
             )
         else:
             import multiprocessing as mp
@@ -90,7 +98,8 @@ class Worker:
                 target=Worker.run,
                 args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
                 kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
-                name=f"SmartProcessPool.worker:{self.index}"
+                name=f"SmartProcessPool.worker:{self.index}",
+                daemon=True
             )
 
         self.process.start()

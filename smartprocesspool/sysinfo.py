@@ -44,6 +44,6 @@ class SysInfo:
 
     def update(self):
         with self._lock:
-            self.cpu_core_free = (1 - psutil.cpu_percent() / 100) * psutil.cpu_count()
-            self.cpu_mem_free = psutil.virtual_memory().available
-            self.gpu_infos = GPUInfos.snapshot("n_cores_free", "memory_free")
+            self._cpu_core_free = (1 - psutil.cpu_percent() / 100) * psutil.cpu_count()
+            self._cpu_mem_free = psutil.virtual_memory().available
+            self._gpu_infos = GPUInfos.snapshot("n_cores_free", "memory_free")

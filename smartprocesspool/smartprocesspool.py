@@ -188,6 +188,9 @@ class SmartProcessPool:
         best_worker:Optional[Worker] = None
         max_overlap_size:int = 0
         for worker in self._workers:
+            if worker.is_working:
+                continue
+
             current_overlap_size = worker.overlap_modules_size(task)
             if not worker.is_working and (best_worker is None or current_overlap_size > max_overlap_size):
                 max_overlap_size = current_overlap_size

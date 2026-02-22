@@ -31,6 +31,7 @@ class Task:
 
     def __getstate__(self):
         return {
+            "id": self.id,
             "func": self.func,
             "args": self.args,
             "kwargs": self.kwargs
