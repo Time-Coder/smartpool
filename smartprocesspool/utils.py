@@ -6,6 +6,7 @@ import warnings
 import functools
 from enum import IntEnum
 import itertools
+from multiprocessing.connection import _ConnectionBase
 from types import ModuleType
 from typing import Set, Dict, Iterable
 
@@ -72,3 +73,15 @@ def batched(iterable:Iterable, chunksize:int):
         if not batch:
             break
         yield batch
+
+def comm_put(queue, item)->None:
+    if isinstance(queue, _ConnectionBase):
+        queue.send(item)
+    else:
+        queue.put(item)
+
+def comm_get(queue)->Any:
+    if isinstance(queue, _ConnectionBase):
+        return queue.recv()
+    else:
+        return queue.get()

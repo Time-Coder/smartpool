@@ -1,26 +1,26 @@
 from __future__ import annotations
 import threading
+from multiprocessing.connection import _ConnectionBase
 import types
 from typing import TYPE_CHECKING, Union, TypeAlias, Optional, Callable, Any, Dict, Tuple
 
 import psutil
 
 from .task import Task, Result
+from .utils import comm_get, comm_put
 
 if TYPE_CHECKING:
-    import multiprocessing
-    from multiprocessing.connection import Connection
     try:
         import torch
-        Queue:TypeAlias = Union[torch.multiprocessing.Queue, multiprocessing.Queue]
+        ConnectionOrQueue:TypeAlias = Union[torch.multiprocessing.Queue, _ConnectionBase]
     except ImportError:
-        Queue:TypeAlias = multiprocessing.Queue
+        ConnectionOrQueue:TypeAlias = _ConnectionBase
 
 
 class Worker:
 
     def __init__(
-        self, index:int, result_queue:Queue[Result], mp_context:str,
+        self, index:int, result_queue:ConnectionOrQueue[Result], mp_context:str,
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
@@ -34,9 +34,18 @@ class Worker:
         self.is_torch:bool = torch
         self.index:int = index
         self.mp_context:str = mp_context
-        self.result_queue:Queue[Result] = result_queue
-        self.task_queue:Queue[Task] = mp.Queue()
-        self.change_device_cmd_connection:Optional[Connection] = None
+        self.result_queue:ConnectionOrQueue[Result] = result_queue
+        if torch:
+            self.task_queue:ConnectionOrQueue[Task] = mp.Queue()
+            self.sub_task_queue:ConnectionOrQueue[Task] = self.task_queue
+        else:
+            conn1, conn2 = mp.Pipe()
+            self.task_queue:ConnectionOrQueue[Task] = conn1
+            self.sub_task_queue:ConnectionOrQueue[Task] = conn2
+
+        conn1, conn2 = mp.Pipe()
+        self.change_device_cmd_connection:Optional[_ConnectionBase] = conn1
+        self.sub_change_device_cmd_connection:Optional[_ConnectionBase] = conn2
         self.is_working:bool = False
         self.module_sizes:Dict[str, int] = {}
         self.n_finished_tasks:int = 0
@@ -72,14 +81,13 @@ class Worker:
     def add_task(self, task:Task)->None:
         self.is_working = True
         self.module_sizes.update(task.module_sizes)
-        task.mem_before_enter = self.rss
-        self.task_queue.put(task)
+        comm_put(self.task_queue, task)
 
     def change_device(self, device:str)->None:
         self.change_device_cmd_connection.send(device)
 
     def stop(self)->None:
-        self.task_queue.put(None)
+        comm_put(self.task_queue, None)
         self.change_device_cmd_connection.send(None)
 
         self.task_queue.close()
@@ -88,30 +96,23 @@ class Worker:
     def start(self):
         if self.is_torch:
             import torch.multiprocessing as mp
-            self.change_device_cmd_connection, con2 = mp.Pipe()
-            self.process:mp.Process = mp.Process(
-                target=Worker.run,
-                args=(self.task_queue, self.result_queue, con2),
-                kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
-                name=f"SmartProcessPool.worker:{self.index}",
-                daemon=True
-            )
+            Process = mp.Process
         else:
             import multiprocessing as mp
-            self.change_device_cmd_connection, con2 = mp.Pipe()
             ctx = mp.get_context(self.mp_context)
-            self.process:mp.Process = ctx.Process(
-                target=Worker.run,
-                args=(self.task_queue, self.result_queue, con2),
-                kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
-                name=f"SmartProcessPool.worker:{self.index}",
-                daemon=True
-            )
+            Process = ctx.Process
 
+        self.process:mp.Process = Process(
+            target=Worker.run,
+            args=(self.sub_task_queue, self.result_queue, self.sub_change_device_cmd_connection),
+            kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
+            name=f"SmartProcessPool.worker:{self.index}",
+            daemon=True
+        )
         self.process.start()
 
     def restart(self)->None:
-        self.task_queue.put(None)
+        comm_put(self.task_queue, None)
         self.change_device_cmd_connection.send(None)
         self.process.join()
         self.n_finished_tasks:int = 0
@@ -128,7 +129,7 @@ class Worker:
     change_device_thread = None
 
     @staticmethod
-    def _changing_device(cmd_connection:Connection[Optional[str]]):
+    def _changing_device(cmd_connection:_ConnectionBase[Optional[str]]):
         while True:
             device = cmd_connection.recv()
             if device is None:
@@ -143,7 +144,7 @@ class Worker:
 
     @staticmethod
     def run(
-        task_queue:Queue[Task], result_queue:Queue[Result], change_device_cmd_connection:Connection[Optional[str]],
+        task_queue:ConnectionOrQueue[Task], result_queue:ConnectionOrQueue[Result], change_device_cmd_connection:_ConnectionBase[Optional[str]],
         initializer:Optional[Callable[..., Any]], initargs:Tuple[Any, ...], initkwargs:Optional[Dict[str, Any]]    
     ):
         if initializer is not None:
@@ -153,7 +154,7 @@ class Worker:
             initializer(*initargs, **initkwargs)
         
         Worker.func_device_lock = threading.Lock()
-        Worker.change_device_thread = threading.Thread(target=Worker._changing_device, args=(change_device_cmd_connection,), daemon=True)
+        Worker.change_device_thread = threading.Thread(target=Worker._changing_device, args=(change_device_cmd_connection,), daemon=True, name="changing_device")
         Worker.change_device_thread.start()
 
         def device(self):
@@ -161,7 +162,7 @@ class Worker:
                 return self._device
 
         while True:
-            task:Task = task_queue.get()
+            task:Optional[Task] = comm_get(task_queue)
             if task is None:
                 task_queue.close()
                 result_queue.close()
@@ -175,4 +176,4 @@ class Worker:
             except AttributeError:
                 pass
 
-            result_queue.put(task.exec())
+            comm_put(result_queue, task.exec())

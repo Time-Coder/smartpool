@@ -2,8 +2,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
+    from typing import TypeAlias, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
     from concurrent.futures import Future
+    from multiprocessing.connection import _ConnectionBase
+
+    try:
+        import torch
+        ConnectionOrQueue:TypeAlias = Union[torch.multiprocessing.Queue, _ConnectionBase]
+    except ImportError:
+        ConnectionOrQueue:TypeAlias = _ConnectionBase
 
     from .task import Task, Result
     from .worker import Worker
@@ -40,7 +47,14 @@ class SmartProcessPool:
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
-        self._result_queue:mp.Queue[Result] = mp.Queue()
+        if torch:
+            self._result_queue:ConnectionOrQueue[Result] = mp.Queue()
+            self._sub_result_queue:ConnectionOrQueue[Result] = self._result_queue
+        else:
+            conn1, conn2 = mp.Pipe()
+            self._result_queue:ConnectionOrQueue[Result] = conn1
+            self._sub_result_queue:ConnectionOrQueue[Result] = conn2
+
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
         self._delayed_tasks:List[Task] = []
@@ -50,7 +64,7 @@ class SmartProcessPool:
 
         self._add_worker()
 
-        self._result_thread = threading.Thread(target=self._collecting_result, daemon=True)
+        self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
         self._result_thread.start()
 
     def submit(
@@ -124,7 +138,6 @@ class SmartProcessPool:
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     ):
-
         from functools import partial
         import itertools
         import time
@@ -156,22 +169,23 @@ class SmartProcessPool:
         iterator = zip(args_iterables, need_cpu_cores, need_cpu_mem, need_gpu_cores, need_gpu_mem)
         for batch in batched(iterator, chunksize):
             args_batch, cpu_cores_batch, cpu_mem_batch, gpu_cores_batch, gpu_mem_batch = zip(*batch)
-            futures.append(
-                self.submit(
-                    target_func, args=args_batch,
-                    need_cpu_cores=max(cpu_cores_batch),
-                    need_cpu_mem=max(cpu_mem_batch),
-                    need_gpu_cores=max(gpu_cores_batch),
-                    need_gpu_mem=max(gpu_mem_batch)
-                )
+            future = self.submit(
+                target_func, args=(args_batch,),
+                need_cpu_cores=max(cpu_cores_batch),
+                need_cpu_mem=max(cpu_mem_batch),
+                need_gpu_cores=max(gpu_cores_batch),
+                need_gpu_mem=max(gpu_mem_batch)
             )
+            futures.append(future)
 
         return _chain_from_iterable_of_lists(SmartProcessPool._result_iterator(futures, end_time))
 
     def _put_task(self, task:Task, worker:Worker)->None:
         self._sys_info.cpu_cores_free -= task.need_cpu_cores
 
-        real_need_cpu_mem = max(0, task.need_cpu_mem - worker.rss)
+        worker_rss = worker.rss
+        task.mem_before_enter = worker_rss
+        real_need_cpu_mem = max(0, task.need_cpu_mem - worker_rss)
         self._sys_info.cpu_mem_free -= real_need_cpu_mem
         task_gpu_id:int = task.gpu_id
         if task_gpu_id != -1:
@@ -185,7 +199,7 @@ class SmartProcessPool:
         from .worker import Worker
 
         worker = Worker(
-            len(self._workers), self._result_queue, self._mp_context,
+            len(self._workers), self._sub_result_queue, self._mp_context,
             initializer=self._initializer,
             initargs=self._initargs,
             initkwargs=self._initkwargs,
@@ -195,8 +209,14 @@ class SmartProcessPool:
         return worker
 
     def _collecting_result(self)->None:
+        from .utils import comm_get
+
         while not self._shutdown:
-            result:Result = self._result_queue.get()
+            try:
+                result:Result = comm_get(self._result_queue)
+            except EOFError:
+                self._shutdown = True
+                break
 
             with self._lock:
                 future = self._futures.pop(result.task_id)
@@ -322,8 +342,10 @@ class SmartProcessPool:
 
         need_gpu_cores:int = task.need_gpu_cores
         need_gpu_mem:int = task.need_gpu_mem
-        
-        gpus = self._sys_info.gpu_infos
+        gpus = None
+        if need_gpu_cores > 0 and need_gpu_mem > 0:
+            gpus = self._sys_info.gpu_infos
+
         if not gpus:
             task.device = "cpu"
             task.worker_index = worker.index

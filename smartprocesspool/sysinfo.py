@@ -8,7 +8,8 @@ class SysInfo:
     def __init__(self):
         self._cpu_cores_free = int((1 - psutil.cpu_percent() / 100) * psutil.cpu_count())
         self._cpu_mem_free = psutil.virtual_memory().available
-        self._gpu_infos = GPUInfos.snapshot("n_cores_free", "memory_free")
+        self._gpu_infos = None
+        self._gpu_infos_dirty = True
 
         self._lock = Lock()
 
@@ -25,12 +26,11 @@ class SysInfo:
     @property
     def gpu_infos(self):
         with self._lock:
+            if self._gpu_infos_dirty:
+                self._gpu_infos = GPUInfos.snapshot("n_cores_free", "memory_free")
+                self._gpu_infos_dirty = False
+
             return self._gpu_infos
-    
-    @gpu_infos.setter
-    def gpu_infos(self, gpu_infos):
-        with self._lock:
-            self._gpu_infos = gpu_infos
 
     @property
     def cpu_cores_free(self):
@@ -46,4 +46,4 @@ class SysInfo:
         with self._lock:
             self._cpu_core_free = (1 - psutil.cpu_percent() / 100) * psutil.cpu_count()
             self._cpu_mem_free = psutil.virtual_memory().available
-            self._gpu_infos = GPUInfos.snapshot("n_cores_free", "memory_free")
+            self._gpu_infos_dirty = True
