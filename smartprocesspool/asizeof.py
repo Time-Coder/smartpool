@@ -1840,162 +1840,71 @@ class Asizer(object):
         return _repr(obj, clip=self._clip_)
 
     def _sizer(self, obj, pid, deep, sized):  # MCCABE 19
-        '''Size an object, iteratively using stack-based approach.
+        '''Size an object, recursively.
         '''
-        from collections import deque
-        
-        # 工作栈: (current_obj, current_pid, current_deep, current_sized, action, context)
-        stack = deque([(obj, pid, deep, sized, 'process', None)])
-        result_stack = []  # 存储计算结果
-        pending_states = {}  # 存储待处理的状态
-        
-        while stack:
-            current_obj, current_pid, current_deep, current_sized, action, context = stack.pop()
-            
-            if action == 'process':
-                # 初始化当前对象的计算
-                s, f, obj_id = 0, 0, id(current_obj)
-                
-                # 复制原始的重复对象处理逻辑
-                if obj_id not in self._seen:
-                    self._seen[obj_id] = 1
-                elif current_deep or self._seen[obj_id]:
-                    # 跳过已处理的对象
-                    if self._seen[obj_id]:
-                        self._seen.again(obj_id)
-                    if current_sized:
-                        result_obj = current_sized(s, f, name=self._nameof(current_obj))
-                        self.exclude_objs(result_obj)
-                        result_stack.append(result_obj)
-                    else:
-                        result_stack.append(s)
-                    continue
-                else:
-                    self._seen.again(obj_id)
-                
-                try:
-                    # 获取对象类型信息
-                    k, rs = _objkey(current_obj), []
-                    
-                    if k in self._excl_d:
-                        self._excl_d[k] += 1
-                    else:
-                        v = _typedefs.get(k, None)
-                        if not v:  # new typedef
-                            _typedefs[k] = v = _typedef(current_obj, derive=self._derive_,
-                                                             frames=self._frames_,
-                                                              infer=self._infer_)
-                        
-                        if (v.both or self._code_) and v.kind is not self._ign_d:
-                            s = f = v.flat(current_obj, self._mask)  # flat size
-                            
-                            if self._profile:
-                                # profile based on *flat* size
-                                self._prof(k).update(current_obj, s)
-                            
-                            # 处理引用对象（迭代方式）
-                            if v.refs and current_deep < self._limit_ \
-                                      and not (current_deep and ismodule(current_obj)):
-                                
-                                # 获取引用对象列表
-                                if current_sized and current_deep < self._detail_:
-                                    refs = list(v.refs(current_obj, True))
-                                    named_refs = True
+        s, f, i = 0, 0, id(obj)
+        if i not in self._seen:
+            self._seen[i] = 1
+        elif deep or self._seen[i]:
+            # skip obj if seen before
+            # or if ref of a given obj
+            if self._seen[i]:
+                self._seen.again(i)
+            if sized:
+                s = sized(s, f, name=self._nameof(obj))
+                self.exclude_objs(s)
+            return s  # zero
+        else:  # deep == seen[i] == 0
+            self._seen.again(i)
+        try:
+            k, rs = _objkey(obj), []
+            if k in self._excl_d:
+                self._excl_d[k] += 1
+            else:
+                v = _typedefs.get(k, None)
+                if not v:  # new typedef
+                    _typedefs[k] = v = _typedef(obj, derive=self._derive_,
+                                                     frames=self._frames_,
+                                                      infer=self._infer_)
+                if (v.both or self._code_) and v.kind is not self._ign_d:
+                    s = f = v.flat(obj, self._mask)  # flat size
+                    if self._profile:
+                        # profile based on *flat* size
+                        self._prof(k).update(obj, s)
+                    # recurse, but not for nested modules
+                    if v.refs and deep < self._limit_ \
+                              and not (deep and ismodule(obj)):
+                        # add sizes of referents
+                        z, d = self._sizer, deep + 1
+                        if sized and deep < self._detail_:
+                            # use named referents
+                            self.exclude_objs(rs)
+                            for o in v.refs(obj, True):
+                                if isinstance(o, _NamedRef):
+                                    r = z(o.ref, i, d, sized)
+                                    r.name = o.name
                                 else:
-                                    refs = list(v.refs(current_obj, False))
-                                    named_refs = False
-                                
-                                if refs:
-                                    # 设置待处理状态
-                                    pending_states[obj_id] = {
-                                        'base_size': s,
-                                        'flat_size': f,
-                                        'references': refs,
-                                        'ref_index': 0,
-                                        'accumulated_size': s,
-                                        'named_refs': named_refs,
-                                        'ref_results': [],
-                                        'parent_pid': current_pid,
-                                        'parent_deep': current_deep,
-                                        'parent_sized': current_sized
-                                    }
-                                    
-                                    # 处理第一个引用对象
-                                    first_ref = refs[0]
-                                    stack.append((current_obj, current_pid, current_deep, current_sized, 'resume', obj_id))
-                                    if named_refs and isinstance(first_ref, _NamedRef):
-                                        stack.append((first_ref.ref, obj_id, current_deep + 1, current_sized, 'process', obj_id))
-                                    else:
-                                        stack.append((first_ref, obj_id, current_deep + 1, None, 'process', obj_id))
-                                else:
-                                    # 无引用对象，直接完成
-                                    self._finalize_sizer_result(current_deep, current_sized, s, f, current_obj, rs, result_stack)
-                            else:
-                                # 无引用或达到深度限制
-                                self._finalize_sizer_result(current_deep, current_sized, s, f, current_obj, rs, result_stack)
-                            
-                            # 统计信息
-                            if self._stats_ and s > self._above_ > 0:
-                                # rank based on *total* size
-                                self._rank(k, current_obj, s, current_deep, current_pid)
-                                
-                except RuntimeError:  # XXX RecursionLimitExceeded:
-                    self._missed += 1
-                    result_stack.append(0)
-                    
-            elif action == 'resume':
-                # 恢复处理，累加引用对象的大小
-                if context in pending_states:
-                    state = pending_states[context]
-                    state['ref_index'] += 1
-                    
-                    # 获取刚刚计算完的引用对象大小
-                    if result_stack:
-                        ref_result = result_stack.pop()
-                        if state['named_refs']:
-                            # 处理命名引用
-                            ref_size = ref_result.size
-                            state['ref_results'].append(ref_result)
-                        else:
-                            ref_size = ref_result
-                        state['accumulated_size'] += ref_size
-                    
-                    # 处理下一个引用对象
-                    if state['ref_index'] < len(state['references']):
-                        next_ref = state['references'][state['ref_index']]
-                        stack.append((context, state['parent_pid'], state['parent_deep'], state['parent_sized'], 'resume', context))
-                        if state['named_refs'] and isinstance(next_ref, _NamedRef):
-                            stack.append((next_ref.ref, context, state['parent_deep'] + 1, state['parent_sized'], 'process', context))
-                        else:
-                            stack.append((next_ref, context, state['parent_deep'] + 1, None, 'process', context))
-                    else:
-                        # 所有引用对象处理完成
-                        final_size = state['accumulated_size']
-                        final_refs = state['ref_results'] if state['named_refs'] else []
-                        self._finalize_sizer_result(
-                            state['parent_deep'], 
-                            state['parent_sized'], 
-                            final_size, 
-                            state['flat_size'], 
-                            context, 
-                            final_refs, 
-                            result_stack
-                        )
-                        del pending_states[context]
-        
-        return result_stack[-1] if result_stack else 0
-    
-    def _finalize_sizer_result(self, deep, sized, size, flat_size, obj, refs, result_stack):
-        '''辅助函数：完成对象大小计算结果'''
+                                    r = z(o, i, d, sized)
+                                    r.name = self._nameof(o)
+                                rs.append(r)
+                                s += r.size
+                        else:  # just size and accumulate
+                            for o in v.refs(obj, False):
+                                s += z(o, i, d, None)
+                        # deepest recursion reached
+                        if self._depth < d:
+                            self._depth = d
+                if self._stats_ and s > self._above_ > 0:
+                    # rank based on *total* size
+                    self._rank(k, obj, s, deep, pid)
+        except RuntimeError:  # XXX RecursionLimitExceeded:
+            self._missed += 1
         if not deep:
-            self._total += size
-        
+            self._total += s  # accumulate
         if sized:
-            result = sized(size, flat_size, name=self._nameof(obj), refs=refs)
-            self.exclude_objs(result)
-            result_stack.append(result)
-        else:
-            result_stack.append(size)
+            s = sized(s, f, name=self._nameof(obj), refs=rs)
+            self.exclude_objs(s)
+        return s
 
     def _sizes(self, objs, sized=None):
         '''Return the size or an **Asized** instance for each
