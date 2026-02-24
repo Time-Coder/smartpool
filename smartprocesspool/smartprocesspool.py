@@ -31,11 +31,11 @@ class SmartProcessPool:
         if use_torch:
             import torch
             import torch.multiprocessing as mp
-            from torch.multiprocessing.queue import SimpleQueue
+            from torch.multiprocessing.queue import Queue
             self._torch_cuda_available = torch.cuda.is_available()
         else:
             import multiprocessing as mp
-            from multiprocessing import SimpleQueue
+            from multiprocessing.queues import Queue
             self._torch_cuda_available = False
 
         from .sysinfo import SysInfo
@@ -48,11 +48,12 @@ class SmartProcessPool:
         self._use_torch:bool = use_torch
         self._sys_info = SysInfo()
         self._max_workers:int = max_workers
-        self._mp_context:str = mp_context
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
-        self._result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = SimpleQueue()
+
+        self._ctx = mp.get_context(mp_context)
+        self._result_queue:Queue[Optional[Tuple[str, bool, Any]]] = Queue(ctx=self._ctx)
 
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
@@ -194,11 +195,12 @@ class SmartProcessPool:
         from .worker import Worker
 
         worker = Worker(
-            len(self._workers), self._result_queue, self._mp_context,
+            len(self._workers), self._result_queue, self._ctx,
             initializer=self._initializer,
             initargs=self._initargs,
             initkwargs=self._initkwargs,
-            use_torch=self._use_torch
+            use_torch=self._use_torch,
+            torch_cuda_available=self._torch_cuda_available
         )
         self._workers.append(worker)
         return worker
@@ -338,7 +340,7 @@ class SmartProcessPool:
         task.mem_before_enter = worker.cached_rss
         task.estimated_need_cpu_mem = 0
         if task.need_cpu_mem > 0:
-            overlap_ratio = task.modules_overlap_size / worker.modules_total_size
+            overlap_ratio = task.modules_overlap_size / worker.modules_total_size(task)
             task.estimated_need_cpu_mem = max(0, task.need_cpu_mem - overlap_ratio * worker.cached_rss)
 
         if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free:

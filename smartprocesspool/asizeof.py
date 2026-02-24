@@ -1298,7 +1298,7 @@ try:  # MCCABE 19
                     and hasattr(obj, 'nbytes'):
                 return (_moduleof(_classof(obj)).startswith('numpy') or
                         _moduleof(type(obj)).startswith('numpy'))
-        except (AttributeError, OSError, ValueError):  # on iOS/Pythonista
+        except:  # on iOS/Pythonista
             pass
         return False
 

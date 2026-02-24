@@ -5,3 +5,5 @@ dist
 .lingma
 test_*
 result.json
+data
+*.png

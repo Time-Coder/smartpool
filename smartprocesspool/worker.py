@@ -2,33 +2,33 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple, Set
 
 if TYPE_CHECKING:
-    from multiprocessing import SimpleQueue
+    from multiprocessing.queues import SimpleQueue, Queue
     from .task import Task
 
 
 class Worker:
 
     def __init__(
-        self, index:int, result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]], mp_context:str,
+        self, index:int, result_queue:Queue[Optional[Tuple[str, bool, Any]]], ctx,
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
-        use_torch:bool=False
+        use_torch:bool, torch_cuda_available:bool
     ):
-        self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = None
-
         if use_torch:
-            from torch.multiprocessing.queue import SimpleQueue
-            import torch
-            if torch.cuda.is_available():
-                self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue()
+            from torch.multiprocessing.queue import SimpleQueue, Queue
         else:
-            from multiprocessing import SimpleQueue
+            from multiprocessing.queues import SimpleQueue, Queue
 
+        if torch_cuda_available:
+            self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=ctx)
+        else:
+            self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = None
+
+        self.ctx = ctx
         self.index:int = index
-        self.mp_context:str = mp_context
-        self.result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = result_queue
-        self.task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = SimpleQueue()
+        self.result_queue:Queue[Optional[Tuple[str, bool, Any]]] = result_queue
+        self.task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = Queue(ctx=ctx)
         self._is_working:bool = False
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
@@ -104,10 +104,7 @@ class Worker:
         import multiprocessing as mp
         import psutil
 
-        ctx = mp.get_context(self.mp_context)
-        Process = ctx.Process
-
-        self.process:mp.Process = Process(
+        self.process:mp.Process = self.ctx.Process(
             target=Worker.run,
             args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
             kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
@@ -117,10 +114,13 @@ class Worker:
         self.process.start()
         self.process_info = psutil.Process(self.process.pid)
 
-    @property
-    def modules_total_size(self)->int:
+    def modules_total_size(self, task:Optional[Task]=None)->int:
         from .utils import asizeof
-        return sum(asizeof(module) for module in self.modules)
+        self_total_size = sum(asizeof(module) for module in self.modules)
+        task_total_size = 0
+        if task is not None:
+            task_total_size = sum(module_size for module_size in task.module_sizes.values())
+        return self_total_size + task_total_size
 
     def restart(self)->None:
         self.task_queue.put(None)
@@ -158,8 +158,8 @@ class Worker:
 
     @staticmethod
     def run(
-        task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]],
-        result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]],
+        task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]],
+        result_queue:Queue[Optional[Tuple[str, bool, Any]]],
         change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]],
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
@@ -190,12 +190,12 @@ class Worker:
                 result_queue.close()
                 break
 
-            task_id, func, args, kwargs = task
+            task_id, task_device, func, args, kwargs = task
 
             if change_device_cmd_queue is not None:
                 try:
                     with Worker.func_device_lock:
-                        func._device = device
+                        func._device = task_device
                         func.device = types.MethodType(device, func)
                         Worker.current_func = func
                 except AttributeError:

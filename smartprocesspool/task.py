@@ -24,7 +24,7 @@ class Task:
         self.mem_before_enter:int = 0
 
     def info(self):
-        return self.id, self.func, self.args, self.kwargs
+        return self.id, self.device, self.func, self.args, self.kwargs
 
     @property
     def gpu_id(self)->int:
