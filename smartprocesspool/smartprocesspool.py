@@ -178,11 +178,7 @@ class SmartProcessPool:
 
     def _put_task(self, task:Task, worker:Worker)->None:
         self._sys_info.cpu_cores_free -= task.need_cpu_cores
-
-        worker_rss = worker.cached_rss
-        task.mem_before_enter = worker_rss
-        real_need_cpu_mem = max(0, task.need_cpu_mem - worker_rss)
-        self._sys_info.cpu_mem_free -= real_need_cpu_mem
+        self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
         task_gpu_id:int = task.gpu_id
         if task_gpu_id != -1:
             self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
@@ -268,9 +264,9 @@ class SmartProcessPool:
     def working_count(self)->int:
         return sum(worker.is_working for worker in self._workers)
     
-    def _choose_task_worker(self, task:Task)->Optional[Worker]:
+    def _choose_task_worker(self, task:Task)->Optional[Tuple[Worker, int]]:
         best_worker:Optional[Worker] = None
-        max_overlap_size:int = 0
+        task.modules_overlap_size = 0
         for worker in self._workers:
             if worker.is_working:
                 continue
@@ -279,15 +275,18 @@ class SmartProcessPool:
                 return worker
 
             current_overlap_size = worker.overlap_modules_size(task)
-            if best_worker is None or current_overlap_size > max_overlap_size:
-                max_overlap_size = current_overlap_size
+            if best_worker is None or current_overlap_size > task.modules_overlap_size:
+                task.modules_overlap_size = current_overlap_size
                 best_worker = worker
             
         if best_worker is not None:
             return best_worker
             
         if len(self._workers) < self._max_workers:
-            return self._add_worker()
+            best_worker = self._add_worker()
+            if task.need_cpu_mem > 0:
+                task.modules_overlap_size = best_worker.overlap_modules_size(task)
+            return best_worker
         else:
             return None
 
@@ -332,8 +331,13 @@ class SmartProcessPool:
             task.device = None
             return None
         
-        real_need_cpu_mem:int = task.need_cpu_mem - worker.cached_rss
-        if real_need_cpu_mem > self._sys_info.cpu_mem_free:
+        task.mem_before_enter = worker.cached_rss
+        task.estimated_need_cpu_mem = 0
+        if task.need_cpu_mem > 0:
+            overlap_ratio = task.modules_overlap_size / worker.modules_total_size
+            task.estimated_need_cpu_mem = max(0, task.need_cpu_mem - overlap_ratio * worker.cached_rss)
+
+        if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free:
             task.device = None
             return None
 

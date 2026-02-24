@@ -112,11 +112,17 @@ class Worker:
         self.process.start()
         self.process_info = psutil.Process(self.process.pid)
 
+    @property
+    def modules_total_size(self)->int:
+        from .utils import asizeof
+        return sum(asizeof(module) for module in self.modules)
+
     def restart(self)->None:
         self.task_queue.put(None)
         self.change_device_cmd_queue.put(None)
         self.process.join()
         self.n_finished_tasks:int = 0
+        self.modules.clear()
         self.start()
         
     def terminate(self)->None:

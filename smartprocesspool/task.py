@@ -16,6 +16,8 @@ class Task:
         self.need_cpu_mem:int = need_cpu_mem
         self.need_gpu_cores:int = need_gpu_cores
         self.need_gpu_mem:int = need_gpu_mem
+        self.estimated_need_cpu_mem:float = 0.0
+        self.modules_overlap_size:int = 0.0
         self.module_sizes:Dict[str, int] = get_module_sizes(sys.modules[func.__module__], need_cpu_mem > 0)
         self.device:Optional[str] = None
         self.worker_index:int = -1
