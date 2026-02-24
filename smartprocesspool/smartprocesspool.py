@@ -25,15 +25,18 @@ class SmartProcessPool:
         initkwargs:Optional[Dict[str, Any]]=None,
         *,
         max_tasks_per_child:Optional[int]=None,
-        torch:bool=False
+        use_torch:bool=False
     ):
         import threading
-        if torch:
+        if use_torch:
+            import torch
             import torch.multiprocessing as mp
             from torch.multiprocessing.queue import SimpleQueue
+            self._torch_cuda_available = torch.cuda.is_available()
         else:
             import multiprocessing as mp
             from multiprocessing import SimpleQueue
+            self._torch_cuda_available = False
 
         from .sysinfo import SysInfo
         
@@ -42,7 +45,7 @@ class SmartProcessPool:
             max_workers = mp.cpu_count()
 
         self._max_tasks_per_child:Optional[int] = max_tasks_per_child
-        self._is_torch:bool = torch
+        self._use_torch:bool = use_torch
         self._sys_info = SysInfo()
         self._max_workers:int = max_workers
         self._mp_context:str = mp_context
@@ -195,7 +198,7 @@ class SmartProcessPool:
             initializer=self._initializer,
             initargs=self._initargs,
             initkwargs=self._initkwargs,
-            torch=self._is_torch
+            use_torch=self._use_torch
         )
         self._workers.append(worker)
         return worker
@@ -257,8 +260,9 @@ class SmartProcessPool:
                     del self._futures[task_id]
                     del self._tasks[task_id] 
 
-                for task in self._tasks.values():
-                    self._try_move_to_gpu(task)
+                if self._torch_cuda_available:
+                    for task in self._tasks.values():
+                        self._try_move_to_gpu(task)
 
     @property
     def working_count(self)->int:
@@ -341,12 +345,12 @@ class SmartProcessPool:
             task.device = None
             return None
 
-        need_gpu_cores:int = task.need_gpu_cores
-        need_gpu_mem:int = task.need_gpu_mem
-        gpus = None
-        if need_gpu_cores > 0 and need_gpu_mem > 0:
-            gpus = self._sys_info.gpu_infos
+        if not self._torch_cuda_available or (task.need_gpu_cores == 0 and task.need_gpu_mem == 0):
+            task.device = "cpu"
+            task.worker_index = worker.index
+            return "cpu"
 
+        gpus = self._sys_info.gpu_infos
         if not gpus:
             task.device = "cpu"
             task.worker_index = worker.index
@@ -354,7 +358,7 @@ class SmartProcessPool:
 
         best_gpu = None
         for gpu in gpus:
-            if gpu.memory_free >= need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+            if gpu.memory_free >= task.need_gpu_mem and gpu.n_cores_free >= task.need_gpu_cores:
                 if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                     best_gpu = gpu
 

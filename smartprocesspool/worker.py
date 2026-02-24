@@ -13,19 +13,22 @@ class Worker:
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
-        torch:bool=False
+        use_torch:bool=False
     ):
-        if torch:
+        self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = None
+
+        if use_torch:
             from torch.multiprocessing.queue import SimpleQueue
+            import torch
+            if torch.cuda.is_available():
+                self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue()
         else:
             from multiprocessing import SimpleQueue
 
-        self.is_torch:bool = torch
         self.index:int = index
         self.mp_context:str = mp_context
         self.result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = result_queue
         self.task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = SimpleQueue()
-        self.change_device_cmd_queue:SimpleQueue[Optional[str]] = SimpleQueue()
         self._is_working:bool = False
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
@@ -86,14 +89,16 @@ class Worker:
         self.task_queue.put(task.info())
 
     def change_device(self, device:str)->None:
-        self.change_device_cmd_queue.put(device)
+        if self.change_device_cmd_queue is not None:
+            self.change_device_cmd_queue.put(device)
 
     def stop(self)->None:
         self.task_queue.put(None)
-        self.change_device_cmd_queue.put(None)
-
         self.task_queue.close()
-        self.change_device_cmd_queue.close()
+
+        if self.change_device_cmd_queue is not None:
+            self.change_device_cmd_queue.put(None)
+            self.change_device_cmd_queue.close()
 
     def start(self):
         import multiprocessing as mp
@@ -105,7 +110,7 @@ class Worker:
         self.process:mp.Process = Process(
             target=Worker.run,
             args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
-            kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs, "torch": self.is_torch},
+            kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
             name=f"SmartProcessPool.worker:{self.index}",
             daemon=True
         )
@@ -119,7 +124,9 @@ class Worker:
 
     def restart(self)->None:
         self.task_queue.put(None)
-        self.change_device_cmd_queue.put(None)
+        if self.change_device_cmd_queue is not None:
+            self.change_device_cmd_queue.put(None)
+
         self.process.join()
         self.n_finished_tasks:int = 0
         self.modules.clear()
@@ -151,8 +158,12 @@ class Worker:
 
     @staticmethod
     def run(
-        task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]], result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]], change_device_cmd_queue:SimpleQueue[Optional[str]],
-        initializer:Optional[Callable[..., Any]], initargs:Tuple[Any, ...], initkwargs:Optional[Dict[str, Any]], torch:bool
+        task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]],
+        result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]],
+        change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]],
+        initializer:Optional[Callable[..., Any]],
+        initargs:Tuple[Any, ...],
+        initkwargs:Optional[Dict[str, Any]]
     ):
         if initializer is not None:
             if initkwargs is None:
@@ -160,7 +171,7 @@ class Worker:
 
             initializer(*initargs, **initkwargs)
         
-        if torch:
+        if change_device_cmd_queue is not None:
             import threading
             import types
 
@@ -181,7 +192,7 @@ class Worker:
 
             task_id, func, args, kwargs = task
 
-            if torch:
+            if change_device_cmd_queue is not None:
                 try:
                     with Worker.func_device_lock:
                         func._device = device
