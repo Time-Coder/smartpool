@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 class Worker:
 
     def __init__(
-        self, index:int, result_queue:Queue[Optional[Tuple[str, bool, Any]]], ctx,
+        self, index:int, result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]], ctx,
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
@@ -27,12 +27,12 @@ class Worker:
 
         self.ctx = ctx
         self.index:int = index
-        self.result_queue:Queue[Optional[Tuple[str, bool, Any]]] = result_queue
+        self.result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = result_queue
         self.task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = Queue(ctx=ctx)
         self._is_working:bool = False
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
-        self.modules:Set[str] = set()
+        self.imported_modules:Set[str] = set()
         self.n_finished_tasks:int = 0
         self.initializer:Optional[Callable[..., Any]] = initializer
         self.initargs:Tuple[Any, ...] = initargs
@@ -58,20 +58,11 @@ class Worker:
         except:
             return 0
 
-    def overlap_modules_size(self, task:Task)->int:
-        result = 0
-        if len(task.module_sizes) < len(self.modules):
-            less_modules = task.module_sizes
-            more_modules = self.modules
-        else:
-            less_modules = self.modules
-            more_modules = task.module_sizes
-
-        for module_name in less_modules:
-            if module_name in more_modules:
-                result += task.module_sizes[module_name]
-
-        return result
+    def overlap_modules_ratio(self, task:Task)->float:
+        if not self.imported_modules:
+            return 0
+        
+        return len(self.imported_modules & task.module_deps) / len(self.imported_modules)
 
     @property
     def is_working(self)->bool:
@@ -85,7 +76,7 @@ class Worker:
 
     def add_task(self, task:Task)->None:
         self.is_working = True
-        self.modules.update(task.module_sizes)
+        self.imported_modules.update(task.module_deps)
         self.task_queue.put(task.info())
 
     def change_device(self, device:str)->None:
@@ -114,14 +105,6 @@ class Worker:
         self.process.start()
         self.process_info = psutil.Process(self.process.pid)
 
-    def modules_total_size(self, task:Optional[Task]=None)->int:
-        from .utils import asizeof
-        self_total_size = sum(asizeof(module) for module in self.modules)
-        task_total_size = 0
-        if task is not None:
-            task_total_size = sum(module_size for module_size in task.module_sizes.values())
-        return self_total_size + task_total_size
-
     def restart(self)->None:
         self.task_queue.put(None)
         if self.change_device_cmd_queue is not None:
@@ -129,7 +112,7 @@ class Worker:
 
         self.process.join()
         self.n_finished_tasks:int = 0
-        self.modules.clear()
+        self.imported_modules.clear()
         self.start()
         
     def terminate(self)->None:
@@ -159,7 +142,7 @@ class Worker:
     @staticmethod
     def run(
         task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]],
-        result_queue:Queue[Optional[Tuple[str, bool, Any]]],
+        result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]],
         change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]],
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],

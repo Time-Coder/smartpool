@@ -31,11 +31,11 @@ class SmartProcessPool:
         if use_torch:
             import torch
             import torch.multiprocessing as mp
-            from torch.multiprocessing.queue import Queue
+            from torch.multiprocessing.queue import SimpleQueue
             self._torch_cuda_available = torch.cuda.is_available()
         else:
             import multiprocessing as mp
-            from multiprocessing.queues import Queue
+            from multiprocessing.queues import SimpleQueue
             self._torch_cuda_available = False
 
         from .sysinfo import SysInfo
@@ -53,7 +53,7 @@ class SmartProcessPool:
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
 
         self._ctx = mp.get_context(mp_context)
-        self._result_queue:Queue[Optional[Tuple[str, bool, Any]]] = Queue(ctx=self._ctx)
+        self._result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = SimpleQueue(ctx=self._ctx)
 
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
@@ -272,27 +272,26 @@ class SmartProcessPool:
     
     def _choose_task_worker(self, task:Task)->Optional[Tuple[Worker, int]]:
         best_worker:Optional[Worker] = None
-        task.modules_overlap_size = 0
+        task.modules_overlap_ratio = 0.0
         for worker in self._workers:
             if worker.is_working:
                 continue
 
-            if task.need_cpu_mem == 0:
+            if task.need_cpu_mem == 0 or task.func.__module__ in worker.imported_modules:
+                task.modules_overlap_ratio = 1.0
                 return worker
 
-            current_overlap_size = worker.overlap_modules_size(task)
-            if best_worker is None or current_overlap_size > task.modules_overlap_size:
-                task.modules_overlap_size = current_overlap_size
+            current_overlap_ratio = worker.overlap_modules_ratio(task)
+            if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
+                task.modules_overlap_ratio = current_overlap_ratio
                 best_worker = worker
             
         if best_worker is not None:
             return best_worker
             
+        task.modules_overlap_ratio = 0.0
         if len(self._workers) < self._max_workers:
-            best_worker = self._add_worker()
-            if task.need_cpu_mem > 0:
-                task.modules_overlap_size = best_worker.overlap_modules_size(task)
-            return best_worker
+            return self._add_worker()
         else:
             return None
 
@@ -340,8 +339,7 @@ class SmartProcessPool:
         task.mem_before_enter = worker.cached_rss
         task.estimated_need_cpu_mem = 0
         if task.need_cpu_mem > 0:
-            overlap_ratio = task.modules_overlap_size / worker.modules_total_size(task)
-            task.estimated_need_cpu_mem = max(0, task.need_cpu_mem - overlap_ratio * worker.cached_rss)
+            task.estimated_need_cpu_mem = max(0, task.need_cpu_mem - task.modules_overlap_ratio * worker.cached_rss)
 
         if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free:
             task.device = None

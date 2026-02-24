@@ -1,25 +1,27 @@
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
 import sys
+
+parent_folder = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + "/../..")
+sys.path.append(parent_folder)
+
+from smartprocesspool import SmartProcessPool, DataSize, limit_num_single_thread
+limit_num_single_thread()
+
+
 import torch.nn as nn
 from sklearn.model_selection import KFold
 import numpy as np
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 import multiprocessing as mp
-
-parent_folder = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + "/../..")
-sys.path.append(parent_folder)
+import queue
+from collections import defaultdict
+from concurrent.futures import Future
+from typing import Dict
 
 import models
-from smartprocesspool import SmartProcessPool, DataSize
 from config import MAX_WORKERS
 from data_utils import prepare_data
-from model_utils import train_single_fold
+from model_utils import train_single_fold, ProgressInfo, TrainingResult
 from visualization import plot_results, print_results_table
 
 
@@ -33,7 +35,7 @@ def main():
     kfold = KFold(n_splits=5, shuffle=True, random_state=42)
     
     manager = mp.Manager()
-    progress_queue = manager.Queue()
+    progress_queue:queue.Queue[ProgressInfo] = manager.Queue()
 
     tasks = []
     for fold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset)):
@@ -52,7 +54,7 @@ def main():
         active_tasks = {}
         
         with SmartProcessPool(max_workers=MAX_WORKERS, use_torch=True) as pool:
-            futures_map = {}
+            futures_map:Dict[str, Future] = {}
             for task_args in tasks:
                 future = pool.submit(
                     train_single_fold,
@@ -70,7 +72,7 @@ def main():
             
             finished_tasks = set()
             while True:
-                progress_info = progress_queue.get()
+                progress_info:ProgressInfo = progress_queue.get()
                 task_key = f"{progress_info.model_name}_fold_{progress_info.fold_idx}"
                 
                 if task_key not in task_progress_bars:
@@ -95,21 +97,21 @@ def main():
                     display_accuracy = progress_info.val_accuracy if progress_info.val_accuracy > 0 else progress_info.last_val_accuracy
                     new_desc += f"Val Acc: {display_accuracy*100:.2f}%"
                     
-                    progress.update(task_progress_bars[task_key], 
-                                    completed=total_progress,
-                                    description=new_desc)
+                    progress.update(
+                        task_progress_bars[task_key], 
+                        completed=total_progress,
+                        description=new_desc
+                    )
 
                 if len(finished_tasks) == len(futures_map):
                     break
     
-    model_results = {model_class.__name__: [] for model_class in model_classes}
+    model_results = defaultdict(list)
     for task_key, future in futures_map.items():
-        result = future.result()
+        result:TrainingResult = future.result()
         model_results[result.model_name].append(result.val_accuracy)
     
     stats = {}
-    successful_models = []
-    
     for model_name, accuracies in model_results.items():
         stats[model_name] = {
             'mean': np.mean(accuracies),
@@ -118,10 +120,9 @@ def main():
             'max': np.max(accuracies),
             'accuracies': accuracies
         }
-        successful_models.append(model_name)
     
-    print_results_table(successful_models, stats)
-    plot_results(successful_models, {k: model_results[k] for k in successful_models}, stats)
+    print_results_table(stats)
+    plot_results(model_results, stats)
 
 
 if __name__ == "__main__":

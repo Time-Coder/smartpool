@@ -3,6 +3,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import torch
 
+
+def limit_num_single_thread():
+    import os
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+
 def move_state_dict_to(obj, device):
     import torch
     import numpy as np
