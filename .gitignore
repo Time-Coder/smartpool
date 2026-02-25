@@ -7,3 +7,4 @@ test_*
 result.json
 data
 *.png
+.vscode

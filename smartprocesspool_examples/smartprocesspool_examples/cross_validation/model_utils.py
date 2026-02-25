@@ -2,39 +2,55 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+import traceback
+from dataclasses import dataclass
+
 from .config import LEARNING_RATE, EPOCHS
 from .data_utils import create_data_loaders
 
 from smartprocesspool import move_optimizer_to
 
 
+@dataclass
 class TrainingResult:
-    def __init__(self, fold_idx, model_name, val_accuracy, train_time):
-        self.fold_idx = fold_idx
-        self.model_name = model_name
-        self.val_accuracy = val_accuracy
-        self.train_time = train_time
+    fold_idx:int
+    model_name:str
+    val_accuracy:float
 
 
+@dataclass
 class ProgressInfo:
-    def __init__(self, model_name, fold_idx, epoch, batch, total_batches, device, avg_loss, val_accuracy=0.0, last_val_accuracy=0.0):
-        self.model_name = model_name
-        self.fold_idx = fold_idx
-        self.epoch = epoch
-        self.batch = batch
-        self.total_batches = total_batches
-        self.device = device
-        self.avg_loss = avg_loss
-        self.val_accuracy = val_accuracy
-        self.last_val_accuracy = last_val_accuracy
+    model_name:str
+    fold_idx:int
+    epoch:int
+    batch:int
+    total_batches:int
+    device:str
+    avg_loss:float
+    val_accuracy:float
 
 
-def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue):
+@dataclass
+class ErrorInfo:
+    exception:BaseException
+    traceback:str
+
+def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device=None):
+    try:
+        return _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device)
+    except BaseException as e:
+        error_info = ErrorInfo(e, traceback.format_exc())
+        progress_queue.put(error_info)
+        raise e
+
+def _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device):
     train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices)
     num_batches = len(train_loader)
     model = model_class()
     
-    device = train_single_fold.device()
+    if hasattr(train_single_fold, "device"):
+        device = train_single_fold.device()
+
     old_device = device
     model.to(device, non_blocking=True)
     
@@ -47,7 +63,7 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
         epoch=1,
         batch=0,
         total_batches=num_batches,
-        device=str(device),
+        device=device,
         avg_loss=0.0,
         val_accuracy=0.0
     )
@@ -59,7 +75,9 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
         epoch_loss = 0.0
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
-            device = train_single_fold.device()
+            if hasattr(train_single_fold, "device"):
+                device = train_single_fold.device()
+
             data = data.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
                     
@@ -82,10 +100,9 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
                 epoch=epoch + 1,
                 batch=batch_idx + 1,
                 total_batches=num_batches,
-                device=str(device),
+                device=device,
                 avg_loss=epoch_loss / (batch_idx + 1),
-                val_accuracy=0.0,
-                last_val_accuracy=last_val_accuracy
+                val_accuracy=last_val_accuracy
             )
             progress_queue.put(progress_info)
         
@@ -96,7 +113,9 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
         
         with torch.no_grad():
             for data, target in val_loader:
-                device = train_single_fold.device()
+                if hasattr(train_single_fold, "device"):
+                    device = train_single_fold.device()
+
                 data = data.to(device, non_blocking=True)
                 target = target.to(device, non_blocking=True)
                         
@@ -120,10 +139,9 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
             epoch=epoch + 1,
             batch=num_batches,
             total_batches=num_batches,
-            device=str(device),
+            device=device,
             avg_loss=epoch_loss / num_batches,
-            val_accuracy=val_accuracy,
-            last_val_accuracy=val_accuracy
+            val_accuracy=val_accuracy
         )
         progress_queue.put(final_progress)
     
@@ -133,7 +151,9 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
     
     with torch.no_grad():
         for data, target in val_loader:
-            device = train_single_fold.device()
+            if hasattr(train_single_fold, "device"):
+                device = train_single_fold.device()
+
             data = data.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
 
@@ -149,4 +169,4 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
     
     val_accuracy = correct / total
     
-    return TrainingResult(fold_idx, model_class.__name__, val_accuracy, 0)
+    return TrainingResult(fold_idx, model_class.__name__, val_accuracy)

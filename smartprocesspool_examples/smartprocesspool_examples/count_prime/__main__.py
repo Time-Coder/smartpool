@@ -7,15 +7,15 @@ from .count_prime import count_prime
 if __name__ == "__main__":
     print("Use SmartProcessPool to count prime numbers lower than 10000.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
-
-    with SmartProcessPool() as pool:
-        tasks = []
-        start = 0
-        while start < 10000:
-            stop = start + 1000
-            tasks.append((start, stop))
-            start = stop
+    
+    tasks = []
+    start = 0
+    while start < 10000:
+        stop = start + 1000
+        tasks.append((start, stop))
+        start = stop
         
+    with SmartProcessPool() as pool:
         futures = []
         for task in tasks:
             future = pool.submit(count_prime, args=task)

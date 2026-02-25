@@ -22,8 +22,8 @@ dependencies = [
     "scikit-learn",
     "numpy",
     "rich",
-    "torchvision",
-    "click"
+    "click",
+    "joblib"
 ]
 
 [project.urls]

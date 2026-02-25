@@ -190,17 +190,19 @@ class SmartProcessPool:
             self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
             self._sys_info.gpu_infos[task_gpu_id].memory_free -= task.need_gpu_mem
         
-        task.future.set_running_or_notify_cancel()
         worker.is_working = True
         worker.imported_modules.update(task.module_deps)
-
         self._feeding_queue.put((task, worker.task_queue))
         
     def _feeding(self)->None:
         while not self._shutdown:
             task, task_queue = self._feeding_queue.get()
+            if task.future.cancelled():
+                continue
+
             try:
                 task_queue.put(task.info())
+                task.future.set_running_or_notify_cancel()
             except BaseException as e:
                 task.future.set_exception(e)
 
