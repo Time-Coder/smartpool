@@ -61,7 +61,7 @@ def main():
                     args=task_args,
                     need_cpu_cores=1,
                     need_cpu_mem=1.1*DataSize.GB,
-                    need_gpu_cores=1152,
+                    need_gpu_cores=1000,
                     need_gpu_mem=0.2*DataSize.GB
                 )
                 fold_idx = task_args[0]
@@ -96,12 +96,19 @@ def main():
                     
                     display_accuracy = progress_info.val_accuracy if progress_info.val_accuracy > 0 else progress_info.last_val_accuracy
                     new_desc += f"Val Acc: {display_accuracy*100:.2f}%"
+                    if progress_info.device.startswith("cuda"):
+                        new_desc = "[bright_cyan]" + new_desc
                     
                     progress.update(
                         task_progress_bars[task_key], 
                         completed=total_progress,
                         description=new_desc
                     )
+                    if total_progress >= 100.0:
+                        progress.update(
+                            task_progress_bars[task_key], 
+                            visible=False
+                        )
 
                 if len(finished_tasks) == len(futures_map):
                     break
