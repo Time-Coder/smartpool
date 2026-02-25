@@ -27,7 +27,7 @@ from visualization import plot_results, print_results_table
 
 def main():
     model_classes = [
-        cls for cls in models.__dict__.values() 
+        cls for cls in models.__dict__.values()
         if isinstance(cls, type) and issubclass(cls, nn.Module) and cls != nn.Module
     ]
     

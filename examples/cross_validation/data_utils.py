@@ -16,12 +16,15 @@ def prepare_data():
         os.path.exists(os.path.join(DATA_ROOT, 'MNIST', 'processed'))
     )
     
-    return datasets.MNIST(
+    dataset = datasets.MNIST(
         root=DATA_ROOT, 
         train=True, 
         download=not mnist_exists, 
         transform=transform
     )
+    dataset.data.share_memory_()
+    dataset.targets.share_memory_()
+    return dataset
 
 
 def create_data_loaders(dataset, train_indices, val_indices):

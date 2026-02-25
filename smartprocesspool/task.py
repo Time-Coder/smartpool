@@ -1,5 +1,6 @@
 import uuid
 import sys
+from concurrent.futures import Future
 from typing import Tuple, Any, Dict, Optional
 
 from .utils import get_module_deps
@@ -22,6 +23,7 @@ class Task:
         self.device:Optional[str] = None
         self.worker_index:int = -1
         self.mem_before_enter:int = 0
+        self.future = Future()
 
     def info(self):
         return self.id, self.device, self.func, self.args, self.kwargs

@@ -16,6 +16,7 @@ class DataSize:
     TB = 1024 * GB
     PB = 1024 * TB
 
+
 class SmartProcessPool:
 
     def __init__(
@@ -28,6 +29,7 @@ class SmartProcessPool:
         use_torch:bool=False
     ):
         import threading
+        import queue
         if use_torch:
             import torch
             import torch.multiprocessing as mp
@@ -54,11 +56,10 @@ class SmartProcessPool:
 
         self._ctx = mp.get_context(mp_context)
         self._result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = SimpleQueue(ctx=self._ctx)
-
+        
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
         self._delayed_tasks:List[Task] = []
-        self._futures:Dict[str, Future] = {}
         self._lock = threading.Lock()
         self._shutdown = False
 
@@ -67,13 +68,16 @@ class SmartProcessPool:
         self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
         self._result_thread.start()
 
+        self._feeding_queue:queue.Queue[Tuple[Task, SimpleQueue]] = queue.Queue()
+        self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
+        self._feeding_thread.start()
+
     def submit(
         self, func:Callable[..., Any],
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
         need_cpu_cores:int=1, need_cpu_mem:int=0,
         need_gpu_cores:int=0, need_gpu_mem:int=0
     ):
-        from concurrent.futures import Future
         from .task import Task
 
         if args is None:
@@ -95,22 +99,20 @@ class SmartProcessPool:
                 need_gpu_cores=need_gpu_cores,
                 need_gpu_mem=need_gpu_mem
             )
-            future = Future()
-            self._futures[task.id] = future
             self._tasks[task.id] = task
             
             worker = self._choose_task_worker(task)
             if worker is None:
                 self._delayed_tasks.append(task)
-                return future
+                return task.future
 
             device = self._choose_task_device(task, worker)
             if device is None:
                 self._delayed_tasks.append(task)
-                return future
+                return task.future
             
             self._put_task(task, worker)
-            return future
+            return task.future
 
     @staticmethod
     def _result_iterator(futures:List[Future], end_time:Optional[float]):
@@ -188,8 +190,19 @@ class SmartProcessPool:
             self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
             self._sys_info.gpu_infos[task_gpu_id].memory_free -= task.need_gpu_mem
         
-        self._futures[task.id].set_running_or_notify_cancel()
-        worker.add_task(task)
+        task.future.set_running_or_notify_cancel()
+        worker.is_working = True
+        worker.imported_modules.update(task.module_deps)
+
+        self._feeding_queue.put((task, worker.task_queue))
+        
+    def _feeding(self)->None:
+        while not self._shutdown:
+            task, task_queue = self._feeding_queue.get()
+            try:
+                task_queue.put(task.info())
+            except BaseException as e:
+                task.future.set_exception(e)
 
     def _add_worker(self)->Worker:
         from .worker import Worker
@@ -207,20 +220,15 @@ class SmartProcessPool:
 
     def _collecting_result(self)->None:
         while not self._shutdown:
-            try:
-                task_id, success, result = self._result_queue.get()
-            except EOFError:
-                self._shutdown = True
-                break
+            task_id, success, result = self._result_queue.get()
 
             with self._lock:
-                future = self._futures.pop(task_id)
-                if success:
-                    future.set_result(result)
-                else:
-                    future.set_exception(result)
-
                 task = self._tasks.pop(task_id)
+                if success:
+                    task.future.set_result(result)
+                else:
+                    task.future.set_exception(result)
+                
                 worker = self._workers[task.worker_index]
                 worker.is_working = False
                 worker.n_finished_tasks += 1
@@ -238,8 +246,7 @@ class SmartProcessPool:
                 should_pop_indices = []
                 cancelled_task_ids = []
                 for i, delayed_task in enumerate(self._delayed_tasks):
-                    future = self._futures[delayed_task.id]
-                    if future.cancelled():
+                    if delayed_task.future.cancelled():
                         cancelled_task_ids.append(delayed_task.id)
                         should_pop_indices.append(i)
                         continue
@@ -259,7 +266,6 @@ class SmartProcessPool:
                     del self._delayed_tasks[i]
 
                 for task_id in cancelled_task_ids:
-                    del self._futures[task_id]
                     del self._tasks[task_id] 
 
                 if self._torch_cuda_available:
@@ -382,8 +388,8 @@ class SmartProcessPool:
                 worker.stop()
 
             if cancel_futures:
-                for future in self._futures.values():
-                    future.cancel()
+                for task in self._tasks.values():
+                    task.future.cancel()
 
             if wait:
                 for worker in self._workers:

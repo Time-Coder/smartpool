@@ -1,24 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import models
 from config import LEARNING_RATE, EPOCHS
 from data_utils import create_data_loaders
 from smartprocesspool import move_optimizer_to
-
-
-def get_model_class(model_name):
-    """Dynamically get model class from models module"""
-    # Get all classes from models module that inherit from nn.Module
-    model_classes = {
-        name: cls for name, cls in models.__dict__.items() 
-        if isinstance(cls, type) and issubclass(cls, nn.Module) and cls != nn.Module
-    }
-    
-    if model_name not in model_classes:
-        raise ValueError(f"Model {model_name} not found in models module. Available models: {list(model_classes.keys())}")
-    
-    return model_classes[model_name]
 
 
 class TrainingResult:

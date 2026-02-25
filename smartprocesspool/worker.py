@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple, Set
 
 if TYPE_CHECKING:
-    from multiprocessing.queues import SimpleQueue, Queue
+    from multiprocessing.queues import SimpleQueue
     from .task import Task
 
 
@@ -16,9 +16,9 @@ class Worker:
         use_torch:bool, torch_cuda_available:bool
     ):
         if use_torch:
-            from torch.multiprocessing.queue import SimpleQueue, Queue
+            from torch.multiprocessing.queue import SimpleQueue
         else:
-            from multiprocessing.queues import SimpleQueue, Queue
+            from multiprocessing.queues import SimpleQueue
 
         if torch_cuda_available:
             self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=ctx)
@@ -28,7 +28,7 @@ class Worker:
         self.ctx = ctx
         self.index:int = index
         self.result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = result_queue
-        self.task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = Queue(ctx=ctx)
+        self.task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = SimpleQueue(ctx=ctx)
         self._is_working:bool = False
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
@@ -74,11 +74,6 @@ class Worker:
             self._is_working = is_working
             self._is_rss_dirty = True
 
-    def add_task(self, task:Task)->None:
-        self.is_working = True
-        self.imported_modules.update(task.module_deps)
-        self.task_queue.put(task.info())
-
     def change_device(self, device:str)->None:
         if self.change_device_cmd_queue is not None:
             self.change_device_cmd_queue.put(device)
@@ -86,10 +81,6 @@ class Worker:
     def stop(self)->None:
         self.task_queue.put(None)
         self.task_queue.close()
-
-        if self.change_device_cmd_queue is not None:
-            self.change_device_cmd_queue.put(None)
-            self.change_device_cmd_queue.close()
 
     def start(self):
         import multiprocessing as mp
@@ -107,9 +98,6 @@ class Worker:
 
     def restart(self)->None:
         self.task_queue.put(None)
-        if self.change_device_cmd_queue is not None:
-            self.change_device_cmd_queue.put(None)
-
         self.process.join()
         self.n_finished_tasks:int = 0
         self.imported_modules.clear()
@@ -129,10 +117,6 @@ class Worker:
     def _changing_device(cmd_queue:SimpleQueue[Optional[str]]):
         while True:
             device = cmd_queue.get()
-            if device is None:
-                cmd_queue.close()
-                break
-
             if Worker.current_func is None or Worker.current_func._device != "cpu":
                 continue
 
@@ -141,7 +125,7 @@ class Worker:
 
     @staticmethod
     def run(
-        task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]],
+        task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]],
         result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]],
         change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]],
         initializer:Optional[Callable[..., Any]],
