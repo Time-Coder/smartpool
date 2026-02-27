@@ -1,7 +1,10 @@
-from __future__ import annotations
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    import torch
+class DataSize:
+    B = 1
+    KB = 1024 * B
+    MB = 1024 * KB
+    GB = 1024 * MB
+    TB = 1024 * GB
+    PB = 1024 * TB
 
 
 def limit_num_single_thread():
@@ -46,8 +49,19 @@ def move_state_dict_to(obj, device):
     else:
         raise TypeError(f"{type(obj)} is not supported")
 
-def move_optimizer_to(optimizer:torch.optim.Optimizer, device):
+
+def move_optimizer_to(optimizer, device):
     for state in optimizer.state.values():
         move_state_dict_to(state, device)
 
     return optimizer
+
+
+def batched(iterable, chunksize:int):
+    import itertools
+    iterator = iter(iterable)
+    while True:
+        batch = list(itertools.islice(iterator, chunksize))
+        if not batch:
+            break
+        yield batch

@@ -3,9 +3,9 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "smartprocesspool"
+name = "smartpool"
 version = "0.1.0"
-description = "A smart multiprocessing pool implementation."
+description = "Smart process pool and thread pool implementation."
 readme = "README.md"
 authors = [
     { name = "王炳辉", email = "binghui.wang@foxmail.com" }
@@ -23,5 +23,5 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Time-Coder/smartprocesspool"
-Repository = "https://github.com/Time-Coder/smartprocesspool.git"
+Homepage = "https://github.com/Time-Coder/smartpool"
+Repository = "https://github.com/Time-Coder/smartpool.git"

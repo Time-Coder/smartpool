@@ -1,13 +1,13 @@
-from smartprocesspool import SmartProcessPool, DataSize, limit_num_single_thread
+from smartpool import ProcessPool, DataSize, limit_num_single_thread
 limit_num_single_thread()
 
 import click
 
 
-@click.command(help=f"Use SmartProcessPool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
+@click.command(help=f"Use ProcessPool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
 @click.option(
-    '--pool', default='SmartProcessPool', type=click.Choice([
-        'SmartProcessPool',
+    '--pool', default='ProcessPool', type=click.Choice([
+        'ProcessPool',
         'multiprocessing.Pool',
         'concurrent.futures.ProcessPoolExecutor',
         'concurrent.futures.ThreadPoolExecutor',
@@ -25,7 +25,7 @@ def main(pool:str="smart", max_workers:int=0):
     os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
     
     print(f"Use {pool} to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
-    print("Use `python -m smartprocesspool_examples.cross_validation --help` to see all options.")
+    print("Use `python -m smartpool_examples.cross_validation --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     print("\npreparing data...")
     
@@ -99,8 +99,8 @@ def main(pool:str="smart", max_workers:int=0):
         
         active_tasks = {}
 
-        if pool == "SmartProcessPool":
-            process_pool = SmartProcessPool(max_workers=max_workers, use_torch=True)
+        if pool == "ProcessPool":
+            process_pool = ProcessPool(max_workers=max_workers, use_torch=True)
         elif pool == "concurrent.futures.ProcessPoolExecutor":
             from concurrent.futures import ProcessPoolExecutor
             process_pool = ProcessPoolExecutor(max_workers=max_workers)
@@ -118,7 +118,7 @@ def main(pool:str="smart", max_workers:int=0):
         futures_map:Dict[str, Future] = {}
         futures = []
         for i, task_args in enumerate(tasks):
-            if pool == "SmartProcessPool":
+            if pool == "ProcessPool":
                 future = process_pool.submit(
                     train_single_fold,
                     args=task_args,
@@ -190,7 +190,7 @@ def main(pool:str="smart", max_workers:int=0):
                 break
 
     model_results = defaultdict(list)
-    if pool in ["SmartProcessPool", "concurrent.futures.ProcessPoolExecutor", "concurrent.futures.ThreadPoolExecutor", "multiprocessing.Pool"]:
+    if pool in ["ProcessPool", "concurrent.futures.ProcessPoolExecutor", "concurrent.futures.ThreadPoolExecutor", "multiprocessing.Pool"]:
         for task_key, future in futures_map.items():
             if pool == "multiprocessing.Pool":
                 result:TrainingResult = future.get()

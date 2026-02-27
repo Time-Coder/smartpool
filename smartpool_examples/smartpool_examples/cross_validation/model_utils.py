@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from .config import LEARNING_RATE, EPOCHS
 from .data_utils import create_data_loaders
 
-from smartprocesspool import move_optimizer_to
+from smartpool import move_optimizer_to
 
 
 @dataclass

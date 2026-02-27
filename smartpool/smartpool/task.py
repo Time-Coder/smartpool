@@ -3,7 +3,7 @@ import sys
 from concurrent.futures import Future
 from typing import Tuple, Any, Dict, Optional
 
-from .utils import get_module_deps
+from .processpool.module_deps import module_deps
 
 
 class Task:
@@ -19,7 +19,7 @@ class Task:
         self.need_gpu_mem:int = need_gpu_mem
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
-        self.module_deps:Dict[str, int] = get_module_deps(sys.modules[func.__module__])
+        self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
         self.device:Optional[str] = None
         self.worker_index:int = -1
         self.mem_before_enter:int = 0

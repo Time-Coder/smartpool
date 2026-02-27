@@ -14,7 +14,7 @@ def _good_module_name(module_name:str, module_names:Set[str])->bool:
         module_name in sys.modules
     )
 
-def _get_module_deps(module:ModuleType)->Set[str]:
+def _module_deps(module:ModuleType)->Set[str]:
     module_names = {module.__name__}
     stack = [module]
 
@@ -41,16 +41,7 @@ def _get_module_deps(module:ModuleType)->Set[str]:
 
 
 @functools.lru_cache(maxsize=None)
-def get_module_deps(module:ModuleType)->Set[str]:
+def module_deps(module:ModuleType)->Set[str]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return _get_module_deps(module)
-
-
-def batched(iterable:Iterable, chunksize:int):
-    iterator = iter(iterable)
-    while True:
-        batch = list(itertools.islice(iterator, chunksize))
-        if not batch:
-            break
-        yield batch
+        return _module_deps(module)

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple, Set
 
 if TYPE_CHECKING:
     from multiprocessing.queues import SimpleQueue
-    from .task import Task
+    from ..task import Task
 
 
 class Worker:
@@ -90,7 +90,7 @@ class Worker:
             target=Worker.run,
             args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
             kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
-            name=f"SmartProcessPool.worker:{self.index}",
+            name=f"ProcessPool.worker:{self.index}",
             daemon=True
         )
         self.process.start()

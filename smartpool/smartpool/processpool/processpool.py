@@ -4,20 +4,11 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Un
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
-    from .task import Task
+    from ..task import Task
     from .worker import Worker
 
 
-class DataSize:
-    B = 1
-    KB = 1024 * B
-    MB = 1024 * KB
-    GB = 1024 * MB
-    TB = 1024 * GB
-    PB = 1024 * TB
-
-
-class SmartProcessPool:
+class ProcessPool:
 
     def __init__(
         self, max_workers:int=0, mp_context:str="spawn",
@@ -40,7 +31,7 @@ class SmartProcessPool:
             from multiprocessing.queues import SimpleQueue
             self._torch_cuda_available = False
 
-        from .sysinfo import SysInfo
+        from ..sysinfo import SysInfo
         
 
         if not max_workers:
@@ -78,7 +69,7 @@ class SmartProcessPool:
         need_cpu_cores:int=1, need_cpu_mem:int=0,
         need_gpu_cores:int=0, need_gpu_mem:int=0
     ):
-        from .task import Task
+        from ..task import Task
 
         if args is None:
             args = []
@@ -145,7 +136,7 @@ class SmartProcessPool:
         import time
         from collections.abc import Iterable
         from concurrent.futures.process import _process_chunk, _chain_from_iterable_of_lists
-        from .utils import batched
+        from .module_deps import batched
 
         if not isinstance(need_cpu_cores, Iterable):
             need_cpu_cores = itertools.repeat(need_cpu_cores)
@@ -180,7 +171,7 @@ class SmartProcessPool:
             )
             futures.append(future)
 
-        return _chain_from_iterable_of_lists(SmartProcessPool._result_iterator(futures, end_time))
+        return _chain_from_iterable_of_lists(ProcessPool._result_iterator(futures, end_time))
 
     def _put_task(self, task:Task, worker:Worker)->None:
         self._sys_info.cpu_cores_free -= task.need_cpu_cores
@@ -399,7 +390,7 @@ class SmartProcessPool:
 
             self._result_queue.close()
 
-    def __enter__(self)->SmartProcessPool:
+    def __enter__(self)->ProcessPool:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb)->None:
