@@ -1,11 +1,11 @@
 import os
-from smartpool import ProcessPool
+from smartpool import ThreadPool
 
 from .count_prime import count_prime
 
 
 if __name__ == "__main__":
-    print("Use ProcessPool to count prime numbers lower than 10000.")
+    print("Use ThreadPool to count prime numbers lower than 10000.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     
     tasks = []
@@ -15,7 +15,7 @@ if __name__ == "__main__":
         tasks.append((start, stop))
         start = stop
         
-    with ProcessPool() as pool:
+    with ThreadPool() as pool:
         futures = []
         for task in tasks:
             future = pool.submit(count_prime, args=task)

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from .config import LEARNING_RATE, EPOCHS
 from .data_utils import create_data_loaders
 
-from smartpool import move_optimizer_to
+from smartpool import move_optimizer_to, best_device
 
 
 @dataclass
@@ -43,13 +43,14 @@ def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset
         progress_queue.put(error_info)
         raise e
 
-def _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device):
+def _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, user_device):
     train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices)
     num_batches = len(train_loader)
     model = model_class()
     
-    if hasattr(train_single_fold, "device"):
-        device = train_single_fold.device()
+    device = user_device
+    if user_device is None:
+        device = best_device()
 
     old_device = device
     model.to(device, non_blocking=True)
@@ -75,8 +76,8 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
         epoch_loss = 0.0
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
-            if hasattr(train_single_fold, "device"):
-                device = train_single_fold.device()
+            if user_device is None:
+                device = best_device()
 
             data = data.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
@@ -113,7 +114,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
         
         with torch.no_grad():
             for data, target in val_loader:
-                if hasattr(train_single_fold, "device"):
+                if user_device is None:
                     device = train_single_fold.device()
 
                 data = data.to(device, non_blocking=True)
@@ -151,7 +152,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
     
     with torch.no_grad():
         for data, target in val_loader:
-            if hasattr(train_single_fold, "device"):
+            if user_device is None:
                 device = train_single_fold.device()
 
             data = data.to(device, non_blocking=True)

@@ -4,66 +4,55 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Un
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
-    from ..task import Task
+    from ..task import Task, Result
     from .worker import Worker
 
 
-class ProcessPool:
+class ThreadPool:
 
     def __init__(
-        self, max_workers:int=0, process_name_prefix:str="ProcessPool.worker:",
-        mp_context:str="spawn",
+        self, max_workers:int=0, thread_name_prefix:str="ThreadPool.worker:",
         initializer:Optional[Callable[..., Any]]=None,
         initargs:Tuple[Any, ...]=(),
         initkwargs:Optional[Dict[str, Any]]=None,
         *,
-        max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
         import threading
-        import queue
+        from queue import SimpleQueue
+        import os
         if use_torch:
             import torch
-            import torch.multiprocessing as mp
-            from torch.multiprocessing.queue import SimpleQueue
             self._torch_cuda_available = torch.cuda.is_available()
         else:
-            import multiprocessing as mp
-            from multiprocessing.queues import SimpleQueue
             self._torch_cuda_available = False
 
         from ..sysinfo import SysInfo
         
 
         if not max_workers:
-            max_workers = mp.cpu_count()
+            max_workers = os.cpu_count()
 
-        self._max_tasks_per_child:Optional[int] = max_tasks_per_child
         self._use_torch:bool = use_torch
         self._sys_info = SysInfo()
         self._max_workers:int = max_workers
+        self._thread_name_prefix:str = thread_name_prefix
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
-        self._process_name_prefix:str = process_name_prefix
-
-        self._ctx = mp.get_context(mp_context)
-        self._result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = SimpleQueue(ctx=self._ctx)
-        
+        self._result_queue:SimpleQueue[Result] = SimpleQueue()
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
         self._delayed_tasks:List[Task] = []
         self._lock = threading.Lock()
         self._shutdown = False
+        self.__max_used_cpu_cores = None
+        self.__max_used_gpu_cores = {}
 
         self._add_worker()
 
         self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
         self._result_thread.start()
-
-        self._feeding_queue:queue.SimpleQueue[Tuple[Task, SimpleQueue]] = queue.SimpleQueue()
-        self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
-        self._feeding_thread.start()
 
     def submit(
         self, func:Callable[..., Any],
@@ -173,71 +162,114 @@ class ProcessPool:
             )
             futures.append(future)
 
-        return _chain_from_iterable_of_lists(ProcessPool._result_iterator(futures, end_time))
+        return _chain_from_iterable_of_lists(ThreadPool._result_iterator(futures, end_time))
+
+    def _max_used_cpu_cores(self)->int:
+        if self.__max_used_cpu_cores is not None:
+            return self.__max_used_cpu_cores
+
+        max_used_cores = 0
+        for task in self._tasks.values():
+            if task.worker is None or not task.worker.is_working:
+                continue
+
+            if task.need_cpu_cores > max_used_cores:
+                max_used_cores = task.need_cpu_cores
+
+        self.__max_used_cpu_cores = max_used_cores
+        return max_used_cores
+    
+    def _max_used_gpu_cores(self, gpu_id:int)->int:
+        if gpu_id in self.__max_used_gpu_cores:
+            return self.__max_used_gpu_cores[gpu_id]
+
+        max_used_cores = 0
+        for task in self._tasks.values():
+            if task.worker is None or not task.worker.is_working or task.gpu_id != gpu_id:
+                continue
+
+            if task.need_gpu_cores > max_used_cores:
+                max_used_cores = task.need_gpu_cores
+
+        self.__max_used_gpu_cores[gpu_id] = max_used_cores
+        return max_used_cores
+
+    def _has_gil(self)->bool:
+        from ..utils import has_gil
+        return has_gil()
 
     def _put_task(self, task:Task)->None:
-        self._sys_info.cpu_cores_free -= task.need_cpu_cores
-        self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
+        if not self._has_gil():
+            self._sys_info.cpu_cores_free -= task.need_cpu_cores
+        else:
+            max_used_cpu_cores = self._max_used_cpu_cores()
+            if task.need_cpu_cores > max_used_cpu_cores:
+                self.__max_used_cpu_cores = task.need_cpu_cores
+                self._sys_info.cpu_cores_free -= (task.need_cpu_cores - max_used_cpu_cores)
+
+        self._sys_info.cpu_mem_free -= task.need_cpu_mem
         task_gpu_id:int = task.gpu_id
         if task_gpu_id != -1:
-            self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
+            if not self._has_gil():
+                self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
+            else:
+                max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
+                if task.need_gpu_cores > max_used_gpu_cores:
+                    self.__max_used_gpu_cores[task_gpu_id] = task.need_gpu_cores
+                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= (task.need_gpu_cores - max_used_gpu_cores)
+
             self._sys_info.gpu_infos[task_gpu_id].mem_free -= task.need_gpu_mem
         
         worker:Worker = task.worker
         worker.is_working = True
-        worker.imported_modules.update(task.module_deps)
-        self._feeding_queue.put((task, worker.task_queue))
-        
-    def _feeding(self)->None:
-        while not self._shutdown:
-            task, task_queue = self._feeding_queue.get()
-            if task.future.cancelled():
-                continue
-
-            try:
-                task_queue.put(task.info())
-                task.future.set_running_or_notify_cancel()
-            except BaseException as e:
-                task.future.set_exception(e)
+        worker.task_queue.put(task)
 
     def _add_worker(self)->Worker:
         from .worker import Worker
 
         worker = Worker(
-            len(self._workers), self._process_name_prefix,
-            self._result_queue, self._ctx,
+            len(self._workers), self._thread_name_prefix,
+            self._result_queue,
             initializer=self._initializer,
             initargs=self._initargs,
-            initkwargs=self._initkwargs,
-            use_torch=self._use_torch,
-            torch_cuda_available=self._torch_cuda_available
+            initkwargs=self._initkwargs
         )
         self._workers.append(worker)
         return worker
 
     def _collecting_result(self)->None:
         while not self._shutdown:
-            task_id, success, result = self._result_queue.get()
+            result:Result = self._result_queue.get()
 
             with self._lock:
-                task = self._tasks.pop(task_id)
-                if success:
-                    task.future.set_result(result)
+                task = self._tasks.pop(result.task_id)
+                if result.exception is None:
+                    task.future.set_result(result.result)
                 else:
-                    task.future.set_exception(result)
+                    task.future.set_exception(result.exception)
                 
-                worker:Worker = task.worker
-                worker.is_working = False
-                worker.n_finished_tasks += 1
-                if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
-                    worker.restart()
-
-                self._sys_info.cpu_cores_free += task.need_cpu_cores
-                hold_cpu_mem = max(worker.cached_rss - task.mem_before_enter, 0)
-                self._sys_info.cpu_mem_free += max(task.need_cpu_mem - hold_cpu_mem, 0)
+                task.worker.is_working = False
+                if not self._has_gil():
+                    self._sys_info.cpu_cores_free += task.need_cpu_cores
+                else:
+                    max_used_cpu_cores = self._max_used_cpu_cores()
+                    if task.need_cpu_cores >= max_used_cpu_cores:
+                        self.__max_used_cpu_cores = None
+                        max_used_cpu_cores = self._max_used_cpu_cores()
+                        self._sys_info.cpu_cores_free += (task.need_cpu_cores - max_used_cpu_cores)
+                    
+                self._sys_info.cpu_mem_free += task.need_cpu_mem
                 task_gpu_id:int = task.gpu_id
                 if task_gpu_id != -1:
-                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
+                    if not self._has_gil():
+                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
+                    else:
+                        max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
+                        if task.need_gpu_cores >= max_used_gpu_cores:
+                            self.__max_used_gpu_cores[task_gpu_id] = None
+                            max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
+                            self._sys_info.gpu_infos[task_gpu_id].n_cores_free += (task.need_gpu_cores - max_used_gpu_cores)
+
                     self._sys_info.gpu_infos[task_gpu_id].mem_free += task.need_gpu_mem
                 
                 should_pop_indices = []
@@ -248,7 +280,7 @@ class ProcessPool:
                         should_pop_indices.append(i)
                         continue
 
-                    used_worker = self._choose_task_worker(delayed_task)
+                    used_worker = self._choose_task_worker()
                     if used_worker is None:
                         continue
 
@@ -274,32 +306,16 @@ class ProcessPool:
         return sum(worker.is_working for worker in self._workers)
     
     def _choose_task_worker(self, task:Task)->Optional[Worker]:
-        best_worker:Optional[Worker] = None
-        task.modules_overlap_ratio = 0.0
         for worker in self._workers:
-            if worker.is_working:
-                continue
-
-            if task.need_cpu_mem == 0 or task.func.__module__ in worker.imported_modules:
-                task.modules_overlap_ratio = 1.0
+            if not worker.is_working:
                 task.worker = worker
                 return worker
 
-            current_overlap_ratio = worker.overlap_modules_ratio(task)
-            if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
-                task.modules_overlap_ratio = current_overlap_ratio
-                best_worker = worker
-            
-        if best_worker is not None:
-            task.worker = best_worker
-            return best_worker
-            
-        task.modules_overlap_ratio = 0.0
         if len(self._workers) < self._max_workers:
             task.worker = self._add_worker()
         else:
             task.worker = None
-
+        
         return task.worker
 
     def _try_move_to_gpu(self, task:Task)->None:
@@ -328,8 +344,7 @@ class ProcessPool:
         if best_gpu is None:
             return
 
-        worker:Worker = task.worker
-        worker.change_device(best_gpu.device)
+        task.worker.change_device(best_gpu.device)
         task.device = best_gpu.device
         best_gpu.n_cores_free -= task.need_gpu_cores
         best_gpu.mem_free -= task.need_gpu_mem
@@ -343,14 +358,8 @@ class ProcessPool:
             task.device = None
             task.worker = None
             return None
-        
-        worker:Worker = task.worker
-        task.mem_before_enter = worker.cached_rss
-        task.estimated_need_cpu_mem = 0
-        if task.need_cpu_mem > 0:
-            task.estimated_need_cpu_mem = max(0, task.need_cpu_mem - task.modules_overlap_ratio * worker.cached_rss)
 
-        if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free:
+        if task.need_cpu_mem > self._sys_info.cpu_mem_free:
             task.device = None
             task.worker = None
             return None
@@ -395,9 +404,7 @@ class ProcessPool:
                 for worker in self._workers:
                     worker.join()
 
-            self._result_queue.close()
-
-    def __enter__(self)->ProcessPool:
+    def __enter__(self)->ThreadPool:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb)->None:

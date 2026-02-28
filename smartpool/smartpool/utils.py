@@ -7,6 +7,19 @@ class DataSize:
     PB = 1024 * TB
 
 
+_has_gil = None
+
+def has_gil()->bool:
+    global _has_gil
+    if _has_gil is None:
+        import sys
+        try:
+            _has_gil = sys._is_gil_enabled()
+        except:
+            _has_gil = True
+
+    return _has_gil
+
 def limit_num_single_thread():
     import os
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -65,3 +78,31 @@ def batched(iterable, chunksize:int):
         if not batch:
             break
         yield batch
+
+
+_best_device_lock = None
+_best_device = {}
+
+def _set_best_device(device:str, tid=None)->None:
+    import threading
+
+    global _best_device_lock
+    if _best_device_lock is None:
+        _best_device_lock = threading.Lock()
+
+    if tid is None:
+        tid = threading.get_ident()
+        
+    with _best_device_lock:
+        _best_device[tid] = device
+
+def best_device()->str:
+    import threading
+
+    global _best_device_lock
+    if _best_device_lock is None:
+        _best_device_lock = threading.Lock()
+
+    tid = threading.get_ident()
+    with _best_device_lock:
+        return _best_device[tid]

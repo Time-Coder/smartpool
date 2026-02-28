@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smartpool"
 version = "0.1.0"
-description = "Smart process pool and thread pool implementation."
+description = "Smart thread/process/interpreter pool implementation."
 readme = "README.md"
 authors = [
     { name = "王炳辉", email = "binghui.wang@foxmail.com" }
@@ -18,8 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "nvidia-ml-py",
-    "psutil",
-    "pympler"
+    "psutil"
 ]
 
 [project.urls]

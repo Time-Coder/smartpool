@@ -14,20 +14,34 @@ class GPUInfoSnapshot:
         self.uuid:Optional[uuid.UUID] = None
         self.serial:Optional[str] = None
         self.driver_version:Optional[str] = None
-        self.memory_total:Optional[int] = None
-        self.memory_used:Optional[int] = None
-        self.memory_free:Optional[int] = None
+        self.mem_total:Optional[int] = None
+        self.mem_used:Optional[int] = None
         self.load:Optional[float] = None
         self.temperature:Optional[int] = None
         self.display_active:Optional[bool] = None
         self.display_mode:Optional[bool] = None
         self.n_cores:Optional[int] = None
-        self.n_cores_free:Optional[int] = None
         self.n_cores_used:Optional[int] = None
 
     @property
     def device(self)->str:
         return f"cuda:{self.id}"
+    
+    @property
+    def mem_free(self)->int:
+        return self.mem_total - self.mem_used
+    
+    @mem_free.setter
+    def mem_free(self, mem_free:int)->None:
+        self.mem_used = self.mem_total - mem_free
+    
+    @property
+    def n_cores_free(self)->int:
+        return self.n_cores - self.n_cores_used
+    
+    @n_cores_free.setter
+    def n_cores_free(self, n_cores_free:int)->None:
+        self.n_cores_used = self.n_cores - n_cores_free
 
 
 class GPUInfo:
@@ -43,27 +57,23 @@ class GPUInfo:
         self._uuid:Optional[uuid.UUID] = None
         self._serial:Optional[str] = None
         self._driver_version:Optional[str] = None
-        self._memory_info = None
-        self._memory_total:Optional[int] = None
-        self._memory_used:Optional[int] = None
-        self._memory_free:Optional[int] = None
+        self._mem_info = None
+        self._mem_total:Optional[int] = None
+        self._mem_used:Optional[int] = None
         self._load:Optional[float] = None
         self._temperature:Optional[int] = None
         self._display_active:Optional[bool] = None
         self._display_mode:Optional[bool] = None
         self._n_cores:Optional[int] = None
-        self._n_cores_free:Optional[int] = None
         self._n_cores_used:Optional[int] = None
         
     def update(self):
-        self._memory_info = None
-        self._memory_used:Optional[int] = None
-        self._memory_free:Optional[int] = None
+        self._mem_info = None
+        self._mem_used:Optional[int] = None
         self._load:Optional[float] = None
         self._temperature:Optional[int] = None
         self._display_active:Optional[bool] = None
         self._display_mode:Optional[bool] = None
-        self._n_cores_free:Optional[int] = None
         self._n_cores_used:Optional[int] = None
 
     @property
@@ -125,7 +135,7 @@ class GPUInfo:
     @property
     def n_cores_free(self)->int:
         self._update_load()
-        return self._n_cores_free
+        return self._n_cores - self._n_cores_used
     
     @property
     def n_cores_used(self)->int:
@@ -133,41 +143,34 @@ class GPUInfo:
         return self._n_cores_used
     
     @property
-    def memory_total(self)->int:
-        if self._memory_total is None:
-            if self._memory_info is None:
+    def mem_total(self)->int:
+        if self._mem_total is None:
+            if self._mem_info is None:
                 with self._lock:
-                    self._memory_info = pynvml.nvmlDeviceGetMemoryInfo(self._handle)
+                    self._mem_info = pynvml.nvmlDeviceGetMemoryInfo(self._handle)
 
-            self._memory_total = self._memory_info.total
+            self._mem_total = self._mem_info.total
 
-        return self._memory_total
+        return self._mem_total
     
     @property
-    def memory_used(self)->int:
-        if self._memory_used is None:
-            if self._memory_info is None:
+    def mem_used(self)->int:
+        if self._mem_used is None:
+            if self._mem_info is None:
                 with self._lock:
-                    self._memory_info = pynvml.nvmlDeviceGetMemoryInfo(self._handle)
+                    self._mem_info = pynvml.nvmlDeviceGetMemoryInfo(self._handle)
 
-            self._memory_used = self._memory_info.used
+            self._mem_used = self._mem_info.used
 
-        return self._memory_used
+        return self._mem_used
     
     @property
-    def memory_free(self)->int:
-        if self._memory_free is None:
-            if self._memory_info is None:
-                with self._lock:
-                    self._memory_info = pynvml.nvmlDeviceGetMemoryInfo(self._handle)
-
-            self._memory_free = self._memory_info.free
-
-        return self._memory_free
+    def mem_free(self)->int:
+        return self.mem_total - self.mem_used
     
     @property
-    def memory_util(self)->float:
-        return self.memory_used / self.memory_total
+    def mem_util(self)->float:
+        return self.mem_used / self.mem_total
     
     def _update_load(self)->None:
         if self._load is None:
@@ -182,7 +185,6 @@ class GPUInfo:
 
             self._load = util.gpu / 100.0
             self._n_cores_used = int(self._load * self.n_cores)
-            self._n_cores_free = self.n_cores - self._n_cores_used
 
     @property
     def load(self)->float:
@@ -232,14 +234,11 @@ class GPUInfo:
         if not args or "driver_version" in args:
             snapshot.driver_version = self.driver_version
 
-        if not args or "memory_total" in args:
-            snapshot.memory_total = self.memory_total
+        if not args or "mem_total" in args or "mem_free" in args or "mem_used" in args:
+            snapshot.mem_total = self.mem_total
 
-        if not args or "memory_used" in args:
-            snapshot.memory_used = self.memory_used
-
-        if not args or "memory_free" in args:
-            snapshot.memory_free = self.memory_free
+        if not args or "mem_used" in args or "mem_free" in args:
+            snapshot.mem_used = self.mem_used
 
         if not args or "load" in args:
             snapshot.load = self.load
@@ -253,13 +252,10 @@ class GPUInfo:
         if not args or "display_mode" in args:
             snapshot.display_mode = self.display_mode
 
-        if not args or "n_cores" in args:
+        if not args or "n_cores" in args or "n_cores_free" in args or "n_cores_used" in args:
             snapshot.n_cores = self.n_cores
 
-        if not args or "n_cores_free" in args:
-            snapshot.n_cores_free = self.n_cores_free
-
-        if not args or "n_cores_used" in args:
+        if not args or "n_cores_used" in args or "n_cores_free" in args:
             snapshot.n_cores_used = self.n_cores_used
 
         return snapshot

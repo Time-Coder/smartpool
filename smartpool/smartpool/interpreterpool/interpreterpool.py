@@ -8,11 +8,10 @@ if TYPE_CHECKING:
     from .worker import Worker
 
 
-class ProcessPool:
+class InterpreterPool:
 
     def __init__(
-        self, max_workers:int=0, process_name_prefix:str="ProcessPool.worker:",
-        mp_context:str="spawn",
+        self, max_workers:int=0,
         initializer:Optional[Callable[..., Any]]=None,
         initargs:Tuple[Any, ...]=(),
         initkwargs:Optional[Dict[str, Any]]=None,
@@ -20,23 +19,21 @@ class ProcessPool:
         max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
+        import os
         import threading
-        import queue
+        from concurrent.interpreters import Queue
+        import concurrent.interpreters as interpreters
         if use_torch:
             import torch
-            import torch.multiprocessing as mp
-            from torch.multiprocessing.queue import SimpleQueue
             self._torch_cuda_available = torch.cuda.is_available()
         else:
-            import multiprocessing as mp
-            from multiprocessing.queues import SimpleQueue
             self._torch_cuda_available = False
 
         from ..sysinfo import SysInfo
         
 
         if not max_workers:
-            max_workers = mp.cpu_count()
+            max_workers = os.cpu_count()
 
         self._max_tasks_per_child:Optional[int] = max_tasks_per_child
         self._use_torch:bool = use_torch
@@ -45,10 +42,8 @@ class ProcessPool:
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
-        self._process_name_prefix:str = process_name_prefix
 
-        self._ctx = mp.get_context(mp_context)
-        self._result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = SimpleQueue(ctx=self._ctx)
+        self._result_queue:Queue[Optional[Tuple[str, bool, Any, int]]] = interpreters.create_queue()
         
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
@@ -60,10 +55,6 @@ class ProcessPool:
 
         self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
         self._result_thread.start()
-
-        self._feeding_queue:queue.SimpleQueue[Tuple[Task, SimpleQueue]] = queue.SimpleQueue()
-        self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
-        self._feeding_thread.start()
 
     def submit(
         self, func:Callable[..., Any],
@@ -173,7 +164,7 @@ class ProcessPool:
             )
             futures.append(future)
 
-        return _chain_from_iterable_of_lists(ProcessPool._result_iterator(futures, end_time))
+        return _chain_from_iterable_of_lists(InterpreterPool._result_iterator(futures, end_time))
 
     def _put_task(self, task:Task)->None:
         self._sys_info.cpu_cores_free -= task.need_cpu_cores
@@ -186,30 +177,16 @@ class ProcessPool:
         worker:Worker = task.worker
         worker.is_working = True
         worker.imported_modules.update(task.module_deps)
-        self._feeding_queue.put((task, worker.task_queue))
-        
-    def _feeding(self)->None:
-        while not self._shutdown:
-            task, task_queue = self._feeding_queue.get()
-            if task.future.cancelled():
-                continue
-
-            try:
-                task_queue.put(task.info())
-                task.future.set_running_or_notify_cancel()
-            except BaseException as e:
-                task.future.set_exception(e)
+        worker.task_queue.put(task.info())
 
     def _add_worker(self)->Worker:
         from .worker import Worker
 
         worker = Worker(
-            len(self._workers), self._process_name_prefix,
-            self._result_queue, self._ctx,
+            len(self._workers), self._result_queue,
             initializer=self._initializer,
             initargs=self._initargs,
             initkwargs=self._initkwargs,
-            use_torch=self._use_torch,
             torch_cuda_available=self._torch_cuda_available
         )
         self._workers.append(worker)
@@ -233,8 +210,7 @@ class ProcessPool:
                     worker.restart()
 
                 self._sys_info.cpu_cores_free += task.need_cpu_cores
-                hold_cpu_mem = max(worker.cached_rss - task.mem_before_enter, 0)
-                self._sys_info.cpu_mem_free += max(task.need_cpu_mem - hold_cpu_mem, 0)
+                self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
                 task_gpu_id:int = task.gpu_id
                 if task_gpu_id != -1:
                     self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
@@ -344,11 +320,9 @@ class ProcessPool:
             task.worker = None
             return None
         
-        worker:Worker = task.worker
-        task.mem_before_enter = worker.cached_rss
         task.estimated_need_cpu_mem = 0
         if task.need_cpu_mem > 0:
-            task.estimated_need_cpu_mem = max(0, task.need_cpu_mem - task.modules_overlap_ratio * worker.cached_rss)
+            task.estimated_need_cpu_mem = (1 - task.modules_overlap_ratio) * task.need_cpu_mem
 
         if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free:
             task.device = None
@@ -395,9 +369,7 @@ class ProcessPool:
                 for worker in self._workers:
                     worker.join()
 
-            self._result_queue.close()
-
-    def __enter__(self)->ProcessPool:
+    def __enter__(self)->InterpreterPool:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb)->None:
