@@ -1,19 +1,11 @@
 from __future__ import annotations
 import uuid
 import sys
-from dataclasses import dataclass
 from concurrent.futures import Future
 from typing import Tuple, Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .worker import Worker
-
-
-@dataclass
-class Result:
-    task_id: str = ""
-    result: Any = None
-    exception: Optional[BaseException] = None
 
 
 class Task:
@@ -50,12 +42,12 @@ class Task:
         
         return -1
 
-    def exec(self)->Result:
-        result = Result(task_id=self.id)
-        
+    def exec(self)->Tuple[str, bool, Any]:
         try:
-            result.result = self.func(*self.args, **self.kwargs)
+            result = self.func(*self.args, **self.kwargs)
+            success = True
         except BaseException as e:
-            result.exception = e
+            result = e
+            success = False
 
-        return result
+        return self.id, success, result

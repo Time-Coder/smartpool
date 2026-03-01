@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable, Protocol, TypeVar
 
 if TYPE_CHECKING:
     import threading
@@ -11,21 +11,38 @@ if TYPE_CHECKING:
     from .worker import Worker
 
 
+T = TypeVar('T')
+
+class QueueLike(Protocol[T]):
+    def put(self, item: T) -> None: ...
+    def get(self) -> T: ...
+
+
 class Pool(ABC):
 
     __sys_info_lock:Optional[threading.Lock] = None
     __sys_info:Optional[SysInfo] = None
 
     def __init__(
-        self, max_workers:int=0,
-        initializer:Optional[Callable[..., Any]]=None,
-        initargs:Tuple[Any, ...]=(),
-        initkwargs:Optional[Dict[str, Any]]=None,
+        self, max_workers:int,
+
+        initializer:Optional[Callable[..., Any]],
+        initargs:Tuple[Any, ...],
+        initkwargs:Optional[Dict[str, Any]],
+
+        result_queue_cls:type,
+        result_queue_args:Tuple[Any, ...]=(),
+        result_queue_kwargs:Dict[str, Any]=None,
+        
         *,
-        use_torch:bool=False
+
+        max_tasks_per_child:Optional[int],
+        use_torch:bool,
+        need_module_deps:bool
     ):
         import threading
         import os
+        
 
         if use_torch:
             import torch
@@ -33,23 +50,28 @@ class Pool(ABC):
         else:
             self._torch_cuda_available = False
 
-        from .sysinfo import SysInfo
-        
 
         if not max_workers:
             max_workers = os.cpu_count()
 
-        self._need_module_deps:bool = True
+        self._max_tasks_per_child:int = max_tasks_per_child
+        self._need_module_deps:bool = need_module_deps
         self._use_torch:bool = use_torch
         self._max_workers:int = max_workers
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
+
+        if result_queue_kwargs is None:
+            result_queue_kwargs = {}
+
+        self._result_queue:QueueLike[Tuple[str, bool, Any]] = result_queue_cls(*result_queue_args, **result_queue_kwargs)
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
         self._delayed_tasks:List[Task] = []
         self._lock = threading.Lock()
         self._shutdown = False
+        self._result_thread = None
 
     def submit(
         self, func:Callable[..., Any],
@@ -57,6 +79,7 @@ class Pool(ABC):
         need_cpu_cores:int=1, need_cpu_mem:int=0,
         need_gpu_cores:int=0, need_gpu_mem:int=0
     ):
+        import threading
         from .task import Task
 
         if args is None:
@@ -92,6 +115,10 @@ class Pool(ABC):
                 return task.future
             
             self._put_task(task)
+            if self._result_thread is None:
+                self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
+                self._result_thread.start()
+
             return task.future
         
     @property
@@ -180,6 +207,50 @@ class Pool(ABC):
 
         return _chain_from_iterable_of_lists(Pool._result_iterator(futures, end_time))
 
+    def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None:
+        with self._lock:
+            if self._shutdown:
+                return
+            
+            self._shutdown = True
+
+            for worker in self._workers:
+                worker.stop()
+
+            if cancel_futures:
+                for task in self._tasks.values():
+                    task.future.cancel()
+
+            if wait:
+                for worker in self._workers:
+                    worker.join()
+
+    def __enter__(self)->Pool:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb)->None:
+        self.shutdown(wait=True)
+
+    def _collecting_result(self)->None:
+        while not self._shutdown:
+            task_id, success, result = self._result_queue.get()
+
+            with self._lock:
+                task = self._tasks.pop(task_id)
+                if success:
+                    task.future.set_result(result)
+                else:
+                    task.future.set_exception(result)
+                
+                worker:Worker = task.worker
+                worker.is_working = False
+                worker.n_finished_tasks += 1
+                if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
+                    worker.restart()
+
+                self._release_resource(task)
+                self._postprocess_after_task_done()
+    
     def _postprocess_after_task_done(self):
         should_pop_indices = []
         cancelled_task_ids = []
@@ -210,33 +281,47 @@ class Pool(ABC):
             for task in self._tasks.values():
                 self._try_move_to_gpu(task)
 
-    def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None:
-        with self._lock:
-            if self._shutdown:
-                return
-            
-            self._shutdown = True
-
-            for worker in self._workers:
-                worker.stop()
-
-            if cancel_futures:
-                for task in self._tasks.values():
-                    task.future.cancel()
-
-            if wait:
-                for worker in self._workers:
-                    worker.join()
-
-    def __enter__(self)->Pool:
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb)->None:
-        self.shutdown(wait=True)
-    
-    @abstractmethod
     def _choose_task_device(self, task:Task)->Optional[str]:
-        pass
+        from .worker import Worker
+
+        with self._sys_info_lock:
+            if Worker.total_working_count() == 0:
+                self._sys_info.update()
+
+            need_cpu_cores = self._estimate_need_cpu_cores(task)
+            if need_cpu_cores > self._sys_info.cpu_cores_free:
+                task.device = None
+                task.worker = None
+                return None
+
+            task.estimated_need_cpu_mem = self._estimate_need_cpu_mem(task)
+            if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free:
+                task.device = None
+                task.worker = None
+                return None
+
+            if not self._torch_cuda_available or (task.need_gpu_cores == 0 and task.need_gpu_mem == 0):
+                task.device = "cpu"
+                return "cpu"
+
+            gpus = self._sys_info.gpu_infos
+            if not gpus:
+                task.device = "cpu"
+                return "cpu"
+
+            best_gpu = None
+            for gpu in gpus:
+                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id)
+                if gpu.mem_free >= task.need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                    if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
+                        best_gpu = gpu
+
+        if best_gpu is None:
+            task.device = "cpu"
+            return "cpu"
+
+        task.device = best_gpu.device
+        return task.device
 
     def _choose_task_worker(self, task:Task)->Optional[Worker]:
         best_worker:Optional[Worker] = None
@@ -244,6 +329,10 @@ class Pool(ABC):
         for worker in self._workers:
             if worker.is_working:
                 continue
+
+            if not self._need_module_deps:
+                task.worker = worker
+                return worker
 
             if task.need_cpu_mem == 0 or task.func.__module__ in worker.imported_modules:
                 task.modules_overlap_ratio = 1.0
@@ -268,6 +357,26 @@ class Pool(ABC):
         return task.worker
 
     @abstractmethod
+    def _take_resource(self, task:Task)->None:
+        pass
+
+    @abstractmethod
+    def _release_resource(self, task:Task)->None:
+        pass
+
+    @abstractmethod
+    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int)->int:
+        pass
+
+    @abstractmethod
+    def _estimate_need_cpu_cores(self, task:Task)->int:
+        pass
+    
+    @abstractmethod
+    def _estimate_need_cpu_mem(self, task:Task)->int:
+        pass
+
+    @abstractmethod
     def _put_task(self, task:Task)->None:
         pass
 
@@ -281,31 +390,30 @@ class Pool(ABC):
         ):
             return
         
-        gpus = self._sys_info.gpu_infos
-        if not gpus:
-            return
-        
-        need_gpu_cores:int = task.need_gpu_cores
-        need_gpu_mem:int = task.need_gpu_mem
+        with self._sys_info_lock:
+            gpus = self._sys_info.gpu_infos
+            if not gpus:
+                return
+            
+            need_gpu_mem:int = task.need_gpu_mem
 
-        best_gpu = None
-        for gpu in gpus:
-            if gpu.mem_free >= need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
-                if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
-                    best_gpu = gpu
+            best_gpu = None
+            need_best_gpu_cores:int = 0
+            for gpu in gpus:
+                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id)
+                if gpu.mem_free >= need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                    if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
+                        best_gpu = gpu
+                        need_best_gpu_cores = need_gpu_cores
 
-        if best_gpu is None:
-            return
+            if best_gpu is None:
+                return
 
-        worker:Worker = task.worker
-        worker.change_device(best_gpu.device)
-        task.device = best_gpu.device
-        best_gpu.n_cores_free -= task.need_gpu_cores
-        best_gpu.mem_free -= task.need_gpu_mem
-
-    @abstractmethod
-    def _collecting_result(self)->None:
-        pass
+            worker:Worker = task.worker
+            worker.change_device(best_gpu.device)
+            task.device = best_gpu.device
+            best_gpu.n_cores_free -= need_best_gpu_cores
+            best_gpu.mem_free -= task.need_gpu_mem
 
     @abstractmethod
     def _add_worker(self)->Worker:

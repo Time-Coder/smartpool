@@ -5,7 +5,6 @@ from ..worker import Worker
 
 if TYPE_CHECKING:
     from multiprocessing.queues import SimpleQueue
-    from ..task import Task
 
 
 class ProcessWorker(Worker):

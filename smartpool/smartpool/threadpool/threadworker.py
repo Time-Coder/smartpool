@@ -8,14 +8,14 @@ from ..utils import _set_best_device
 
 
 if TYPE_CHECKING:
-    from ..task import Task, Result
+    from ..task import Task
 
 
 class ThreadWorker(Worker):
 
     def __init__(
         self, index:int, name_prefix:str,
-        result_queue:SimpleQueue[Result],
+        result_queue:SimpleQueue[Tuple[str, bool, Any]],
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]]
@@ -23,7 +23,7 @@ class ThreadWorker(Worker):
         Worker.__init__(self, index, initializer=initializer, initargs=initargs, initkwargs=initkwargs)
         self.name_prefix:str = name_prefix
         self.task_queue:SimpleQueue[Task] = SimpleQueue()
-        self.result_queue:SimpleQueue[Result] = result_queue
+        self.result_queue:SimpleQueue[Tuple[str, bool, Any]] = result_queue
 
         self.start()
 
@@ -45,10 +45,17 @@ class ThreadWorker(Worker):
     def join(self)->None:
         self.thread.join()
 
+    def restart(self)->None:
+        self.task_queue.put(None)
+        self.thread.join()
+        self.n_finished_tasks:int = 0
+        self.imported_modules.clear()
+        self.start()
+
     @staticmethod
     def run(
         task_queue:SimpleQueue[Task],
-        result_queue:SimpleQueue[Result],
+        result_queue:SimpleQueue[Tuple[str, bool, Any]],
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]]

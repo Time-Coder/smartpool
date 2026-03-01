@@ -3,7 +3,7 @@ from ..pool import Pool
 from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
 if TYPE_CHECKING:
-    from ..task import Task, Result
+    from ..task import Task
     from .threadworker import ThreadWorker
 
 
@@ -15,29 +15,28 @@ class ThreadPool(Pool):
         initargs:Tuple[Any, ...]=(),
         initkwargs:Optional[Dict[str, Any]]=None,
         *,
+        max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
+        from queue import SimpleQueue
+
         Pool.__init__(
             self, max_workers=max_workers,
+
             initializer=initializer,
             initargs=initargs,
             initkwargs=initkwargs,
-            use_torch=use_torch
+
+            result_queue_cls=SimpleQueue,
+
+            max_tasks_per_child=max_tasks_per_child,
+            use_torch=use_torch,
+            need_module_deps=False
         )
 
-        import threading
-        from queue import SimpleQueue
-        
-
         self._thread_name_prefix:str = thread_name_prefix
-        self._result_queue:SimpleQueue[Result] = SimpleQueue()
         self.__max_used_cpu_cores = None
         self.__max_used_gpu_cores = {}
-
-        self._add_worker()
-
-        self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
-        self._result_thread.start()
 
     def _max_used_cpu_cores(self)->int:
         if self.__max_used_cpu_cores is not None:
@@ -73,7 +72,7 @@ class ThreadPool(Pool):
         from ..utils import has_gil
         return has_gil()
 
-    def _put_task(self, task:Task)->None:
+    def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:
             if not self._has_gil():
                 self._sys_info.cpu_cores_free -= task.need_cpu_cores
@@ -95,7 +94,49 @@ class ThreadPool(Pool):
                         self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= (task.need_gpu_cores - max_used_gpu_cores)
 
                 self._sys_info.gpu_infos[task_gpu_id].mem_free -= task.need_gpu_mem
+
+    def _release_resource(self, task:Task)->None:
+        with self._sys_info_lock:
+            if not self._has_gil():
+                self._sys_info.cpu_cores_free += task.need_cpu_cores
+            else:
+                max_used_cpu_cores = self._max_used_cpu_cores()
+                if task.need_cpu_cores >= max_used_cpu_cores:
+                    self.__max_used_cpu_cores = None
+                    max_used_cpu_cores = self._max_used_cpu_cores()
+                    self._sys_info.cpu_cores_free += (task.need_cpu_cores - max_used_cpu_cores)
+                
+            self._sys_info.cpu_mem_free += task.need_cpu_mem
+            task_gpu_id:int = task.gpu_id
+            if task_gpu_id != -1:
+                if not self._has_gil():
+                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
+                else:
+                    max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
+                    if task.need_gpu_cores >= max_used_gpu_cores:
+                        self.__max_used_gpu_cores[task_gpu_id] = None
+                        max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
+                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free += (task.need_gpu_cores - max_used_gpu_cores)
+
+                self._sys_info.gpu_infos[task_gpu_id].mem_free += task.need_gpu_mem
+
+    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int)->int:
+        if self._has_gil():
+            return max(0, task.need_gpu_cores - self._max_used_gpu_cores(gpu_id))
+        else:
+            return task.need_gpu_cores
+
+    def _estimate_need_cpu_cores(self, task:Task)->int:
+        if self._has_gil():
+            return max(0, task.need_cpu_cores - self._max_used_cpu_cores())
+        else:
+            return task.need_cpu_cores
         
+    def _estimate_need_cpu_mem(self, task:Task)->int:
+        return task.need_cpu_mem
+
+    def _put_task(self, task:Task)->None:
+        self._take_resource(task)
         worker:ThreadWorker = task.worker
         worker.is_working = True
         task.future.set_running_or_notify_cancel()
@@ -113,130 +154,3 @@ class ThreadPool(Pool):
         )
         self._workers.append(worker)
         return worker
-
-    def _collecting_result(self)->None:
-        while not self._shutdown:
-            result:Result = self._result_queue.get()
-
-            with self._lock:
-                task = self._tasks.pop(result.task_id)
-                if result.exception is None:
-                    task.future.set_result(result.result)
-                else:
-                    task.future.set_exception(result.exception)
-                
-                task.worker.is_working = False
-                with self._sys_info_lock:
-                    if not self._has_gil():
-                        self._sys_info.cpu_cores_free += task.need_cpu_cores
-                    else:
-                        max_used_cpu_cores = self._max_used_cpu_cores()
-                        if task.need_cpu_cores >= max_used_cpu_cores:
-                            self.__max_used_cpu_cores = None
-                            max_used_cpu_cores = self._max_used_cpu_cores()
-                            self._sys_info.cpu_cores_free += (task.need_cpu_cores - max_used_cpu_cores)
-                        
-                    self._sys_info.cpu_mem_free += task.need_cpu_mem
-                    task_gpu_id:int = task.gpu_id
-                    if task_gpu_id != -1:
-                        if not self._has_gil():
-                            self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
-                        else:
-                            max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
-                            if task.need_gpu_cores >= max_used_gpu_cores:
-                                self.__max_used_gpu_cores[task_gpu_id] = None
-                                max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
-                                self._sys_info.gpu_infos[task_gpu_id].n_cores_free += (task.need_gpu_cores - max_used_gpu_cores)
-
-                        self._sys_info.gpu_infos[task_gpu_id].mem_free += task.need_gpu_mem
-                
-                self._postprocess_after_task_done()
-
-    @property
-    def working_count(self)->int:
-        return sum(worker.is_working for worker in self._workers)
-    
-    def _choose_task_worker(self, task:Task)->Optional[ThreadWorker]:
-        for worker in self._workers:
-            if not worker.is_working:
-                task.worker = worker
-                return worker
-
-        if len(self._workers) < self._max_workers:
-            task.worker = self._add_worker()
-        else:
-            task.worker = None
-        
-        return task.worker
-
-    def _try_move_to_gpu(self, task:Task)->None:
-        if (
-            task.device is None or
-            task.device.startswith("cuda") or
-            task.need_gpu_cores == 0 or
-            task.worker is None or
-            not task.worker.is_working
-        ):
-            return
-        
-        with self._sys_info_lock:
-            gpus = self._sys_info.gpu_infos
-            if not gpus:
-                return
-            
-            need_gpu_cores:int = task.need_gpu_cores
-            need_gpu_mem:int = task.need_gpu_mem
-
-            best_gpu = None
-            for gpu in gpus:
-                if gpu.mem_free >= need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
-                    if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
-                        best_gpu = gpu
-
-            if best_gpu is None:
-                return
-
-            task.worker.change_device(best_gpu.device)
-            task.device = best_gpu.device
-            best_gpu.n_cores_free -= task.need_gpu_cores
-            best_gpu.mem_free -= task.need_gpu_mem
-
-    def _choose_task_device(self, task:Task)->str:
-        from ..worker import Worker
-
-        with self._sys_info_lock:
-            if Worker.total_working_count() == 0:
-                self._sys_info.update()
-
-            need_cpu_cores:int = task.need_cpu_cores
-            if need_cpu_cores > self._sys_info.cpu_cores_free:
-                task.device = None
-                task.worker = None
-                return None
-
-            if task.need_cpu_mem > self._sys_info.cpu_mem_free:
-                task.device = None
-                task.worker = None
-                return None
-
-            if not self._torch_cuda_available or (task.need_gpu_cores == 0 and task.need_gpu_mem == 0):
-                task.device = "cpu"
-                return "cpu"
-
-            gpus = self._sys_info.gpu_infos
-            if not gpus:
-                task.device = "cpu"
-                return "cpu"
-
-            best_gpu = None
-            for gpu in gpus:
-                if gpu.mem_free >= task.need_gpu_mem and gpu.n_cores_free >= task.need_gpu_cores:
-                    if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
-                        best_gpu = gpu
-
-        if best_gpu is None:
-            task.device = "cpu"
-            return "cpu"
-
-        task.device = f"cuda:{best_gpu.id}"
-        return task.device

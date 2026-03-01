@@ -61,6 +61,10 @@ class Worker(ABC):
     def join(self)->None:
         pass
 
+    @abstractmethod
+    def restart(self)->None:
+        pass
+
     def overlap_modules_ratio(self, task:Task)->float:
         if not self.imported_modules:
             return 0

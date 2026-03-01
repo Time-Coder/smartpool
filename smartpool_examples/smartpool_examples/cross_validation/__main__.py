@@ -1,17 +1,20 @@
-from smartpool import ProcessPool, DataSize, limit_num_single_thread
+from smartpool import ProcessPool, ThreadPool, DataSize, limit_num_single_thread
 limit_num_single_thread()
 
 import click
 
 
-@click.command(help=f"Use ProcessPool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
+@click.command(help=f"Use smartpool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
 @click.option(
-    '--pool', default='ProcessPool', type=click.Choice([
-        'ProcessPool',
+    '--pool', default='smartpool.ProcessPool', type=click.Choice([
+        'smartpool.ProcessPool',
+        'smartpool.ThreadPool',
         'multiprocessing.Pool',
         'concurrent.futures.ProcessPoolExecutor',
         'concurrent.futures.ThreadPoolExecutor',
-        "joblib",
+        "joblib.Parallel(backend='locky')",
+        "joblib.Parallel(backend='multiprocessing')",
+        "joblib.Parallel(backend='threading')",
         "ray"
     ]),
     help="choose process pool implementations"
@@ -42,6 +45,7 @@ def main(pool:str="smart", max_workers:int=0):
         print("torchvision is not installed. Follow https://pytorch.org/ instructions to install torchvision.")
         exit(1)
 
+    import time
     from sklearn.model_selection import KFold
     import numpy as np
     from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
@@ -90,6 +94,7 @@ def main(pool:str="smart", max_workers:int=0):
     task_progress_bars = {}
     best_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
+    start_time = time.perf_counter()
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -99,8 +104,10 @@ def main(pool:str="smart", max_workers:int=0):
         
         active_tasks = {}
 
-        if pool == "ProcessPool":
+        if pool == "smartpool.ProcessPool":
             process_pool = ProcessPool(max_workers=max_workers, use_torch=True)
+        elif pool == "smartpool.ThreadPool":
+            process_pool = ThreadPool(max_workers=max_workers, use_torch=True)
         elif pool == "concurrent.futures.ProcessPoolExecutor":
             from concurrent.futures import ProcessPoolExecutor
             process_pool = ProcessPoolExecutor(max_workers=max_workers)
@@ -110,15 +117,21 @@ def main(pool:str="smart", max_workers:int=0):
         elif pool == "multiprocessing.Pool":
             import multiprocessing
             process_pool = multiprocessing.Pool(processes=max_workers)
-        elif pool == "joblib":
+        elif pool == "joblib.Parallel(backend='locky')":
             from joblib import Parallel, delayed
-            process_pool = Parallel(n_jobs=max_workers, return_as="generator")
+            process_pool = Parallel(n_jobs=max_workers, backend='locky', return_as="generator")
+        elif pool == "joblib.Parallel(backend='multiprocessing')":
+            from joblib import Parallel, delayed
+            process_pool = Parallel(n_jobs=max_workers, backend='multiprocessing', return_as="generator")
+        elif pool == "joblib.Parallel(backend='threading')":
+            from joblib import Parallel, delayed
+            process_pool = Parallel(n_jobs=max_workers, backend='threading', return_as="generator")
         
         print("submitting training tasks...")
         futures_map:Dict[str, Future] = {}
         futures = []
         for i, task_args in enumerate(tasks):
-            if pool == "ProcessPool":
+            if pool.startswith("smartpool."):
                 future = process_pool.submit(
                     train_single_fold,
                     args=task_args,
@@ -131,7 +144,7 @@ def main(pool:str="smart", max_workers:int=0):
                 future = process_pool.submit(train_single_fold, *task_args, best_device if i % max_workers < 5 else 'cpu')
             elif pool == "multiprocessing.Pool":
                 future = process_pool.apply_async(train_single_fold, args=(*task_args, best_device if i % max_workers < 5 else 'cpu'))
-            elif pool == "joblib":
+            elif pool.startswith("joblib"):
                 future = delayed(train_single_fold)(*task_args, best_device if i % max_workers < 5 else 'cpu')
             elif pool == "ray":
                 future = ray.remote(num_cpus=1, num_gpus=(0.2 if i % max_workers < 5 else 0), memory=1.1*DataSize.GB)(train_single_fold).remote(*task_args, best_device if i % max_workers < 5 else 'cpu')
@@ -144,7 +157,7 @@ def main(pool:str="smart", max_workers:int=0):
             futures.append(future)
         
         print(f"training all models in {pool} ...")
-        if pool == "joblib":
+        if pool.startswith("joblib"):
             joblib_results = process_pool(futures)
 
         finished_tasks = set()
@@ -190,7 +203,7 @@ def main(pool:str="smart", max_workers:int=0):
                 break
 
     model_results = defaultdict(list)
-    if pool in ["ProcessPool", "concurrent.futures.ProcessPoolExecutor", "concurrent.futures.ThreadPoolExecutor", "multiprocessing.Pool"]:
+    if pool in ["smartpool.ProcessPool", "smartpool.ThreadPool", "concurrent.futures.ProcessPoolExecutor", "concurrent.futures.ThreadPoolExecutor", "multiprocessing.Pool"]:
         for task_key, future in futures_map.items():
             if pool == "multiprocessing.Pool":
                 result:TrainingResult = future.get()
@@ -198,7 +211,7 @@ def main(pool:str="smart", max_workers:int=0):
                 result:TrainingResult = future.result()
 
             model_results[result.model_name].append(result.val_accuracy)
-    elif pool == "joblib":
+    elif pool.startswith("joblib"):
         for result in joblib_results:
             model_results[result.model_name].append(result.val_accuracy)
     elif pool == "ray":
@@ -206,6 +219,9 @@ def main(pool:str="smart", max_workers:int=0):
         for result in ray_results:
             model_results[result.model_name].append(result.val_accuracy)
     
+    stop_time = time.perf_counter()
+    print(f"train completed in {stop_time - start_time:.2f} seconds")
+
     print("analysing results...")
 
     stats = {}
