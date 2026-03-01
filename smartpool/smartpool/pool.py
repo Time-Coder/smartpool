@@ -1,0 +1,312 @@
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
+
+if TYPE_CHECKING:
+    import threading
+    from concurrent.futures import Future
+
+    from .sysinfo import SysInfo
+    from .task import Task
+    from .worker import Worker
+
+
+class Pool(ABC):
+
+    __sys_info_lock:Optional[threading.Lock] = None
+    __sys_info:Optional[SysInfo] = None
+
+    def __init__(
+        self, max_workers:int=0,
+        initializer:Optional[Callable[..., Any]]=None,
+        initargs:Tuple[Any, ...]=(),
+        initkwargs:Optional[Dict[str, Any]]=None,
+        *,
+        use_torch:bool=False
+    ):
+        import threading
+        import os
+
+        if use_torch:
+            import torch
+            self._torch_cuda_available = torch.cuda.is_available()
+        else:
+            self._torch_cuda_available = False
+
+        from .sysinfo import SysInfo
+        
+
+        if not max_workers:
+            max_workers = os.cpu_count()
+
+        self._need_module_deps:bool = True
+        self._use_torch:bool = use_torch
+        self._max_workers:int = max_workers
+        self._initializer:Optional[Callable[..., Any]] = initializer
+        self._initargs:Tuple[Any, ...] = initargs
+        self._initkwargs:Optional[Dict[str, Any]] = initkwargs
+        self._workers:List[Worker] = []
+        self._tasks:Dict[str, Task] = {}
+        self._delayed_tasks:List[Task] = []
+        self._lock = threading.Lock()
+        self._shutdown = False
+
+    def submit(
+        self, func:Callable[..., Any],
+        args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
+        need_cpu_cores:int=1, need_cpu_mem:int=0,
+        need_gpu_cores:int=0, need_gpu_mem:int=0
+    ):
+        from .task import Task
+
+        if args is None:
+            args = []
+
+        if kwargs is None:
+            kwargs = {}
+
+        with self._lock:
+            if self._shutdown:
+                raise RuntimeError("cannot submit after shutdown")
+            
+            task = Task(
+                func=func,
+                args=args,
+                kwargs=kwargs,
+                need_cpu_cores=need_cpu_cores,
+                need_cpu_mem=need_cpu_mem,
+                need_gpu_cores=need_gpu_cores,
+                need_gpu_mem=need_gpu_mem,
+                calculate_module_deps=self._need_module_deps
+            )
+            self._tasks[task.id] = task
+            
+            worker = self._choose_task_worker(task)
+            if worker is None:
+                self._delayed_tasks.append(task)
+                return task.future
+
+            device = self._choose_task_device(task)
+            if device is None:
+                self._delayed_tasks.append(task)
+                return task.future
+            
+            self._put_task(task)
+            return task.future
+        
+    @property
+    def _sys_info(self)->SysInfo:
+        from .sysinfo import SysInfo
+        
+        if Pool.__sys_info is None:
+            Pool.__sys_info = SysInfo()
+
+        return Pool.__sys_info
+    
+    @property
+    def _sys_info_lock(self)->threading.Lock:
+        import threading
+
+        if Pool.__sys_info_lock is None:
+            Pool.__sys_info_lock = threading.Lock()
+
+        return Pool.__sys_info_lock
+
+    @staticmethod
+    def _result_iterator(futures:List[Future], end_time:Optional[float]):
+        from concurrent.futures._base import _result_or_cancel
+        import time
+
+        try:
+            futures.reverse()
+            while futures:
+                if end_time is None:
+                    yield _result_or_cancel(futures.pop())
+                else:
+                    yield _result_or_cancel(futures.pop(), end_time - time.monotonic())
+        finally:
+            for future in futures:
+                future.cancel()
+
+    def starmap(
+        self, func:Callable[..., Any],
+        args_iterables:Iterable[Tuple[Any, ...]],
+        need_cpu_cores:Union[int, Iterable[int]]=1,
+        need_cpu_mem:Union[int, Iterable[int]]=0,
+        need_gpu_cores:Union[int, Iterable[int]]=0,
+        need_gpu_mem:Union[int, Iterable[int]]=0,
+        timeout:Optional[Union[float, int]]=None,
+        chunksize:int=1
+    ):
+        from functools import partial
+        import itertools
+        import time
+        from collections.abc import Iterable
+        from concurrent.futures.process import _process_chunk, _chain_from_iterable_of_lists
+        from .utils import batched
+
+        if not isinstance(need_cpu_cores, Iterable):
+            need_cpu_cores = itertools.repeat(need_cpu_cores)
+
+        if not isinstance(need_cpu_mem, Iterable):
+            need_cpu_mem = itertools.repeat(need_cpu_mem)
+
+        if not isinstance(need_gpu_cores, Iterable):
+            need_gpu_cores = itertools.repeat(need_gpu_cores)
+
+        if not isinstance(need_gpu_mem, Iterable):
+            need_gpu_mem = itertools.repeat(need_gpu_mem)
+
+        if chunksize < 1:
+            raise ValueError("chunksize must be >= 1.")
+
+        end_time = None
+        if timeout is not None:
+            end_time = timeout + time.monotonic()
+
+        target_func = partial(_process_chunk, func)
+        futures:List[Future] = []
+        iterator = zip(args_iterables, need_cpu_cores, need_cpu_mem, need_gpu_cores, need_gpu_mem)
+        for batch in batched(iterator, chunksize):
+            args_batch, cpu_cores_batch, cpu_mem_batch, gpu_cores_batch, gpu_mem_batch = zip(*batch)
+            future = self.submit(
+                target_func, args=(args_batch,),
+                need_cpu_cores=max(cpu_cores_batch),
+                need_cpu_mem=max(cpu_mem_batch),
+                need_gpu_cores=max(gpu_cores_batch),
+                need_gpu_mem=max(gpu_mem_batch)
+            )
+            futures.append(future)
+
+        return _chain_from_iterable_of_lists(Pool._result_iterator(futures, end_time))
+
+    def _postprocess_after_task_done(self):
+        should_pop_indices = []
+        cancelled_task_ids = []
+        for i, delayed_task in enumerate(self._delayed_tasks):
+            if delayed_task.future.cancelled():
+                cancelled_task_ids.append(delayed_task.id)
+                should_pop_indices.append(i)
+                continue
+
+            used_worker = self._choose_task_worker(delayed_task)
+            if used_worker is None:
+                continue
+
+            device = self._choose_task_device(delayed_task)
+            if device is None:
+                continue
+
+            self._put_task(delayed_task)
+            should_pop_indices.append(i)
+
+        for i in reversed(should_pop_indices):
+            del self._delayed_tasks[i]
+
+        for task_id in cancelled_task_ids:
+            del self._tasks[task_id] 
+
+        if self._torch_cuda_available:
+            for task in self._tasks.values():
+                self._try_move_to_gpu(task)
+
+    def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None:
+        with self._lock:
+            if self._shutdown:
+                return
+            
+            self._shutdown = True
+
+            for worker in self._workers:
+                worker.stop()
+
+            if cancel_futures:
+                for task in self._tasks.values():
+                    task.future.cancel()
+
+            if wait:
+                for worker in self._workers:
+                    worker.join()
+
+    def __enter__(self)->Pool:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb)->None:
+        self.shutdown(wait=True)
+    
+    @abstractmethod
+    def _choose_task_device(self, task:Task)->Optional[str]:
+        pass
+
+    def _choose_task_worker(self, task:Task)->Optional[Worker]:
+        best_worker:Optional[Worker] = None
+        task.modules_overlap_ratio = 0.0
+        for worker in self._workers:
+            if worker.is_working:
+                continue
+
+            if task.need_cpu_mem == 0 or task.func.__module__ in worker.imported_modules:
+                task.modules_overlap_ratio = 1.0
+                task.worker = worker
+                return worker
+
+            current_overlap_ratio = worker.overlap_modules_ratio(task)
+            if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
+                task.modules_overlap_ratio = current_overlap_ratio
+                best_worker = worker
+            
+        if best_worker is not None:
+            task.worker = best_worker
+            return best_worker
+            
+        task.modules_overlap_ratio = 0.0
+        if len(self._workers) < self._max_workers:
+            task.worker = self._add_worker()
+        else:
+            task.worker = None
+
+        return task.worker
+
+    @abstractmethod
+    def _put_task(self, task:Task)->None:
+        pass
+
+    def _try_move_to_gpu(self, task:Task)->None:
+        if (
+            task.device is None or
+            task.device.startswith("cuda") or
+            task.need_gpu_cores == 0 or
+            task.worker is None or
+            not task.worker.is_working
+        ):
+            return
+        
+        gpus = self._sys_info.gpu_infos
+        if not gpus:
+            return
+        
+        need_gpu_cores:int = task.need_gpu_cores
+        need_gpu_mem:int = task.need_gpu_mem
+
+        best_gpu = None
+        for gpu in gpus:
+            if gpu.mem_free >= need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
+                    best_gpu = gpu
+
+        if best_gpu is None:
+            return
+
+        worker:Worker = task.worker
+        worker.change_device(best_gpu.device)
+        task.device = best_gpu.device
+        best_gpu.n_cores_free -= task.need_gpu_cores
+        best_gpu.mem_free -= task.need_gpu_mem
+
+    @abstractmethod
+    def _collecting_result(self)->None:
+        pass
+
+    @abstractmethod
+    def _add_worker(self)->Worker:
+        pass

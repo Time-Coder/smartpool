@@ -1,10 +1,12 @@
+from __future__ import annotations
 import uuid
 import sys
 from dataclasses import dataclass
 from concurrent.futures import Future
-from typing import Tuple, Any, Dict, Optional
+from typing import Tuple, Any, Dict, Optional, TYPE_CHECKING
 
-from .module_deps import module_deps
+if TYPE_CHECKING:
+    from .worker import Worker
 
 
 @dataclass
@@ -16,7 +18,7 @@ class Result:
 
 class Task:
 
-    def __init__(self, func, args, kwargs, need_cpu_cores, need_cpu_mem, need_gpu_cores, need_gpu_mem):
+    def __init__(self, func, args, kwargs, need_cpu_cores, need_cpu_mem, need_gpu_cores, need_gpu_mem, calculate_module_deps:bool):
         self.id:str = str(uuid.uuid4())
         self.func = func
         self.args:Tuple[Any] = args
@@ -27,9 +29,14 @@ class Task:
         self.need_gpu_mem:int = need_gpu_mem
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
-        self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
+        self.module_deps:Dict[str, int] = {}
+        
+        if calculate_module_deps:
+            from .module_deps import module_deps
+            self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
+        
         self.device:Optional[str] = None
-        self.worker = None
+        self.worker:Worker = None
         self.mem_before_enter:int = 0
         self.future = Future()
 
