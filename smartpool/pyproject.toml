@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Smart thread/process/interpreter pool implementation."
 readme = "README.md"
 authors = [
-    { name = "王炳辉", email = "binghui.wang@foxmail.com" }
+    { name = "王炳辉 (Bing-Hui WANG)", email = "binghui.wang@foxmail.com" }
 ]
 license = { text = "MIT" }
 classifiers = [

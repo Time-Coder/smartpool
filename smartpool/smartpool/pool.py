@@ -207,6 +207,29 @@ class Pool(ABC):
 
         return _chain_from_iterable_of_lists(Pool._result_iterator(futures, end_time))
 
+    def map(
+        self, func:Callable[..., Any],
+        iterable:Iterable[Any],
+        need_cpu_cores:Union[int, Iterable[int]]=1,
+        need_cpu_mem:Union[int, Iterable[int]]=0,
+        need_gpu_cores:Union[int, Iterable[int]]=0,
+        need_gpu_mem:Union[int, Iterable[int]]=0,
+        timeout:Optional[Union[float, int]]=None,
+        chunksize:int=1
+    ):
+        args_iterable = ((item,) for item in iterable)
+        
+        return self.starmap(
+            func=func,
+            args_iterables=args_iterable,
+            need_cpu_cores=need_cpu_cores,
+            need_cpu_mem=need_cpu_mem,
+            need_gpu_cores=need_gpu_cores,
+            need_gpu_mem=need_gpu_mem,
+            timeout=timeout,
+            chunksize=chunksize
+        )
+
     def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None:
         with self._lock:
             if self._shutdown:

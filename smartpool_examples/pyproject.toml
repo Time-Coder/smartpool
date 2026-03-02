@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Examples for smartpool."
 readme = "README.md"
 authors = [
-    { name = "王炳辉", email = "binghui.wang@foxmail.com" }
+    { name = "王炳辉 (Bing-Hui WANG)", email = "binghui.wang@foxmail.com" }
 ]
 license = { text = "MIT" }
 classifiers = [
@@ -23,7 +23,8 @@ dependencies = [
     "numpy",
     "rich",
     "click",
-    "joblib"
+    "joblib",
+    "datawatcher"
 ]
 
 [project.urls]
