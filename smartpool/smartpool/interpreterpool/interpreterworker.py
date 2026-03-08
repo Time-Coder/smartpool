@@ -26,7 +26,7 @@ class InterpreterWorker(Worker):
         else:
             self.change_device_cmd_queue:Optional[Queue[Optional[str]]] = None
 
-        self.result_queue:Queue[Optional[Tuple[str, bool, Any, int]]] = result_queue
+        self.result_queue:Queue[Tuple[str, bool, Any, int]] = result_queue
         self.task_queue:Queue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = interpreters.create_queue()
 
         self.start()
@@ -50,14 +50,6 @@ class InterpreterWorker(Worker):
             initargs=self.initargs,
             initkwargs=self.initkwargs
         )
-
-    def restart(self)->None:
-        self.task_queue.put(None)
-        self.thread.join()
-        self.interp.close()
-        self.n_finished_tasks:int = 0
-        self.imported_modules.clear()
-        self.start()
 
     def join(self)->None:
         self.thread.join()

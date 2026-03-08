@@ -20,7 +20,12 @@ class ThreadWorker(Worker):
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]]
     ):
-        Worker.__init__(self, index, initializer=initializer, initargs=initargs, initkwargs=initkwargs)
+        Worker.__init__(
+            self, index,
+            initializer=initializer,
+            initargs=initargs,
+            initkwargs=initkwargs
+        )
         self.name_prefix:str = name_prefix
         self.task_queue:SimpleQueue[Task] = SimpleQueue()
         self.result_queue:SimpleQueue[Tuple[str, bool, Any]] = result_queue
@@ -44,13 +49,6 @@ class ThreadWorker(Worker):
 
     def join(self)->None:
         self.thread.join()
-
-    def restart(self)->None:
-        self.task_queue.put(None)
-        self.thread.join()
-        self.n_finished_tasks:int = 0
-        self.imported_modules.clear()
-        self.start()
 
     @staticmethod
     def run(

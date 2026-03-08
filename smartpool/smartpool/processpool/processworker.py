@@ -4,29 +4,38 @@ from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple
 from ..worker import Worker
 
 if TYPE_CHECKING:
-    from multiprocessing.queues import SimpleQueue
+    from ..utils import QueueLike
+    from ..task import Task
+
+    import multiprocessing as mp
+    import psutil
 
 
 class ProcessWorker(Worker):
 
     def __init__(
         self, index:int, name_prefix:str,
-        result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]], ctx,
+        result_queue:QueueLike[Optional[Tuple[str, bool, Any]]], ctx,
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
         use_torch:bool, torch_cuda_available:bool
     ):
-        Worker.__init__(
-            self, index,
-            initializer,
-            initargs,
-            initkwargs
-        )
         if use_torch:
             from torch.multiprocessing.queue import SimpleQueue
         else:
             from multiprocessing.queues import SimpleQueue
+
+        Worker.__init__(
+            self, index,
+            result_queue=result_queue,
+            task_queue_cls=SimpleQueue,
+            task_queue_args=(),
+            task_queue_kwargs={"ctx": ctx},
+            initializer=initializer,
+            initargs=initargs,
+            initkwargs=initkwargs
+        )
 
         if torch_cuda_available:
             self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=ctx)
@@ -35,12 +44,9 @@ class ProcessWorker(Worker):
 
         self.ctx = ctx
         self.name_prefix:str = name_prefix
-        self.result_queue:SimpleQueue[Optional[Tuple[str, bool, Any]]] = result_queue
-        self.task_queue:SimpleQueue[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = SimpleQueue(ctx=ctx)
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
-
-        self.start()
+        self.process_info:Optional[psutil.Process] = None
 
     @property
     def cached_rss(self)->int:
@@ -81,33 +87,34 @@ class ProcessWorker(Worker):
         if self.change_device_cmd_queue is not None:
             self.change_device_cmd_queue.put(device)
 
-    def stop(self)->None:
-        self.task_queue.put(None)
-        self.task_queue.close()
+    def _clear(self)->None:
+        self.process_or_thread = None
+        self.process_info = None
+        self._is_working = False
+        self.imported_modules.clear()
+        self._is_rss_dirty = True
+        self._cached_rss = 0
 
-    def start(self):
-        import multiprocessing as mp
+    def start(self)->None:
+        if self.process_or_thread is not None:
+            return
+        
         import psutil
 
-        self.process:mp.Process = self.ctx.Process(
+        self.process_or_thread:mp.Process = self.ctx.Process(
             target=ProcessWorker.run,
             args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
             kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
             name=f"{self.name_prefix}{self.index}",
             daemon=True
         )
-        self.process.start()
-        self.process_info = psutil.Process(self.process.pid)
-
-    def restart(self)->None:
-        self.task_queue.put(None)
-        self.process.join()
-        self.n_finished_tasks:int = 0
-        self.imported_modules.clear()
-        self.start()
+        self.process_or_thread.start()
+        self.process_info = psutil.Process(self.process_or_thread.pid)
         
     def terminate(self)->None:
-        self.process.terminate()
+        self.process_or_thread.terminate()
+        self._clear()
 
     def join(self)->None:
-        self.process.join()
+        self.process_or_thread.join()
+        self._clear()

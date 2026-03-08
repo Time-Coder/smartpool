@@ -53,7 +53,7 @@ class ProcessPool(Pool):
         self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
         self._feeding_thread.start()
 
-    def _take_resource(self, task):
+    def _take_resource(self, task:Task):
         with self._sys_info_lock:
             self._sys_info.cpu_cores_free -= task.need_cpu_cores
             self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable, Protocol, TypeVar
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
 
 if TYPE_CHECKING:
     import threading
@@ -9,19 +9,13 @@ if TYPE_CHECKING:
     from .sysinfo import SysInfo
     from .task import Task
     from .worker import Worker
-
-
-T = TypeVar('T')
-
-class QueueLike(Protocol[T]):
-    def put(self, item: T) -> None: ...
-    def get(self) -> T: ...
+    from .utils import QueueLike
 
 
 class Pool(ABC):
 
-    __sys_info_lock:Optional[threading.Lock] = None
-    __sys_info:Optional[SysInfo] = None
+    _sys_info_lock:Optional[threading.Lock] = None
+    _sys_info:Optional[SysInfo] = None
 
     def __init__(
         self, max_workers:int,
@@ -40,6 +34,8 @@ class Pool(ABC):
         use_torch:bool,
         need_module_deps:bool
     ):
+        self._init_sys_info()
+
         import threading
         import os
         
@@ -121,23 +117,15 @@ class Pool(ABC):
 
             return task.future
         
-    @property
-    def _sys_info(self)->SysInfo:
-        from .sysinfo import SysInfo
-        
-        if Pool.__sys_info is None:
-            Pool.__sys_info = SysInfo()
+    def _init_sys_info(self)->None:
+        if Pool._sys_info is not None:
+            return
 
-        return Pool.__sys_info
-    
-    @property
-    def _sys_info_lock(self)->threading.Lock:
+        from .sysinfo import SysInfo
         import threading
 
-        if Pool.__sys_info_lock is None:
-            Pool.__sys_info_lock = threading.Lock()
-
-        return Pool.__sys_info_lock
+        Pool._sys_info = SysInfo()
+        Pool._sys_info_lock = threading.Lock()
 
     @staticmethod
     def _result_iterator(futures:List[Future], end_time:Optional[float]):
@@ -269,7 +257,7 @@ class Pool(ABC):
                 worker.is_working = False
                 worker.n_finished_tasks += 1
                 if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
-                    worker.restart()
+                    worker.stop(wait=False, clear=True)
 
                 self._release_resource(task)
                 self._postprocess_after_task_done()
@@ -349,6 +337,7 @@ class Pool(ABC):
     def _choose_task_worker(self, task:Task)->Optional[Worker]:
         best_worker:Optional[Worker] = None
         task.modules_overlap_ratio = 0.0
+        max_overlap_size = 0.0
         for worker in self._workers:
             if worker.is_working:
                 continue
@@ -357,15 +346,22 @@ class Pool(ABC):
                 task.worker = worker
                 return worker
 
-            if task.need_cpu_mem == 0 or task.func.__module__ in worker.imported_modules:
+            if task.need_cpu_mem == 0:
                 task.modules_overlap_ratio = 1.0
                 task.worker = worker
                 return worker
 
             current_overlap_ratio = worker.overlap_modules_ratio(task)
-            if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
-                task.modules_overlap_ratio = current_overlap_ratio
-                best_worker = worker
+            if hasattr(task.worker, "cached_rss"):
+                current_overlap_size = current_overlap_ratio * task.worker.cached_rss
+                if best_worker is None or current_overlap_size > max_overlap_size:
+                    task.modules_overlap_ratio = current_overlap_ratio
+                    max_overlap_size = current_overlap_size
+                    best_worker = worker
+            else:
+                if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
+                    task.modules_overlap_ratio = current_overlap_ratio
+                    best_worker = worker
             
         if best_worker is not None:
             task.worker = best_worker

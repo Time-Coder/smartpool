@@ -1,3 +1,13 @@
+from typing import TypeVar, Protocol
+
+
+T = TypeVar('T')
+
+class QueueLike(Protocol[T]):
+    def put(self, item: T) -> None: ...
+    def get(self) -> T: ...
+
+
 class DataSize:
     B = 1
     KB = 1024 * B
