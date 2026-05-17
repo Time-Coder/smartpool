@@ -1,9 +1,11 @@
 from __future__ import annotations
-import pynvml
-import weakref
-import uuid
+
 import threading
-from typing import List, Optional, Iterator
+import uuid
+import weakref
+from typing import Iterator, List, Optional
+
+import pynvml
 
 
 class GPUInfoSnapshot:
@@ -177,7 +179,7 @@ class GPUInfo:
             with self._lock:
                 try:
                     util = pynvml.nvmlDeviceGetUtilizationRates(self._handle)
-                except:
+                except Exception:
                     pynvml.nvmlShutdown()
                     pynvml.nvmlInit()
                     self._handle = pynvml.nvmlDeviceGetHandleByIndex(self._id)
@@ -283,7 +285,7 @@ class MetaGPUInfos(type):
         if MetaGPUInfos.__nvml_constructor is None:
             try:
                 MetaGPUInfos.__nvml_constructor = NVMLConstructor()
-            except:
+            except Exception:
                 MetaGPUInfos.__has_gpu = False
 
     def __len__(self)->int:
@@ -292,7 +294,10 @@ class MetaGPUInfos(type):
 
         if MetaGPUInfos.__n_devices is None:
             MetaGPUInfos.__init()
-            MetaGPUInfos.__n_devices = pynvml.nvmlDeviceGetCount()
+            try:
+                MetaGPUInfos.__n_devices = pynvml.nvmlDeviceGetCount()
+            except Exception:
+                MetaGPUInfos.__n_devices = 0
 
         return MetaGPUInfos.__n_devices
 

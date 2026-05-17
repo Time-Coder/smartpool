@@ -9,7 +9,6 @@ class SysInfo:
 
     def __init__(self):
         import psutil
-        import threading
 
         self._cpu_cores_total:int = psutil.cpu_count()
         self._cpu_mem_total:int = psutil.virtual_memory().total
@@ -18,8 +17,6 @@ class SysInfo:
         self._cpu_cores_used:Optional[float] = None
         self._cpu_mem_used:Optional[float] = None
         self._gpu_infos:Optional[List[GPUInfoSnapshot]] = None
-        self._get_cpu_percent_thread:threading.Thread = threading.Thread(target=self._get_cpu_percent, daemon=True)
-        self._get_cpu_percent_thread.start()
 
     @property
     def cpu_mem_free(self)->int:
@@ -33,7 +30,7 @@ class SysInfo:
     def cpu_mem_used(self)->int:
         if self._cpu_mem_used is None:
             import psutil
-            self._cpu_mem_used:float = min(self._cpu_mem_total, psutil.virtual_memory().used + 0.15 * self._cpu_mem_total)
+            self._cpu_mem_used:float = min(self._cpu_mem_total, psutil.virtual_memory().used)
 
         return self._cpu_mem_used
 
@@ -89,7 +86,7 @@ class SysInfo:
         self._cpu_mem_used = None
         self._gpu_infos = None
 
-    def _get_cpu_percent(self)->None:
+    def update_cpu_percent(self)->None:
         import psutil
-        while True:
-            self._last_cpu_percent = psutil.cpu_percent(interval=1)
+
+        self._last_cpu_percent = psutil.cpu_percent(interval=1)

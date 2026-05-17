@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Un
 
 if TYPE_CHECKING:
     import threading
+    import weakref
     from concurrent.futures import Future
 
     from .sysinfo import SysInfo
@@ -16,6 +17,8 @@ class Pool(ABC):
 
     _sys_info_lock:Optional[threading.Lock] = None
     _sys_info:Optional[SysInfo] = None
+    _updating_sysinfo_thread:Optional[threading.Thread] = None
+    _instances:Optional[weakref.WeakSet[Pool]] = None
 
     def __init__(
         self, max_workers:int,
@@ -35,6 +38,12 @@ class Pool(ABC):
         need_module_deps:bool,
         need_result_thread:bool
     ):
+        if Pool._instances is None:
+            import weakref
+            Pool._instances = weakref.WeakSet()
+
+        Pool._instances.add(self)
+
         self._init_sys_info()
 
         import threading
@@ -55,6 +64,7 @@ class Pool(ABC):
         self._need_module_deps:bool = need_module_deps
         self._use_torch:bool = use_torch
         self._max_workers:int = max_workers
+        self._workers_working_count:int = 0
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
@@ -130,6 +140,20 @@ class Pool(ABC):
 
         Pool._sys_info = SysInfo()
         Pool._sys_info_lock = threading.Lock()
+        Pool._updating_sysinfo_thread = threading.Thread(target=Pool._updating_sysinfo, daemon=True)
+        Pool._updating_sysinfo_thread.start()
+
+    @staticmethod
+    def _updating_sysinfo()->None:
+        while True:
+            Pool._sys_info.update_cpu_percent()
+
+            for pool in Pool._instances:
+                if pool._workers_working_count > 0 or not pool._delayed_tasks:
+                    continue
+
+                with pool._lock:
+                    pool._postprocess_after_task_done()
 
     @staticmethod
     def _result_iterator(futures:List[Future], end_time:Optional[float]):
@@ -256,6 +280,7 @@ class Pool(ABC):
             
             worker:Worker = task.worker
             worker.is_working = False
+            self._workers_working_count -= 1
             worker.n_finished_tasks += 1
             if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
                 worker.stop(wait=False, clear=True)
@@ -269,30 +294,31 @@ class Pool(ABC):
             self._on_task_done(task_id, success, result)
     
     def _postprocess_after_task_done(self)->None:
-        should_pop_indices = []
-        cancelled_task_ids = []
-        for i, delayed_task in enumerate(self._delayed_tasks):
-            if delayed_task.future.cancelled():
-                cancelled_task_ids.append(delayed_task.id)
+        if self._delayed_tasks:
+            should_pop_indices = []
+            cancelled_task_ids = []
+            for i, delayed_task in enumerate(self._delayed_tasks):
+                if delayed_task.future.cancelled():
+                    cancelled_task_ids.append(delayed_task.id)
+                    should_pop_indices.append(i)
+                    continue
+
+                used_worker = self._choose_task_worker(delayed_task)
+                if used_worker is None:
+                    continue
+
+                device = self._choose_task_device(delayed_task)
+                if device is None:
+                    continue
+
+                self._put_task(delayed_task)
                 should_pop_indices.append(i)
-                continue
 
-            used_worker = self._choose_task_worker(delayed_task)
-            if used_worker is None:
-                continue
+            for i in reversed(should_pop_indices):
+                del self._delayed_tasks[i]
 
-            device = self._choose_task_device(delayed_task)
-            if device is None:
-                continue
-
-            self._put_task(delayed_task)
-            should_pop_indices.append(i)
-
-        for i in reversed(should_pop_indices):
-            del self._delayed_tasks[i]
-
-        for task_id in cancelled_task_ids:
-            del self._tasks[task_id] 
+            for task_id in cancelled_task_ids:
+                del self._tasks[task_id] 
 
         if self._torch_cuda_available:
             for task in self._tasks.values():

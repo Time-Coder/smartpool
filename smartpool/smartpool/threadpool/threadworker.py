@@ -65,7 +65,7 @@ class ThreadWorker(Worker):
             self.initializer(*self.initargs, **self.initkwargs)
 
         while True:
-            task = self.task_queue.get()
+            task:Task = self.task_queue.get()
             if task is None:
                 break
 

@@ -65,6 +65,7 @@ class InterpreterPool(Pool):
         self._take_resource(task)
         worker:InterpreterWorker = task.worker
         worker.is_working = True
+        self._workers_working_count += 1
         worker.imported_modules.update(task.module_deps)
         task.future.set_running_or_notify_cancel()
         worker.add_task(task)
