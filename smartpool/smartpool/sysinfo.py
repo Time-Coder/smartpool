@@ -43,7 +43,9 @@ class SysInfo:
         from .gpuinfos import GPUInfos
 
         if self._gpu_infos is None:
-            self._gpu_infos:List[GPUInfoSnapshot] = GPUInfos.snapshot("n_cores", "n_cores_used", "mem_total", "mem_used")
+            self._gpu_infos:List[GPUInfoSnapshot] = GPUInfos.snapshot(
+                n_cores=True, n_cores_used=True, mem_total=True, mem_used=True
+            )
 
         return self._gpu_infos
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
+import weakref
 
 if TYPE_CHECKING:
     import threading
-    import weakref
     from concurrent.futures import Future
 
     from .sysinfo import SysInfo
@@ -18,7 +18,7 @@ class Pool(ABC):
     _sys_info_lock:Optional[threading.Lock] = None
     _sys_info:Optional[SysInfo] = None
     _updating_sysinfo_thread:Optional[threading.Thread] = None
-    _instances:Optional[weakref.WeakSet[Pool]] = None
+    _instances:weakref.WeakSet[Pool] = weakref.WeakSet()
 
     def __init__(
         self, max_workers:int,
@@ -38,24 +38,16 @@ class Pool(ABC):
         need_module_deps:bool,
         need_result_thread:bool
     ):
-        if Pool._instances is None:
-            import weakref
-            Pool._instances = weakref.WeakSet()
-
-        Pool._instances.add(self)
-
         self._init_sys_info()
 
         import threading
         import os
-        
 
         if use_torch:
             import torch
             self._torch_cuda_available = torch.cuda.is_available()
         else:
             self._torch_cuda_available = False
-
 
         if not max_workers:
             max_workers = os.cpu_count()
@@ -82,6 +74,8 @@ class Pool(ABC):
         self._shutdown:bool = False
         self._need_result_thread:bool = need_result_thread
         self._result_thread:Optional[threading.Thread] = None
+
+        Pool._instances.add(self)
 
     def submit(
         self, func:Callable[..., Any],
