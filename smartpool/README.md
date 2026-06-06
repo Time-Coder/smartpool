@@ -53,10 +53,10 @@ if __name__ == "__main__":
         future = pool.submit(
             memory_intensive_task, 
             args=(large_dataset,),
-            need_cpu_cores=2,           # Request 2 CPU cores
-            need_cpu_mem=1*DataSize.GB, # Request 4GB RAM
-            need_gpu_cores=1024,        # Request 1024 CUDA cores (NOT percentage)
-            need_gpu_mem=1*DataSize.GB  # Request 2GB GPU memory
+            cpu_cores_needed=2,           # Request 2 CPU cores
+            cpu_mem_needed=1*DataSize.GB, # Request 4GB RAM
+            gpu_cores_needed=1024,        # Request 1024 CUDA cores (NOT percentage)
+            gpu_mem_needed=1*DataSize.GB  # Request 2GB GPU memory
         )
 ```
 
@@ -145,8 +145,8 @@ class ProcessPool:
         self, func:Callable[..., Any],
         args:Optional[Tuple[Any]]=None,
         kwargs:Optional[Dict[str, Any]]=None,
-        need_cpu_cores:int=1, need_cpu_mem:int=0,
-        need_gpu_cores:int=0, need_gpu_mem:int=0
+        cpu_cores_needed:int=1, cpu_mem_needed:int=0,
+        gpu_cores_needed:int=0, gpu_mem_needed:int=0
     )->concurrent.futures.Future: ...
         """
         Submits a callable to be executed with the given arguments.
@@ -158,10 +158,10 @@ class ProcessPool:
             func: The callable to execute.
             args: The arguments to pass to the callable.
             kwargs: The keyword arguments to pass to the callable.
-            need_cpu_cores: The number of CPU cores required for the task.
-            need_cpu_mem: The amount of CPU memory required for the task.
-            need_gpu_cores: The number of CUDA cores required for the task.
-            need_gpu_mem: The amount of GPU memory required for the task.
+            cpu_cores_needed: The number of CPU cores required for the task.
+            cpu_mem_needed: The amount of CPU memory required for the task.
+            gpu_cores_needed: The number of CUDA cores required for the task.
+            gpu_mem_needed: The amount of GPU memory required for the task.
         
         Returns:
             A concurrent.futures.Future representing the given call.
@@ -170,10 +170,10 @@ class ProcessPool:
     def map(
         self, func:Callable[..., Any],
         iterable:Iterable[Any],
-        need_cpu_cores:Union[int, Iterable[int]]=1,
-        need_cpu_mem:Union[int, Iterable[int]]=0,
-        need_gpu_cores:Union[int, Iterable[int]]=0,
-        need_gpu_mem:Union[int, Iterable[int]]=0,
+        cpu_cores_needed:Union[int, Iterable[int]]=1,
+        cpu_mem_needed:Union[int, Iterable[int]]=0,
+        gpu_cores_needed:Union[int, Iterable[int]]=0,
+        gpu_mem_needed:Union[int, Iterable[int]]=0,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]: ...
@@ -184,10 +184,10 @@ class ProcessPool:
             func: A callable that will take as many arguments as there are
                 passed iterables.
             iterable: An iterable whose items will be passed to func as arguments.
-            need_cpu_cores: The number of CPU cores required for the each task.
-            need_cpu_mem: The amount of CPU memory required for each task.
-            need_gpu_cores: The number of CUDA cores required for each task.
-            need_gpu_mem: The amount of GPU memory required for each task.
+            cpu_cores_needed: The number of CPU cores required for the each task.
+            cpu_mem_needed: The amount of CPU memory required for each task.
+            gpu_cores_needed: The number of CUDA cores required for each task.
+            gpu_mem_needed: The amount of GPU memory required for each task.
             timeout: The maximum number of seconds to wait. If None, then there
                 is no limit on the wait time.
             chunksize: If greater than one, the iterables will be chopped into
@@ -206,10 +206,10 @@ class ProcessPool:
     def starmap(
         self, func:Callable[..., Any],
         iterable:Iterable[Any],
-        need_cpu_cores:Union[int, Iterable[int]]=1,
-        need_cpu_mem:Union[int, Iterable[int]]=0,
-        need_gpu_cores:Union[int, Iterable[int]]=0,
-        need_gpu_mem:Union[int, Iterable[int]]=0,
+        cpu_cores_needed:Union[int, Iterable[int]]=1,
+        cpu_mem_needed:Union[int, Iterable[int]]=0,
+        gpu_cores_needed:Union[int, Iterable[int]]=0,
+        gpu_mem_needed:Union[int, Iterable[int]]=0,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]: ...

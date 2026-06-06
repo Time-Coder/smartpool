@@ -126,8 +126,6 @@ class Pool(ABC):
             return task.future
         
     def _try_assign_task(self, task: Task) -> bool:
-        from .worker import Worker
-
         gpu_res = task.gpu_mode_res
         if self._torch_gpu_available and (gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0):
             self._choose_task_worker(task, gpu_res)
@@ -340,24 +338,24 @@ class Pool(ABC):
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
 
-    def _choose_task_device(self, task:Task, res: Resource, dry_run: bool = False) -> Optional[str]:
+    def _choose_task_device(self, task:Task, res: Resource, dry_run: bool) -> Optional[str]:
         from .worker import Worker
 
         with self._sys_info_lock:
             if Worker.total_working_count() == 0:
                 self._sys_info.update()
 
-            need_cpu_cores = self._estimate_need_cpu_cores(task, res)
-            if need_cpu_cores > self._sys_info.cpu_cores_free:
+            cpu_cores_needed = self._estimate_cpu_cores_needes(task, res)
+            if cpu_cores_needed > self._sys_info.cpu_cores_free:
                 if not dry_run:
                     task.device = None
                 return None
 
-            need_cpu_mem = res.cpu_mem
-            if need_cpu_mem > max(0, self._sys_info.cpu_mem_free):
+            cpu_mem_needed = res.cpu_mem
+            if cpu_mem_needed > max(0, self._sys_info.cpu_mem_free):
                 if hasattr(task.worker, "cached_rss"):
                     idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
-                    if need_cpu_mem > self._sys_info.cpu_mem_free + total_hold_mem:
+                    if cpu_mem_needed > self._sys_info.cpu_mem_free + total_hold_mem:
                         if not dry_run:
                             task.device = None
                         return None
@@ -366,7 +364,7 @@ class Pool(ABC):
                         for idle_worker in idle_workers:
                             self._sys_info.cpu_mem_free += idle_worker.cached_rss
                             idle_worker.stop(wait=False, clear=True)
-                            if need_cpu_mem <= self._sys_info.cpu_mem_free:
+                            if cpu_mem_needed <= self._sys_info.cpu_mem_free:
                                 break
                 else:
                     if not dry_run:
@@ -391,8 +389,8 @@ class Pool(ABC):
 
             best_gpu = None
             for gpu in gpus:
-                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id, res)
-                if gpu.mem_free >= res.gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                gpu_cores_needed:int = self._estimate_need_gpu_cores(task, gpu.id, res)
+                if gpu.mem_free >= res.gpu_mem and gpu.n_cores_free >= gpu_cores_needed:
                     if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                         best_gpu = gpu
 
@@ -459,7 +457,7 @@ class Pool(ABC):
         pass
 
     @abstractmethod
-    def _estimate_need_cpu_cores(self, task:Task, res: Resource) -> float:
+    def _estimate_cpu_cores_needes(self, task:Task, res: Resource) -> float:
         pass
 
     @abstractmethod
@@ -485,11 +483,11 @@ class Pool(ABC):
             best_gpu = None
             need_best_gpu_cores:int = 0
             for gpu in gpus:
-                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id, gpu_res)
-                if gpu.mem_free >= gpu_res.gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                gpu_cores_needed:int = self._estimate_need_gpu_cores(task, gpu.id, gpu_res)
+                if gpu.mem_free >= gpu_res.gpu_mem and gpu.n_cores_free >= gpu_cores_needed:
                     if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                         best_gpu = gpu
-                        need_best_gpu_cores = need_gpu_cores
+                        need_best_gpu_cores = gpu_cores_needed
 
             if best_gpu is None:
                 return

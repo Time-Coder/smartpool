@@ -135,7 +135,7 @@ class ThreadPool(Pool):
         else:
             return res.gpu_cores
 
-    def _estimate_need_cpu_cores(self, task:Task, res: Resource) -> int:
+    def _estimate_cpu_cores_needes(self, task:Task, res: Resource) -> int:
         if self._has_gil():
             max_in = self._max_used_cpu_cores_in_python()
             return max(0, res.cpu_cores_in_python - max_in) + res.cpu_cores_out_of_python

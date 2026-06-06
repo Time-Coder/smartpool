@@ -58,7 +58,7 @@ class InterpreterPool(Pool):
                 self._sys_info.gpu_infos[task_gpu_id].n_cores_free += res.gpu_cores
                 self._sys_info.gpu_infos[task_gpu_id].mem_free += res.gpu_mem
 
-    def _estimate_need_cpu_cores(self, task:Task, res: Resource) -> float:
+    def _estimate_cpu_cores_needes(self, task:Task, res: Resource) -> float:
         return res.cpu_cores
 
     def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> float:

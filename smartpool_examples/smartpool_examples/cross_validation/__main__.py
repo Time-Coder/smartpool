@@ -146,10 +146,10 @@ def main(
                 future = process_pool.submit(
                     train_single_fold,
                     args=task_args,
-                    need_cpu_cores=1,
-                    need_cpu_mem=1.1*DataSize.GB,
-                    need_gpu_cores=1000,
-                    need_gpu_mem=0.2*DataSize.GB
+                    cpu_cores_needed=1,
+                    cpu_mem_needed=1.1*DataSize.GB,
+                    gpu_cores_needed=1000,
+                    gpu_mem_needed=0.2*DataSize.GB
                 )
             elif pool.startswith("concurrent.futures."):
                 future = process_pool.submit(train_single_fold, *task_args, best_device if i % max_workers < 5 else 'cpu')
