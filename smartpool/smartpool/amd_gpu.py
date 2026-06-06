@@ -24,6 +24,12 @@ class AMDGPUInfo(GPUInfo):
     _vram_ranges: Dict[int, int] = {}
     _device_info: List[Dict] = []
 
+    supported_onnx_providers = [
+        "ROCMExecutionProvider",
+        "MIGraphXExecutionProvider",
+        "DmlExecutionProvider"
+    ]
+
     def __init__(self, device_id: int):
         GPUInfo.__init__(self, device_id)
         self._ensure_init()

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import uuid
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Type, Optional
 
 
 class GPUVendor(Enum):
@@ -58,6 +58,8 @@ class GPUInfoSnapshot:
 
 
 class GPUInfo(ABC):
+
+    supported_onnx_providers = []
 
     def __init__(self, device_id: int):
         self._device_id = device_id
@@ -123,6 +125,20 @@ class GPUInfo(ABC):
     @abstractmethod
     def vendor(self) -> GPUVendor:
         pass
+
+    @staticmethod
+    def gpuinfo_class(device_prefix:str)->Type[GPUInfo]:
+        if device_prefix == "cuda":
+            from .nvidia_gpu import NvidiaGPUInfo
+            return NvidiaGPUInfo
+        elif device_prefix == "xpu":
+            from .intel_gpu import IntelGPUInfo
+            return IntelGPUInfo
+        elif device_prefix == "hip":
+            from .amd_gpu import AMDGPUInfo
+            return AMDGPUInfo
+        else:
+            raise ValueError(f"Unknown device prefix: {device_prefix}")
 
     @property
     def device_id(self) -> int:

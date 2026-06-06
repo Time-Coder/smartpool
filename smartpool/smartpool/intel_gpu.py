@@ -14,6 +14,12 @@ class IntelGPUInfo(GPUInfo):
     _initialized = False
     _device_info: List[Dict] = []
 
+    supported_onnx_providers = [
+        "OpenVINOExecutionProvider",
+        "DnnlExecutionProvider",
+        "DmlExecutionProvider"
+    ]
+
     def __init__(self, device_id: int):
         GPUInfo.__init__(self, device_id)
         self._ensure_init()

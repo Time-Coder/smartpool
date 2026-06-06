@@ -110,7 +110,7 @@ class Worker(ABC):
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]]
     ):
-        from .utils import _set_best_device
+        from .utils import _set_best_device, _set_best_onnx_provider
         
 
         if initializer is not None:
@@ -131,8 +131,9 @@ class Worker(ABC):
             if task is None:
                 break
 
-            task_id, task_device, func, args, kwargs = task
+            task_id, task_device, onnx_provider, func, args, kwargs = task
             _set_best_device(task_device)
+            _set_best_onnx_provider(onnx_provider)
 
             try:
                 result = func(*args, **kwargs)

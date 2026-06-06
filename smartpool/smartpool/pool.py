@@ -112,7 +112,8 @@ class Pool(ABC):
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
-        use_torch: Optional[bool] = None
+        use_torch: Optional[bool] = None,
+        use_onnx: bool = False
     )->Future:
         import threading
         from .task import Task
@@ -143,6 +144,7 @@ class Pool(ABC):
                 cpu_mode_res=cpu_mode_res,
                 gpu_mode_res=gpu_mode_res,
                 use_torch=use_torch,
+                use_onnx=use_onnx,
                 calculate_module_deps=self._need_module_deps
             )
             self._validate_resource_feasibility(task)

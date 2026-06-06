@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TypeVar, Protocol, Optional, TYPE_CHECKING
+from typing import List, Tuple, Dict, Any, TypeVar, Protocol, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from torch.cuda import Stream
@@ -7,8 +7,8 @@ if TYPE_CHECKING:
 
 T = TypeVar('T')
 class QueueLike(Protocol[T]):
-    def put(self, item: T) -> None: ...
-    def get(self) -> T: ...
+    def put(task, item: T) -> None: ...
+    def get(task) -> T: ...
 
 
 _has_gil = None
@@ -87,6 +87,7 @@ def batched(iterable, chunksize:int):
 _best_device_lock = None
 _best_device = {}
 _best_stream = {}
+_best_onnx_providers = {}
 
 def _set_best_device(device:str, tid=None)->None:
     import threading
@@ -135,3 +136,27 @@ def best_stream()->Optional[Stream]:
     tid = threading.get_ident()
     with _best_device_lock:
         return _best_stream.get(tid, None)
+
+def _set_best_onnx_provider(providers, tid=None)->None:
+    import threading
+
+    global _best_device_lock
+    if _best_device_lock is None:
+        _best_device_lock = threading.Lock()
+
+    if tid is None:
+        tid = threading.get_ident()
+
+    with _best_device_lock:
+        _best_onnx_providers[tid] = providers
+
+def best_onnx_provider():
+    import threading
+
+    global _best_device_lock
+    if _best_device_lock is None:
+        _best_device_lock = threading.Lock()
+
+    tid = threading.get_ident()
+    with _best_device_lock:
+        return _best_onnx_providers.get(tid, None)

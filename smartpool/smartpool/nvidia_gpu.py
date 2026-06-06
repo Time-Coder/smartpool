@@ -13,6 +13,12 @@ class NvidiaGPUInfo(GPUInfo):
     _initialized = False
     _handles = {}
 
+    supported_onnx_providers = [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+        "DmlExecutionProvider"
+    ]
+
     def __init__(self, device_id: int):
         GPUInfo.__init__(self, device_id)
         self._handle = None
