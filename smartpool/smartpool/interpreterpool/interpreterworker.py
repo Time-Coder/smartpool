@@ -15,7 +15,7 @@ class InterpreterWorker(Worker):
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
-        torch_cuda_available:bool
+        torch_gpu_available:bool
     ):
         import concurrent.interpreters as interpreters
 
@@ -30,7 +30,7 @@ class InterpreterWorker(Worker):
             initkwargs=initkwargs
         )
 
-        if torch_cuda_available:
+        if torch_gpu_available:
             self.change_device_cmd_queue:Optional[Queue[Optional[str]]] = interpreters.create_queue()
         else:
             self.change_device_cmd_queue:Optional[Queue[Optional[str]]] = None

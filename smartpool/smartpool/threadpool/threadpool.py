@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
 if TYPE_CHECKING:
     from ..task import Task
+    from ..utils import Resource
     from .threadworker import ThreadWorker
 
 
@@ -34,24 +35,25 @@ class ThreadPool(Pool):
         )
 
         self._thread_name_prefix:str = thread_name_prefix
-        self.__max_used_cpu_cores = None
+        self.__max_used_cpu_cores_in_python = None
         self.__max_used_gpu_cores = {}
 
-    def _max_used_cpu_cores(self)->int:
-        if self.__max_used_cpu_cores is not None:
-            return self.__max_used_cpu_cores
+    def _max_used_cpu_cores_in_python(self)->int:
+        if self.__max_used_cpu_cores_in_python is not None:
+            return self.__max_used_cpu_cores_in_python
 
-        max_used_cores = 0
+        max_in = 0
         for task in self._tasks.values():
             if task.worker is None or not task.worker.is_working:
                 continue
 
-            if task.need_cpu_cores > max_used_cores:
-                max_used_cores = task.need_cpu_cores
+            task_in = task.effective_res.cpu_cores_in_python
+            if task_in > max_in:
+                max_in = task_in
 
-        self.__max_used_cpu_cores = max_used_cores
-        return max_used_cores
-    
+        self.__max_used_cpu_cores_in_python = max_in
+        return max_in
+
     def _max_used_gpu_cores(self, gpu_id:int)->int:
         if gpu_id in self.__max_used_gpu_cores:
             return self.__max_used_gpu_cores[gpu_id]
@@ -61,8 +63,9 @@ class ThreadPool(Pool):
             if task.worker is None or not task.worker.is_working or task.gpu_id != gpu_id:
                 continue
 
-            if task.need_gpu_cores > max_used_cores:
-                max_used_cores = task.need_gpu_cores
+            task_gpu = task.effective_res.gpu_cores
+            if task_gpu > max_used_cores:
+                max_used_cores = task_gpu
 
         self.__max_used_gpu_cores[gpu_id] = max_used_cores
         return max_used_cores
@@ -73,66 +76,71 @@ class ThreadPool(Pool):
 
     def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:
-            if not self._has_gil():
-                self._sys_info.cpu_cores_free -= task.need_cpu_cores
-            else:
-                max_used_cpu_cores = self._max_used_cpu_cores()
-                if task.need_cpu_cores > max_used_cpu_cores:
-                    self.__max_used_cpu_cores = task.need_cpu_cores
-                    self._sys_info.cpu_cores_free -= (task.need_cpu_cores - max_used_cpu_cores)
+            res = task.effective_res
+            task.estimated_need_cpu_mem = res.cpu_mem
 
-            self._sys_info.cpu_mem_free -= task.need_cpu_mem
+            if not self._has_gil():
+                self._sys_info.cpu_cores_free -= res.cpu_cores
+            else:
+                max_in = self._max_used_cpu_cores_in_python()
+                if res.cpu_cores_in_python > max_in:
+                    self.__max_used_cpu_cores_in_python = res.cpu_cores_in_python
+                    self._sys_info.cpu_cores_free -= (res.cpu_cores_in_python - max_in)
+                self._sys_info.cpu_cores_free -= res.cpu_cores_out_of_python
+
+            self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
             task_gpu_id:int = task.gpu_id
             if task_gpu_id != -1:
                 if not self._has_gil():
-                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
+                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= res.gpu_cores
                 else:
-                    max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
-                    if task.need_gpu_cores > max_used_gpu_cores:
-                        self.__max_used_gpu_cores[task_gpu_id] = task.need_gpu_cores
-                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= (task.need_gpu_cores - max_used_gpu_cores)
+                    max_used_gpu = self._max_used_gpu_cores(task_gpu_id)
+                    if res.gpu_cores > max_used_gpu:
+                        self.__max_used_gpu_cores[task_gpu_id] = res.gpu_cores
+                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= (res.gpu_cores - max_used_gpu)
 
-                self._sys_info.gpu_infos[task_gpu_id].mem_free -= task.need_gpu_mem
+                self._sys_info.gpu_infos[task_gpu_id].mem_free -= res.gpu_mem
 
     def _release_resource(self, task:Task)->None:
         with self._sys_info_lock:
+            res = task.effective_res
+
             if not self._has_gil():
-                self._sys_info.cpu_cores_free += task.need_cpu_cores
+                self._sys_info.cpu_cores_free += res.cpu_cores
             else:
-                max_used_cpu_cores = self._max_used_cpu_cores()
-                if task.need_cpu_cores >= max_used_cpu_cores:
-                    self.__max_used_cpu_cores = None
-                    max_used_cpu_cores = self._max_used_cpu_cores()
-                    self._sys_info.cpu_cores_free += (task.need_cpu_cores - max_used_cpu_cores)
-                
-            self._sys_info.cpu_mem_free += task.need_cpu_mem
+                max_in = self._max_used_cpu_cores_in_python()
+                if res.cpu_cores_in_python >= max_in:
+                    self.__max_used_cpu_cores_in_python = None
+                    max_in = self._max_used_cpu_cores_in_python()
+                    self._sys_info.cpu_cores_free += (res.cpu_cores_in_python - max_in)
+                self._sys_info.cpu_cores_free += res.cpu_cores_out_of_python
+
+            self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
             task_gpu_id:int = task.gpu_id
             if task_gpu_id != -1:
                 if not self._has_gil():
-                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
+                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free += res.gpu_cores
                 else:
-                    max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
-                    if task.need_gpu_cores >= max_used_gpu_cores:
+                    max_used_gpu = self._max_used_gpu_cores(task_gpu_id)
+                    if res.gpu_cores >= max_used_gpu:
                         self.__max_used_gpu_cores[task_gpu_id] = None
-                        max_used_gpu_cores = self._max_used_gpu_cores(task_gpu_id)
-                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free += (task.need_gpu_cores - max_used_gpu_cores)
+                        max_used_gpu = self._max_used_gpu_cores(task_gpu_id)
+                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free += (res.gpu_cores - max_used_gpu)
 
-                self._sys_info.gpu_infos[task_gpu_id].mem_free += task.need_gpu_mem
+                self._sys_info.gpu_infos[task_gpu_id].mem_free += res.gpu_mem
 
-    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int)->int:
+    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> int:
         if self._has_gil():
-            return max(0, task.need_gpu_cores - self._max_used_gpu_cores(gpu_id))
+            return max(0, res.gpu_cores - self._max_used_gpu_cores(gpu_id))
         else:
-            return task.need_gpu_cores
+            return res.gpu_cores
 
-    def _estimate_need_cpu_cores(self, task:Task)->int:
+    def _estimate_need_cpu_cores(self, task:Task, res: Resource) -> int:
         if self._has_gil():
-            return max(0, task.need_cpu_cores - self._max_used_cpu_cores())
+            max_in = self._max_used_cpu_cores_in_python()
+            return max(0, res.cpu_cores_in_python - max_in) + res.cpu_cores_out_of_python
         else:
-            return task.need_cpu_cores
-        
-    def _estimate_need_cpu_mem(self, task:Task)->int:
-        return task.need_cpu_mem
+            return res.cpu_cores
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)

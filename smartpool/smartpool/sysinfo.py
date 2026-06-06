@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
-    from .gpuinfos import GPUInfoSnapshot
+    from .gpuinfo import GPUInfoSnapshot
 
 
 class SysInfo:

@@ -6,19 +6,19 @@ from typing import Tuple, Any, Dict, Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .worker import Worker
+    from .utils import Resource
 
 
 class Task:
 
-    def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any], need_cpu_cores:float, need_cpu_mem:float, need_gpu_cores:float, need_gpu_mem:float, calculate_module_deps:bool):
+    def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any],
+                 cpu_mode_res: Resource, gpu_mode_res: Resource, calculate_module_deps:bool):
         self.id:str = str(uuid.uuid4())
         self.func:Callable[..., Any] = func
         self.args:Tuple[Any] = args
         self.kwargs:Dict[str, Any] = kwargs
-        self.need_cpu_cores:int = need_cpu_cores
-        self.need_cpu_mem:int = need_cpu_mem
-        self.need_gpu_cores:int = need_gpu_cores
-        self.need_gpu_mem:int = need_gpu_mem
+        self.cpu_mode_res: Resource = cpu_mode_res
+        self.gpu_mode_res: Resource = gpu_mode_res
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
         self.module_deps:Dict[str, int] = {}
@@ -32,14 +32,24 @@ class Task:
         self.mem_before_enter:int = 0
         self.future = Future()
 
+    @property
+    def effective_res(self) -> Resource:
+        if self.device and self.device != "cpu":
+            return self.gpu_mode_res
+        return self.cpu_mode_res
+
     def info(self):
         return self.id, self.device, self.func, self.args, self.kwargs
 
     @property
     def gpu_id(self)->int:
-        if isinstance(self.device, str) and self.device.startswith("cuda:"):
-            return int(self.device[len("cuda:"):])
-        
+        if isinstance(self.device, str) and ":" in self.device:
+            parts = self.device.split(":")
+            if len(parts) == 2:
+                try:
+                    return int(parts[1])
+                except (ValueError, IndexError):
+                    pass
         return -1
 
     def exec(self)->Tuple[bool, Any]:

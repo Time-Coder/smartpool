@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
 import weakref
 
+from .utils import Resource
+
 if TYPE_CHECKING:
     import threading
     from concurrent.futures import Future
@@ -45,9 +47,9 @@ class Pool(ABC):
 
         if use_torch:
             import torch
-            self._torch_cuda_available = torch.cuda.is_available()
+            self._torch_gpu_available = torch.cuda.is_available()
         else:
-            self._torch_cuda_available = False
+            self._torch_gpu_available = False
 
         if not max_workers:
             max_workers = os.cpu_count()
@@ -80,8 +82,8 @@ class Pool(ABC):
     def submit(
         self, func:Callable[..., Any],
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
-        need_cpu_cores:int=1, need_cpu_mem:int=0,
-        need_gpu_cores:int=0, need_gpu_mem:int=0
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None
     )->Future:
         import threading
         from .task import Task
@@ -92,6 +94,12 @@ class Pool(ABC):
         if kwargs is None:
             kwargs = {}
 
+        if cpu_mode_res is None:
+            cpu_mode_res = Resource(cpu_cores_in_python=1)
+
+        if gpu_mode_res is None:
+            gpu_mode_res = cpu_mode_res
+
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot submit after shutdown")
@@ -100,21 +108,13 @@ class Pool(ABC):
                 func=func,
                 args=args,
                 kwargs=kwargs,
-                need_cpu_cores=need_cpu_cores,
-                need_cpu_mem=need_cpu_mem,
-                need_gpu_cores=need_gpu_cores,
-                need_gpu_mem=need_gpu_mem,
+                cpu_mode_res=cpu_mode_res,
+                gpu_mode_res=gpu_mode_res,
                 calculate_module_deps=self._need_module_deps
             )
             self._tasks[task.id] = task
-            
-            worker = self._choose_task_worker(task)
-            if worker is None:
-                self._delayed_tasks.append(task)
-                return task.future
 
-            device = self._choose_task_device(task)
-            if device is None:
+            if not self._try_assign_task(task):
                 self._delayed_tasks.append(task)
                 return task.future
             
@@ -125,6 +125,33 @@ class Pool(ABC):
 
             return task.future
         
+    def _try_assign_task(self, task: Task) -> bool:
+        from .worker import Worker
+
+        gpu_res = task.gpu_mode_res
+        if self._torch_gpu_available and (gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0):
+            self._choose_task_worker(task, gpu_res)
+            if task.worker is not None:
+                device = self._choose_task_device(task, gpu_res, dry_run=True)
+                if device is not None:
+                    device = self._choose_task_device(task, gpu_res, dry_run=False)
+                    if device is not None:
+                        return True
+
+                task.worker = None
+                task.modules_overlap_ratio = 0.0
+
+        cpu_res = task.cpu_mode_res
+        self._choose_task_worker(task, cpu_res)
+        if task.worker is not None:
+            device = self._choose_task_device(task, cpu_res, dry_run=False)
+            if device is not None:
+                return True
+
+        task.worker = None
+        task.modules_overlap_ratio = 0.0
+        return False
+
     def _init_sys_info(self)->None:
         if Pool._sys_info is not None:
             return
@@ -165,13 +192,20 @@ class Pool(ABC):
             for future in futures:
                 future.cancel()
 
+    def _batch_resource(self, resources: List[Resource]) -> Resource:
+        return Resource(
+            cpu_cores_in_python=max(r.cpu_cores_in_python for r in resources),
+            cpu_cores_out_of_python=max(r.cpu_cores_out_of_python for r in resources),
+            cpu_mem=max(r.cpu_mem for r in resources),
+            gpu_cores=max(r.gpu_cores for r in resources),
+            gpu_mem=max(r.gpu_mem for r in resources),
+        )
+
     def starmap(
         self, func:Callable[..., Any],
         args_iterables:Iterable[Tuple[Any, ...]],
-        need_cpu_cores:Union[int, Iterable[int]]=1,
-        need_cpu_mem:Union[int, Iterable[int]]=0,
-        need_gpu_cores:Union[int, Iterable[int]]=0,
-        need_gpu_mem:Union[int, Iterable[int]]=0,
+        cpu_mode_res:Union[Resource, Iterable[Resource]] = Resource(cpu_cores_in_python=1),
+        gpu_mode_res:Union[Resource, Iterable[Resource], None]=None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]:
@@ -182,17 +216,13 @@ class Pool(ABC):
         from concurrent.futures.process import _process_chunk, _chain_from_iterable_of_lists
         from .utils import batched
 
-        if not isinstance(need_cpu_cores, Iterable):
-            need_cpu_cores = itertools.repeat(need_cpu_cores)
+        if not isinstance(cpu_mode_res, Iterable):
+            cpu_mode_res = itertools.repeat(cpu_mode_res)
 
-        if not isinstance(need_cpu_mem, Iterable):
-            need_cpu_mem = itertools.repeat(need_cpu_mem)
-
-        if not isinstance(need_gpu_cores, Iterable):
-            need_gpu_cores = itertools.repeat(need_gpu_cores)
-
-        if not isinstance(need_gpu_mem, Iterable):
-            need_gpu_mem = itertools.repeat(need_gpu_mem)
+        if gpu_mode_res is None:
+            gpu_mode_res = cpu_mode_res
+        elif not isinstance(gpu_mode_res, Iterable):
+            gpu_mode_res = itertools.repeat(gpu_mode_res)
 
         if chunksize < 1:
             raise ValueError("chunksize must be >= 1.")
@@ -203,15 +233,13 @@ class Pool(ABC):
 
         target_func = partial(_process_chunk, func)
         futures:List[Future] = []
-        iterator = zip(args_iterables, need_cpu_cores, need_cpu_mem, need_gpu_cores, need_gpu_mem)
+        iterator = zip(args_iterables, cpu_mode_res, gpu_mode_res)
         for batch in batched(iterator, chunksize):
-            args_batch, cpu_cores_batch, cpu_mem_batch, gpu_cores_batch, gpu_mem_batch = zip(*batch)
+            args_batch, cpu_res_batch, gpu_res_batch = zip(*batch)
             future = self.submit(
                 target_func, args=(args_batch,),
-                need_cpu_cores=max(cpu_cores_batch),
-                need_cpu_mem=max(cpu_mem_batch),
-                need_gpu_cores=max(gpu_cores_batch),
-                need_gpu_mem=max(gpu_mem_batch)
+                cpu_mode_res=self._batch_resource(cpu_res_batch),
+                gpu_mode_res=self._batch_resource(gpu_res_batch),
             )
             futures.append(future)
 
@@ -220,10 +248,8 @@ class Pool(ABC):
     def map(
         self, func:Callable[..., Any],
         iterable:Iterable[Any],
-        need_cpu_cores:Union[int, Iterable[int]]=1,
-        need_cpu_mem:Union[int, Iterable[int]]=0,
-        need_gpu_cores:Union[int, Iterable[int]]=0,
-        need_gpu_mem:Union[int, Iterable[int]]=0,
+        cpu_mode_res:Union[Resource, Iterable[Resource]] = Resource(cpu_cores_in_python=1),
+        gpu_mode_res:Union[Resource, Iterable[Resource], None]=None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]:
@@ -232,10 +258,8 @@ class Pool(ABC):
         return self.starmap(
             func=func,
             args_iterables=args_iterable,
-            need_cpu_cores=need_cpu_cores,
-            need_cpu_mem=need_cpu_mem,
-            need_gpu_cores=need_gpu_cores,
-            need_gpu_mem=need_gpu_mem,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
             timeout=timeout,
             chunksize=chunksize
         )
@@ -297,12 +321,7 @@ class Pool(ABC):
                     should_pop_indices.append(i)
                     continue
 
-                used_worker = self._choose_task_worker(delayed_task)
-                if used_worker is None:
-                    continue
-
-                device = self._choose_task_device(delayed_task)
-                if device is None:
+                if not self._try_assign_task(delayed_task):
                     continue
 
                 self._put_task(delayed_task)
@@ -314,69 +333,79 @@ class Pool(ABC):
             for task_id in cancelled_task_ids:
                 del self._tasks[task_id] 
 
-        if self._torch_cuda_available:
+        if self._torch_gpu_available:
             for task in self._tasks.values():
                 self._try_move_to_gpu(task)
 
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
 
-    def _choose_task_device(self, task:Task)->Optional[str]:
+    def _choose_task_device(self, task:Task, res: Resource, dry_run: bool = False) -> Optional[str]:
         from .worker import Worker
 
         with self._sys_info_lock:
             if Worker.total_working_count() == 0:
                 self._sys_info.update()
 
-            need_cpu_cores = self._estimate_need_cpu_cores(task)
+            need_cpu_cores = self._estimate_need_cpu_cores(task, res)
             if need_cpu_cores > self._sys_info.cpu_cores_free:
-                task.device = None
-                task.worker = None
+                if not dry_run:
+                    task.device = None
                 return None
 
-            task.estimated_need_cpu_mem = self._estimate_need_cpu_mem(task)
-            if task.estimated_need_cpu_mem > max(0, self._sys_info.cpu_mem_free):
+            need_cpu_mem = res.cpu_mem
+            if need_cpu_mem > max(0, self._sys_info.cpu_mem_free):
                 if hasattr(task.worker, "cached_rss"):
                     idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
-                    if task.estimated_need_cpu_mem > self._sys_info.cpu_mem_free + total_hold_mem:
-                        task.device = None
-                        task.worker = None
+                    if need_cpu_mem > self._sys_info.cpu_mem_free + total_hold_mem:
+                        if not dry_run:
+                            task.device = None
                         return None
                     
-                    for idle_worker in idle_workers:
-                        self._sys_info.cpu_mem_free += idle_worker.cached_rss
-                        idle_worker.stop(wait=False, clear=True)
-                        if task.estimated_need_cpu_mem <= self._sys_info.cpu_mem_free:
-                            break
+                    if not dry_run:
+                        for idle_worker in idle_workers:
+                            self._sys_info.cpu_mem_free += idle_worker.cached_rss
+                            idle_worker.stop(wait=False, clear=True)
+                            if need_cpu_mem <= self._sys_info.cpu_mem_free:
+                                break
                 else:
-                    task.device = None
-                    task.worker = None
+                    if not dry_run:
+                        task.device = None
                     return None
 
-            if not self._torch_cuda_available or (task.need_gpu_cores == 0 and task.need_gpu_mem == 0):
-                task.device = "cpu"
+            if res.gpu_cores == 0 and res.gpu_mem == 0:
+                if not dry_run:
+                    task.device = "cpu"
                 return "cpu"
+
+            if not self._torch_gpu_available:
+                if not dry_run:
+                    task.device = None
+                return None
 
             gpus = self._sys_info.gpu_infos
             if not gpus:
-                task.device = "cpu"
-                return "cpu"
+                if not dry_run:
+                    task.device = None
+                return None
 
             best_gpu = None
             for gpu in gpus:
-                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id)
-                if gpu.mem_free >= task.need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id, res)
+                if gpu.mem_free >= res.gpu_mem and gpu.n_cores_free >= need_gpu_cores:
                     if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                         best_gpu = gpu
 
         if best_gpu is None:
-            task.device = "cpu"
+            if not dry_run:
+                task.device = "cpu"
             return "cpu"
 
-        task.device = best_gpu.device
-        return task.device
+        if not dry_run:
+            task.device = best_gpu.device
+        return best_gpu.device
 
-    def _choose_task_worker(self, task:Task)->Optional[Worker]:
+    def _choose_task_worker(self, task:Task, res: Resource) -> Optional[Worker]:
         best_worker:Optional[Worker] = None
         task.modules_overlap_ratio = 0.0
         max_overlap_size = 0.0
@@ -388,14 +417,14 @@ class Pool(ABC):
                 task.worker = worker
                 return worker
 
-            if task.need_cpu_mem == 0:
+            if res.cpu_mem == 0:
                 task.modules_overlap_ratio = 1.0
                 task.worker = worker
                 return worker
 
             current_overlap_ratio = worker.overlap_modules_ratio(task)
             if hasattr(task.worker, "cached_rss"):
-                current_overlap_size = current_overlap_ratio * task.worker.cached_rss
+                current_overlap_size = current_overlap_ratio * worker.cached_rss
                 if best_worker is None or current_overlap_size > max_overlap_size:
                     task.modules_overlap_ratio = current_overlap_ratio
                     max_overlap_size = current_overlap_size
@@ -426,15 +455,11 @@ class Pool(ABC):
         pass
 
     @abstractmethod
-    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int)->float:
+    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> float:
         pass
 
     @abstractmethod
-    def _estimate_need_cpu_cores(self, task:Task)->float:
-        pass
-    
-    @abstractmethod
-    def _estimate_need_cpu_mem(self, task:Task)->float:
+    def _estimate_need_cpu_cores(self, task:Task, res: Resource) -> float:
         pass
 
     @abstractmethod
@@ -442,10 +467,11 @@ class Pool(ABC):
         pass
 
     def _try_move_to_gpu(self, task:Task)->None:
+        gpu_res = task.gpu_mode_res
         if (
             task.device is None or
-            task.device.startswith("cuda") or
-            task.need_gpu_cores == 0 or
+            task.device != "cpu" or
+            gpu_res.gpu_cores == 0 or
             task.worker is None or
             not task.worker.is_working
         ):
@@ -455,14 +481,12 @@ class Pool(ABC):
             gpus = self._sys_info.gpu_infos
             if not gpus:
                 return
-            
-            need_gpu_mem:int = task.need_gpu_mem
 
             best_gpu = None
             need_best_gpu_cores:int = 0
             for gpu in gpus:
-                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id)
-                if gpu.mem_free >= need_gpu_mem and gpu.n_cores_free >= need_gpu_cores:
+                need_gpu_cores:int = self._estimate_need_gpu_cores(task, gpu.id, gpu_res)
+                if gpu.mem_free >= gpu_res.gpu_mem and gpu.n_cores_free >= need_gpu_cores:
                     if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                         best_gpu = gpu
                         need_best_gpu_cores = need_gpu_cores
@@ -474,7 +498,7 @@ class Pool(ABC):
             worker.change_device(best_gpu.device)
             task.device = best_gpu.device
             best_gpu.n_cores_free -= need_best_gpu_cores
-            best_gpu.mem_free -= task.need_gpu_mem
+            best_gpu.mem_free -= gpu_res.gpu_mem
 
     @abstractmethod
     def _add_worker(self)->Worker:

@@ -18,7 +18,7 @@ class ProcessWorker(Worker):
         initializer:Optional[Callable[..., Any]],
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
-        use_torch:bool, torch_cuda_available:bool
+        use_torch:bool, torch_gpu_available:bool
     ):
         if use_torch:
             from torch.multiprocessing.queue import SimpleQueue
@@ -36,7 +36,7 @@ class ProcessWorker(Worker):
             initkwargs=initkwargs
         )
 
-        if torch_cuda_available:
+        if torch_gpu_available:
             self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=ctx)
         else:
             self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = None

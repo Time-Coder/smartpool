@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
 if TYPE_CHECKING:
     from ..task import Task
+    from ..utils import Resource
     from .interpreterworker import InterpreterWorker
 
 
@@ -36,30 +37,32 @@ class InterpreterPool(Pool):
 
     def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:
-            self._sys_info.cpu_cores_free -= task.need_cpu_cores
+            res = task.effective_res
+            self._sys_info.cpu_cores_free -= res.cpu_cores
+
+            task.estimated_need_cpu_mem = (1 - task.modules_overlap_ratio) * res.cpu_mem
             self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
+
             task_gpu_id:int = task.gpu_id
             if task_gpu_id != -1:
-                self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= task.need_gpu_cores
-                self._sys_info.gpu_infos[task_gpu_id].mem_free -= task.need_gpu_mem
+                self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= res.gpu_cores
+                self._sys_info.gpu_infos[task_gpu_id].mem_free -= res.gpu_mem
 
     def _release_resource(self, task:Task)->None:
         with self._sys_info_lock:
-            self._sys_info.cpu_cores_free += task.need_cpu_cores
+            res = task.effective_res
+            self._sys_info.cpu_cores_free += res.cpu_cores
             self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
             task_gpu_id:int = task.gpu_id
             if task_gpu_id != -1:
-                self._sys_info.gpu_infos[task_gpu_id].n_cores_free += task.need_gpu_cores
-                self._sys_info.gpu_infos[task_gpu_id].mem_free += task.need_gpu_mem
+                self._sys_info.gpu_infos[task_gpu_id].n_cores_free += res.gpu_cores
+                self._sys_info.gpu_infos[task_gpu_id].mem_free += res.gpu_mem
 
-    def _estimate_need_cpu_cores(self, task:Task)->float:
-        return task.need_cpu_cores
-    
-    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int)->float:
-        return task.need_gpu_cores
-    
-    def _estimate_need_cpu_mem(self, task:Task)->float:
-        return (1 - task.modules_overlap_ratio) * task.need_cpu_mem
+    def _estimate_need_cpu_cores(self, task:Task, res: Resource) -> float:
+        return res.cpu_cores
+
+    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> float:
+        return res.gpu_cores
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)
@@ -78,7 +81,7 @@ class InterpreterPool(Pool):
             initializer=self._initializer,
             initargs=self._initargs,
             initkwargs=self._initkwargs,
-            torch_cuda_available=self._torch_cuda_available
+            torch_gpu_available=self._torch_gpu_available
         )
         self._workers.append(worker)
         return worker

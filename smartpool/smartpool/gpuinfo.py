@@ -19,6 +19,8 @@ class GPUInfoSnapshot:
         self.uuid: Optional[uuid.UUID] = None
         self.serial: Optional[str] = None
         self.driver_version: Optional[str] = None
+        self.vendor: Optional[str] = None
+        self.device: Optional[str] = None
         self.mem_total: Optional[int] = None
         self.mem_used: Optional[int] = None
         self.load: Optional[float] = None
@@ -27,6 +29,22 @@ class GPUInfoSnapshot:
         self.display_mode: Optional[bool] = None
         self.n_cores: Optional[int] = None
         self.n_cores_used: Optional[int] = None
+
+    @property
+    def id(self) -> Optional[int]:
+        return self.device_id
+
+    @property
+    def mem_free(self) -> Optional[int]:
+        if self.mem_total is None or self.mem_used is None:
+            return None
+        return self.mem_total - self.mem_used
+
+    @property
+    def n_cores_free(self) -> Optional[int]:
+        if self.n_cores is None or self.n_cores_used is None:
+            return None
+        return self.n_cores - self.n_cores_used
 
 
 class GPUInfo(ABC):
@@ -259,6 +277,9 @@ class GPUInfo(ABC):
             n_cores_used = True
 
         snapshot = GPUInfoSnapshot()
+        snapshot.device_id = self.device_id
+        snapshot.vendor = self.vendor.value
+        snapshot.device = self.device
 
         if name:
             snapshot.name = self.name

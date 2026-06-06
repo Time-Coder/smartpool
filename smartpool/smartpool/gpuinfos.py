@@ -60,28 +60,46 @@ class GPUInfos(metaclass=MetaGPUInfos):
             gpu.update()
 
     @staticmethod
-    def snapshot() -> List[dict]:
+    def snapshot(
+        name: bool = False,
+        uuid: bool = False,
+        serial: bool = False,
+        driver_version: bool = False,
+        mem_total: bool = False,
+        mem_used: bool = False,
+        load: bool = False,
+        temperature: bool = False,
+        display_mode: bool = False,
+        display_active: bool = False,
+        n_cores: bool = False,
+        n_cores_used: bool = False,
+    ) -> List[GPUInfoSnapshot]:
+        if not any([name, uuid, serial, driver_version, mem_total, mem_used,
+                     load, temperature, display_mode, display_active,
+                     n_cores, n_cores_used]):
+            name = True
+            uuid = True
+            serial = True
+            driver_version = True
+            mem_total = True
+            mem_used = True
+            load = True
+            temperature = True
+            display_mode = True
+            display_active = True
+            n_cores = True
+            n_cores_used = True
+
         result = []
         for gpu in GPUInfos:
             gpu.update()
-            snapshot = {
-                'vendor': gpu.vendor.value,
-                'id': gpu.device_id,
-                'name': gpu.name,
-                'device': gpu.device,
-                'uuid': str(gpu.uuid) if gpu.uuid else None,
-                'serial': gpu.serial,
-                'driver_version': gpu.driver_version,
-                'mem_total': gpu.mem_total,
-                'mem_used': gpu.mem_used,
-                'mem_free': gpu.mem_free,
-                'load': gpu.load,
-                'temperature': gpu.temperature,
-                'n_cores': gpu.n_cores,
-                'n_cores_used': gpu.n_cores_used,
-                'n_cores_free': gpu.n_cores_free,
-            }
-            result.append(snapshot)
+            result.append(gpu.snapshot(
+                name=name, uuid=uuid, serial=serial,
+                driver_version=driver_version, mem_total=mem_total,
+                mem_used=mem_used, load=load, temperature=temperature,
+                display_mode=display_mode, display_active=display_active,
+                n_cores=n_cores, n_cores_used=n_cores_used,
+            ))
         return result
 
     @staticmethod
