@@ -38,7 +38,7 @@ if __name__ == "__main__":
 ### Resource-Aware Task Scheduling
 
 ```python
-from smartpool import ProcessPool, DataSize
+from smartpool import ProcessPool, DataSize, Resource
 
 
 # Tasks can specify their resource requirements
@@ -53,10 +53,16 @@ if __name__ == "__main__":
         future = pool.submit(
             memory_intensive_task, 
             args=(large_dataset,),
-            cpu_cores_needed=2,           # Request 2 CPU cores
-            cpu_mem_needed=1*DataSize.GB, # Request 4GB RAM
-            gpu_cores_needed=1024,        # Request 1024 CUDA cores (NOT percentage)
-            gpu_mem_needed=1*DataSize.GB  # Request 2GB GPU memory
+            cpu_mode_res=Resource(
+                cpu_cores_in_python=os.cpu_count()
+                cpu_mem=1*DataSize.GB
+            )
+            gpu_mode_res=Resource(
+                cpu_cores_in_python=1,
+                cpu_mem=500*DataSize.MB,
+                gpu_cores_needed=1024,        # Request 1024 CUDA cores (NOT percentage)
+                gpu_mem_needed=1*DataSize.GB  # Request 2GB GPU memory
+            )
         )
 ```
 
@@ -170,10 +176,8 @@ class ProcessPool:
     def map(
         self, func:Callable[..., Any],
         iterable:Iterable[Any],
-        cpu_cores_needed:Union[int, Iterable[int]]=1,
-        cpu_mem_needed:Union[int, Iterable[int]]=0,
-        gpu_cores_needed:Union[int, Iterable[int]]=0,
-        gpu_mem_needed:Union[int, Iterable[int]]=0,
+        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]]=None,
+        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]]=None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]: ...
@@ -206,10 +210,8 @@ class ProcessPool:
     def starmap(
         self, func:Callable[..., Any],
         iterable:Iterable[Any],
-        cpu_cores_needed:Union[int, Iterable[int]]=1,
-        cpu_mem_needed:Union[int, Iterable[int]]=0,
-        gpu_cores_needed:Union[int, Iterable[int]]=0,
-        gpu_mem_needed:Union[int, Iterable[int]]=0,
+        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]]=None,
+        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]]=None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]: ...

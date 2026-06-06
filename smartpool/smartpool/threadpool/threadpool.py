@@ -146,7 +146,7 @@ class ThreadPool(Pool):
         self._take_resource(task)
         worker:ThreadWorker = task.worker
         worker.is_working = True
-        self._workers_working_count += 1
+        Pool._all_workers_working_count += 1
         task.future.set_running_or_notify_cancel()
         worker.add_task(task)
 

@@ -5,7 +5,7 @@ from ..pool import Pool
 
 if TYPE_CHECKING:
     from ..task import Task
-    from ..utils import Resource
+    from ..resource import Resource
     from .processworker import ProcessWorker
 
 
@@ -105,7 +105,7 @@ class ProcessPool(Pool):
         self._take_resource(task)
         worker:ProcessWorker = task.worker
         worker.is_working = True
-        self._workers_working_count += 1
+        Pool._all_workers_working_count += 1
         worker.imported_modules.update(task.module_deps)
         self._feeding_queue.put(task)
         

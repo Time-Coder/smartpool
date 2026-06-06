@@ -40,11 +40,21 @@ class GPUInfoSnapshot:
             return None
         return self.mem_total - self.mem_used
 
+    @mem_free.setter
+    def mem_free(self, value: int) -> None:
+        if self.mem_total is not None:
+            self.mem_used = self.mem_total - value
+
     @property
     def n_cores_free(self) -> Optional[int]:
         if self.n_cores is None or self.n_cores_used is None:
             return None
         return self.n_cores - self.n_cores_used
+
+    @n_cores_free.setter
+    def n_cores_free(self, value: int) -> None:
+        if self.n_cores is not None:
+            self.n_cores_used = self.n_cores - value
 
 
 class GPUInfo(ABC):

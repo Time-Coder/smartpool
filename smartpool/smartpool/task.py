@@ -12,13 +12,14 @@ if TYPE_CHECKING:
 class Task:
 
     def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any],
-                 cpu_mode_res: Resource, gpu_mode_res: Resource, calculate_module_deps:bool):
+                 cpu_mode_res: Resource, gpu_mode_res: Resource, use_torch: bool, calculate_module_deps:bool):
         self.id:str = str(uuid.uuid4())
         self.func:Callable[..., Any] = func
         self.args:Tuple[Any] = args
         self.kwargs:Dict[str, Any] = kwargs
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
+        self.use_torch: bool = use_torch
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
         self.module_deps:Dict[str, int] = {}
