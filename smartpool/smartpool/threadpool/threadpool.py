@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
 if TYPE_CHECKING:
     from ..task import Task
-    from ..utils import Resource
+    from ..resource import Resource
     from .threadworker import ThreadWorker
 
 

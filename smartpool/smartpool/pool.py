@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
 import weakref
 
-from .utils import Resource
+from .resource import Resource
 
 if TYPE_CHECKING:
     import threading

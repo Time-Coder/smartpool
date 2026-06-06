@@ -1,35 +1,14 @@
-from typing import TypeVar, Protocol
+from __future__ import annotations
+from typing import TypeVar, Protocol, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch.cuda import Stream
 
 
 T = TypeVar('T')
-
-
-class Resource:
-
-    def __init__(self, cpu_cores_in_python: float = 0, cpu_cores_out_of_python: float = 0,
-                 cpu_mem: int = 0, gpu_cores: float = 0, gpu_mem: int = 0):
-        self.cpu_cores_in_python = cpu_cores_in_python
-        self.cpu_cores_out_of_python = cpu_cores_out_of_python
-        self.cpu_mem = cpu_mem
-        self.gpu_cores = gpu_cores
-        self.gpu_mem = gpu_mem
-
-    @property
-    def cpu_cores(self) -> float:
-        return self.cpu_cores_in_python + self.cpu_cores_out_of_python
-
 class QueueLike(Protocol[T]):
     def put(self, item: T) -> None: ...
     def get(self) -> T: ...
-
-
-class DataSize:
-    B = 1
-    KB = 1024 * B
-    MB = 1024 * KB
-    GB = 1024 * MB
-    TB = 1024 * GB
-    PB = 1024 * TB
 
 
 _has_gil = None
@@ -107,6 +86,7 @@ def batched(iterable, chunksize:int):
 
 _best_device_lock = None
 _best_device = {}
+_best_stream = {}
 
 def _set_best_device(device:str, tid=None)->None:
     import threading
@@ -131,3 +111,27 @@ def best_device()->str:
     tid = threading.get_ident()
     with _best_device_lock:
         return _best_device[tid]
+    
+def _set_best_stream(stream:Optional[Stream], tid=None)->None:
+    import threading
+
+    global _best_device_lock
+    if _best_device_lock is None:
+        _best_device_lock = threading.Lock()
+
+    if tid is None:
+        tid = threading.get_ident()
+        
+    with _best_device_lock:
+        _best_stream[tid] = stream
+
+def best_stream()->Optional[Stream]:
+    import threading
+
+    global _best_device_lock
+    if _best_device_lock is None:
+        _best_device_lock = threading.Lock()
+
+    tid = threading.get_ident()
+    with _best_device_lock:
+        return _best_stream.get(tid, None)

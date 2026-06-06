@@ -6,7 +6,7 @@ from typing import Tuple, Any, Dict, Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .worker import Worker
-    from .utils import Resource
+    from .resource import Resource
 
 
 class Task:

@@ -4,12 +4,13 @@ from queue import SimpleQueue
 from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple
 
 from ..worker import Worker
-from ..utils import _set_best_device
+from ..utils import _set_best_device, _set_best_stream
 
 
 if TYPE_CHECKING:
     from ..task import Task
     from .threadpool import ThreadPool
+    from torch.cuda import Stream
 
 
 class ThreadWorker(Worker):
@@ -33,6 +34,7 @@ class ThreadWorker(Worker):
         )
         self.name_prefix:str = name_prefix
         self.thread_pool:ThreadPool = thread_pool
+        self._streams:Dict[str, Stream] = {}
 
     def add_task(self, task:Task)->None:
         self.start()
@@ -40,6 +42,18 @@ class ThreadWorker(Worker):
 
     def change_device(self, device:str)->None:
         _set_best_device(device, self.process_or_thread.ident)
+        self._set_stream(device)
+
+    def _set_stream(self, device:str)->Optional[Stream]:
+        if device not in self._streams:
+            if device.startswith("cuda") or device.startswith("hip"):
+                from torch.cuda import Stream
+                self._streams[device] = Stream(device=device)
+            else:
+                self._streams[device] = None
+
+        _set_best_stream(self._streams[device], self.process_or_thread.ident)
+        return self._streams[device]
 
     def _clear(self)->None:
         self.process_or_thread = None
@@ -70,5 +84,12 @@ class ThreadWorker(Worker):
                 break
 
             _set_best_device(task.device)
-            success, result = task.exec()
+            stream = self._set_stream(task.device)
+            if stream is not None:
+                import torch.cuda
+                with torch.cuda.stream(stream):
+                    success, result = task.exec()
+            else:
+                success, result = task.exec()
+
             self.thread_pool._on_task_done(task.id, success, result)

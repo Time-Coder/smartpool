@@ -1,7 +1,8 @@
 from .processpool import ProcessPool
 from .threadpool import ThreadPool
 from .interpreterpool import InterpreterPool
-from .utils import DataSize, move_optimizer_to, limit_num_single_thread, best_device
+from .utils import move_optimizer_to, limit_num_single_thread, best_device, best_stream
+from .resource import DataSize, Resource
 
 from .gpuinfos import GPUInfos
 from .gpuinfo import GPUVendor, GPUInfoSnapshot
@@ -14,9 +15,11 @@ __all__ = [
     "ThreadPool",
     "InterpreterPool",
     "DataSize",
+    "Resource",
     "move_optimizer_to",
     "limit_num_single_thread",
     "best_device",
+    "best_stream",
     "GPUInfos",
     "GPUVendor",
     "GPUInfoSnapshot",
