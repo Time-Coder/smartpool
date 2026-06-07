@@ -56,6 +56,35 @@ python -m smartpool_examples.cross_validation --pool ray
 - Performance comparison with external frameworks
 
 
+### 3. ONNX Inference (`onnx_infer`)
+
+Runs batched ONNX model inference using `InferSessionPool` for concurrent GPU/CPU execution.
+Automatically manages inference sessions across worker threads.
+
+#### Running the Example
+
+```bash
+python -m smartpool_examples.onnx_infer --max-workers 4
+```
+
+#### What it Demonstrates
+
+- `InferSessionPool` creation and session lifecycle management
+- Multi-threaded inference with automatic device placement
+- COCO-format image preprocessing (resize, normalize, letterbox)
+- Softmax + top-5 postprocessing
+- Progress bars for downloads and inference steps
+
+#### Extra Dependencies
+
+Install with ONNX / PyTorch support:
+
+```bash
+pip install pysmartpool[onnx,torch]
+pip install smartpool-examples[torch]
+```
+
+
 ## License
 
 MIT License - see main smartpool repository for details

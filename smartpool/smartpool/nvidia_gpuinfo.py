@@ -1,6 +1,6 @@
 import threading
 import uuid
-from typing import Optional
+from typing import Optional, List
 
 import pynvml
 
@@ -12,7 +12,7 @@ class NvidiaGPUInfo(GPUInfo):
     _lock = threading.Lock()
     _initialized = False
 
-    supported_onnx_providers = [
+    supported_onnx_providers: List[str] = [
         "TensorrtExecutionProvider",
         "CUDAExecutionProvider",
         "DmlExecutionProvider"

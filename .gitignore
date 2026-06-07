@@ -13,4 +13,5 @@ doc
 dataset
 *.onnx
 *.jpg
+.pytest_cache
 __trtcache__

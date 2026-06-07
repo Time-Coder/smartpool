@@ -424,6 +424,10 @@ class Pool(ABC):
         else:
             res = task.gpu_mode_res
 
+        if task.use_onnx:
+            from .gpuinfo import GPUInfo
+            GPUInfo.init_onnx_providers()
+
         with self._sys_info_lock:
             if Worker.total_working_count() == 0:
                 self._sys_info.update()
@@ -487,9 +491,17 @@ class Pool(ABC):
 
             best_gpu = None
             for gpu in gpus:
-                if gpu.mem_free >= res.gpu_mem and gpu.n_cores_free >= res.gpu_cores:
-                    if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
-                        best_gpu = gpu
+                if gpu.mem_free < res.gpu_mem:
+                    continue
+
+                if gpu.n_cores_free < res.gpu_cores:
+                    continue
+
+                if task.use_onnx and not gpu.parent_class.supported_onnx_providers:
+                    continue
+
+                if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
+                    best_gpu = gpu
 
         if best_gpu is None:
             task.device = None
@@ -497,17 +509,9 @@ class Pool(ABC):
             task.dml_id = -1
             return None, []
         
-
         task.device = best_gpu.device
         task.gpu_index = best_gpu.index
         task.dml_id = best_gpu.dml_id
-        if task.use_onnx:
-            if task.onnx_provider[0] == "CPUExecutionProvider":
-                task.device = None
-                task.gpu_index = -1
-                task.dml_id = -1
-                return None, []
-            
         return best_gpu.device, should_kill_workers
 
     def _choose_task_worker(self, task:Task, res: Resource) -> Optional[Worker]:

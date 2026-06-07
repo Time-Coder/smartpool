@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 import json
 import threading
-from collections import defaultdict
 from cachetools import LRUCache
 from typing import TYPE_CHECKING, Tuple, Dict
 
@@ -58,6 +57,12 @@ class InferSessionWorker(ThreadWorker):
             kwargs = task.kwargs
             provider = task.onnx_provider
             session = self._get_session(model_path, provider)
+            if self.thread_pool.print_info:
+                if "device_id" in provider[1]:
+                    print(f"infer with {provider[0]}(device_id={provider[1]["device_id"]}) in session {id(session)}")
+                else:
+                    print(f"infer with {provider[0]} in session {id(session)}")
+
             try:
                 inputs = kwargs
                 if args:

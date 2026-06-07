@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smartpool-examples"
-version = "0.1.4"
+version = "0.1.6"
 description = "Examples for smartpool."
 readme = "README.md"
 authors = [
@@ -24,8 +24,12 @@ dependencies = [
     "rich",
     "typer",
     "joblib",
-    "datawatcher"
+    "opencv-python",
 ]
+
+[project.optional-dependencies]
+torch = ["torch", "torchvision"]
+ray = ["ray"]
 
 [project.urls]
 Homepage = "https://github.com/Time-Coder/smartpool"

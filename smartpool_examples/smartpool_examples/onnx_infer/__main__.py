@@ -52,6 +52,7 @@ def main(
     print(f"\nSubmit {len(image_paths)} tasks to ThreadPool({n_workers})...")
     thread_pool = ThreadPool(max_workers=n_workers)
     infer_session_pool = InferSessionPool(max_workers=n_workers)
+    infer_session_pool.print_info = True
 
     futures = []
     for path in image_paths:

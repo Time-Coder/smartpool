@@ -12,8 +12,6 @@ if TYPE_CHECKING:
 
 class Task:
 
-    _all_supported_onnx_providers:Optional[List[Tuple[str, Dict[str, Any]]]] = None
-
     def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any],
                  cpu_mode_res: Resource, gpu_mode_res: Resource,
                  use_torch: bool, use_onnx: bool,
@@ -42,17 +40,6 @@ class Task:
         self._onnx_provider:Optional[Tuple[str, Dict]] = None
         self.future = Future()
 
-    @staticmethod
-    def _init_onnx_providers()->None:
-        if Task._all_supported_onnx_providers is not None:
-            return
-        
-        try:
-            import onnxruntime
-            Task._all_supported_onnx_providers = onnxruntime.get_available_providers()
-        except ImportError:
-            Task._all_supported_onnx_providers = []
-
     @property
     def device(self)->str:
         return self._device
@@ -79,21 +66,21 @@ class Task:
 
         from .gpuinfo import GPUInfo
 
-        self._init_onnx_providers()
         items = self.device.split(":")
         device_prefix = items[0]
         device_id = int(items[1])
+
+        GPUInfo.init_onnx_providers()
         gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)
         for provider_name in gpuinfo_class.supported_onnx_providers:
-            if provider_name in Task._all_supported_onnx_providers:
-                options = {"device_id": device_id}
-                if provider_name == "DmlExecutionProvider":
-                    options["device_id"] = self.dml_id
-                elif provider_name == "TensorrtExecutionProvider":
-                    options["trt_engine_cache_enable"] = True
-                    options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
-                self._onnx_provider = (provider_name, options)
-                return self._onnx_provider
+            options = {"device_id": device_id}
+            if provider_name == "DmlExecutionProvider":
+                options["device_id"] = self.dml_id
+            elif provider_name == "TensorrtExecutionProvider":
+                options["trt_engine_cache_enable"] = True
+                options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
+            self._onnx_provider = (provider_name, options)
+            return self._onnx_provider
 
         self._onnx_provider = ("CPUExecutionProvider", {})
         return self._onnx_provider

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysmartpool"
-version = "0.1.5"
+version = "0.1.6"
 description = "Smart thread/process/interpreter pool implementation."
 readme = "README.md"
 authors = [
@@ -18,8 +18,13 @@ classifiers = [
 ]
 dependencies = [
     "nvidia-ml-py",
-    "psutil"
+    "psutil",
+    "cachetools",
 ]
+
+[project.optional-dependencies]
+torch = ["torch"]
+onnx = ["onnxruntime", "numpy"]
 
 [project.urls]
 Homepage = "https://github.com/Time-Coder/smartpool"

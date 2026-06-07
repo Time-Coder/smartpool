@@ -10,6 +10,7 @@ SmartPool is a Python library that provides intelligent resource-aware pooling m
 - **Hardware-Aware Scheduling**: Automatically detects system resources and schedules tasks accordingly
 - **PyTorch Integration**: Support for PyTorch multiprocessing with tensor sharing to avoid serialization
 - **Training Hot Migration**: Automatically moves CPU training tasks to GPU when `best_device()` changes
+- **InferSessionPool**: Thread-safe ONNX Runtime session pool for concurrent inference
 
 ## Installation
 
@@ -54,15 +55,15 @@ if __name__ == "__main__":
             memory_intensive_task, 
             args=(large_dataset,),
             cpu_mode_res=Resource(
-                cpu_cores_in_python=os.cpu_count()
-                cpu_mem=1*DataSize.GB
-            )
+                cpu_cores_in_python=os.cpu_count(),
+                cpu_mem=1*DataSize.GB,
+            ),
             gpu_mode_res=Resource(
                 cpu_cores_in_python=1,
                 cpu_mem=500*DataSize.MB,
-                gpu_cores_needed=1024,        # Request 1024 CUDA cores (NOT percentage)
-                gpu_mem_needed=1*DataSize.GB  # Request 2GB GPU memory
-            )
+                gpu_cores=1024,        # Request 1024 CUDA cores (NOT percentage)
+                gpu_mem=1*DataSize.GB, # Request 2GB GPU memory
+            ),
         )
 ```
 
@@ -151,8 +152,9 @@ class ProcessPool:
         self, func:Callable[..., Any],
         args:Optional[Tuple[Any]]=None,
         kwargs:Optional[Dict[str, Any]]=None,
-        cpu_cores_needed:int=1, cpu_mem_needed:int=0,
-        gpu_cores_needed:int=0, gpu_mem_needed:int=0
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+        use_torch: Optional[bool] = None
     )->concurrent.futures.Future: ...
         """
         Submits a callable to be executed with the given arguments.
@@ -164,10 +166,9 @@ class ProcessPool:
             func: The callable to execute.
             args: The arguments to pass to the callable.
             kwargs: The keyword arguments to pass to the callable.
-            cpu_cores_needed: The number of CPU cores required for the task.
-            cpu_mem_needed: The amount of CPU memory required for the task.
-            gpu_cores_needed: The number of CUDA cores required for the task.
-            gpu_mem_needed: The amount of GPU memory required for the task.
+            cpu_mode_res: Resource requirements when running on CPU.
+            gpu_mode_res: Resource requirements when running on GPU.
+            use_torch: Whether to enable PyTorch tensor sharing and device migration.
         
         Returns:
             A concurrent.futures.Future representing the given call.
@@ -188,10 +189,8 @@ class ProcessPool:
             func: A callable that will take as many arguments as there are
                 passed iterables.
             iterable: An iterable whose items will be passed to func as arguments.
-            cpu_cores_needed: The number of CPU cores required for the each task.
-            cpu_mem_needed: The amount of CPU memory required for each task.
-            gpu_cores_needed: The number of CUDA cores required for each task.
-            gpu_mem_needed: The amount of GPU memory required for each task.
+            cpu_mode_res: Resource requirements (or iterable of resources) for CPU mode.
+            gpu_mode_res: Resource requirements (or iterable of resources) for GPU mode.
             timeout: The maximum number of seconds to wait. If None, then there
                 is no limit on the wait time.
             chunksize: If greater than one, the iterables will be chopped into
@@ -209,14 +208,14 @@ class ProcessPool:
 
     def starmap(
         self, func:Callable[..., Any],
-        iterable:Iterable[Any],
-        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]]=None,
-        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]]=None,
+        args_iterables:Iterable[Tuple[Any, ...]],
+        cpu_mode_res:Union[Resource, Iterable[Resource]] = Resource(cpu_cores_in_python=1),
+        gpu_mode_res:Union[Resource, Iterable[Resource], None]=None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]: ...
         """
-        Like `map()` method but the elements of the `iterable` are expected to
+        Like `map()` method but the elements of the `args_iterables` are expected to
         be iterables as well and will be unpacked as arguments. Hence
         `func` and (a, b) becomes func(a, b).
         """
@@ -309,6 +308,116 @@ class InterpreterPool:
         """
         All same as ProcessPool
         """
+```
+
+### InferSessionPool
+
+Each worker runs as a thread with a dedicated ONNX Runtime `InferenceSession`.
+Suitable for concurrent inference on CPU, CUDA, or DML devices.
+
+```python
+class InferSessionPool(ThreadPool):
+
+    def __init__(
+        self, max_workers:int=0,
+        thread_name_prefix:str="InferSessionPool.worker:",
+        initializer:Optional[Callable[..., Any]]=None,
+        initargs:Tuple[Any, ...]=(),
+        initkwargs:Optional[Dict[str, Any]]=None,
+        *,
+        max_tasks_per_child:Optional[int]=None,
+    ): ...
+        """
+        Initializes a new InferSessionPool instance.
+
+        Same as ThreadPool
+        """
+
+    def submit(
+        self, model_path:str,
+        args:Optional[Tuple[Any]]=None,
+        kwargs:Optional[Dict[str, Any]]=None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+    )->Future: ...
+        """
+        Submits an ONNX model for inference with the given input tensors.
+
+        Args:
+            model_path: Path to the .onnx model file.
+            args: Input tensors to pass to the model.
+            kwargs: Additional keyword arguments.
+            cpu_mode_res: Resource requirements when running on CPU.
+            gpu_mode_res: Resource requirements when running on GPU.
+
+        Returns:
+            A concurrent.futures.Future representing the inference result.
+        """
+
+    def map(self, ...): ...
+    def starmap(self, ...): ...
+    def shutdown(self, ...): ...
+    def __enter__(self): ...
+    def __exit__(self, exc_type, exc_val, exc_tb): ...
+        """
+        All same as ThreadPool
+        """
+```
+
+### Resource & DataSize
+
+`Resource` describes the CPU/GPU resources a task requires. `DataSize` provides
+human-readable memory size constants.
+
+```python
+class Resource:
+    def __init__(
+        self, *,
+        cpu_cores: float = 1,
+        cpu_cores_in_python: Optional[float] = None,
+        cpu_cores_out_of_python: float = 0,
+        cpu_mem: int = 0,
+        gpu_cores: float = 0,
+        gpu_mem: int = 0,
+    ): ...
+        """
+        Args:
+            cpu_cores: Shorthand for cpu_cores_in_python (used when
+                       cpu_cores_in_python is not given).
+            cpu_cores_in_python: Number of CPU cores consumed inside the
+                                 Python process (e.g. by numpy/torch).
+            cpu_cores_out_of_python: CPU cores consumed outside Python
+                                     (e.g. by subprocesses).
+            cpu_mem: CPU memory required in bytes.
+            gpu_cores: Number of GPU cores (CUDA cores) required.
+            gpu_mem: GPU memory required in bytes.
+        """
+
+    @property
+    def cpu_cores(self) -> float:
+        """Sum of cpu_cores_in_python and cpu_cores_out_of_python."""
+
+
+class DataSize:
+    B = 1
+    KB = 1024 * B
+    MB = 1024 * KB
+    GB = 1024 * MB
+    TB = 1024 * GB
+```
+
+Example:
+
+```python
+from smartpool import Resource, DataSize
+
+# Request 2 CPU cores + 1 GB RAM + 1024 CUDA cores + 2 GB GPU memory
+res = Resource(
+    cpu_cores_in_python=2,
+    cpu_mem=1 * DataSize.GB,
+    gpu_cores=1024,
+    gpu_mem=2 * DataSize.GB,
+)
 ```
 
 ## License

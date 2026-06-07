@@ -29,6 +29,7 @@ class InferSessionPool(ThreadPool):
             max_tasks_per_child=max_tasks_per_child,
             use_torch=False
         )
+        self.print_info:bool = False
 
     def _add_worker(self)->InferSessionWorker:
         from .infersessionworker import InferSessionWorker
