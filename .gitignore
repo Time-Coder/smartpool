@@ -10,3 +10,5 @@ data
 .vscode
 .venv*
 doc
+dataset
+*.onnx
