@@ -56,7 +56,7 @@ class InferSessionPool(ThreadPool):
         if not os.path.isfile(model_path):
             raise FileNotFoundError(model_path)
 
-        name, ext = os.path.splitext(model_path)
+        _, ext = os.path.splitext(model_path)
         if ext != ".onnx":
             raise ValueError(f"only support .onnx model, {ext} were given")
 
