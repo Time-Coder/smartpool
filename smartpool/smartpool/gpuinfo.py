@@ -16,6 +16,8 @@ class GPUInfoSnapshot:
     def __init__(self):
         self.index: Optional[int] = None
         self.device_id: Optional[int] = None
+        self.dml_id: Optional[int] = None
+
         self.name: Optional[str] = None
         self.uuid: Optional[uuid.UUID] = None
         self.serial: Optional[str] = None
@@ -53,8 +55,9 @@ class GPUInfo(ABC):
     supported_onnx_providers = []
 
     def __init__(self, device_id: int, index: int):
-        self._device_id = device_id
-        self._index = index
+        self._device_id: int = device_id
+        self._index: int = index
+        self._dml_id: int = -1
 
         self._name: Optional[str] = None
         self._uuid: Optional[uuid.UUID] = None
@@ -113,6 +116,10 @@ class GPUInfo(ABC):
     def is_available(self) -> bool:
         pass
 
+    @classmethod
+    def get_device_count(cls) -> int:
+        return 0
+
     @property
     @abstractmethod
     def vendor(self) -> GPUVendor:
@@ -139,6 +146,10 @@ class GPUInfo(ABC):
     @property
     def index(self) -> int:
         return self._index
+
+    @property
+    def dml_id(self) -> int:
+        return self._dml_id
 
     @property
     def device(self) -> str:
@@ -303,6 +314,7 @@ class GPUInfo(ABC):
         snapshot.device_id = self.device_id
         snapshot.vendor = self.vendor.value
         snapshot.device = self.device
+        snapshot.dml_id = self.dml_id
 
         if name:
             snapshot.name = self.name

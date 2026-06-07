@@ -1,6 +1,7 @@
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Type, Dict
 
 from .gpuinfo import GPUInfo, GPUVendor, GPUInfoSnapshot
+
 from .nvidia_gpuinfo import NvidiaGPUInfo
 from .intel_gpuinfo import IntelGPUInfo
 from .amd_gpuinfo import AMDGPUInfo
@@ -12,29 +13,58 @@ class MetaGPUInfos(type):
     __n_devices: Optional[int] = None
 
     @staticmethod
+    def _dxgi_enumerate_name_map() -> Dict[str, int]:
+        import platform
+        if platform.system() != "Windows":
+            return {}
+        
+        import wmi
+        c = wmi.WMI()
+        adapters = list(c.Win32_VideoController())
+        return {
+            (getattr(a, 'Name', None) or getattr(a, 'Description', '') or '').lower().strip(): i
+            for i, a in enumerate(adapters)
+        }
+
+    @staticmethod
     def __init() -> None:
-        if MetaGPUInfos.__gpu_infos is None:
-            MetaGPUInfos.__gpu_infos = []
-            MetaGPUInfos.__n_devices = 0
+        if MetaGPUInfos.__gpu_infos is not None:
+            return
+        
+        MetaGPUInfos.__gpu_infos = []
+        MetaGPUInfos.__n_devices = 0
 
-            gpu_classes = [
-                NvidiaGPUInfo,
-                IntelGPUInfo,
-                AMDGPUInfo,
-            ]
+        gpu_classes:List[Type[GPUInfo]] = [
+            NvidiaGPUInfo,
+            IntelGPUInfo,
+            AMDGPUInfo,
+        ]
 
-            index = 0
-            for gpu_class in gpu_classes:
-                if not gpu_class.is_available():
+        index = 0
+        dml_map = MetaGPUInfos._dxgi_enumerate_name_map()
+        for gpu_class in gpu_classes:
+            if not gpu_class.is_available():
+                continue
+
+            count = gpu_class.get_device_count()
+            for i in range(count):
+                gpu = gpu_class(i, index)
+                MetaGPUInfos.__gpu_infos.append(gpu)
+                index += 1
+
+                if not dml_map:
                     continue
 
-                count = gpu_class.get_device_count()
-                for i in range(count):
-                    gpu = gpu_class(i, index)
-                    MetaGPUInfos.__gpu_infos.append(gpu)
-                    index += 1
+                gpu_name = gpu.name.lower().strip()
+                if gpu_name in dml_map:
+                    gpu._dml_id = dml_map[gpu_name]
+                else:
+                    for dml_name, dml_id in dml_map.items():
+                        if gpu_name and (gpu_name in dml_name or dml_name in gpu_name):
+                            gpu._dml_id = dml_id
+                            break
 
-                MetaGPUInfos.__n_devices += count
+            MetaGPUInfos.__n_devices += count
 
     def __len__(self) -> int:
         if MetaGPUInfos.__n_devices is None:

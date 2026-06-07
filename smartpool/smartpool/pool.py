@@ -432,6 +432,7 @@ class Pool(ABC):
             if cpu_cores_needed > self._sys_info.cpu_cores_free:
                 task.device = None
                 task.gpu_index = -1
+                task.dml_id = -1
                 return None, []
 
             should_kill_workers = []
@@ -442,6 +443,7 @@ class Pool(ABC):
                     if cpu_mem_needed > self._sys_info.cpu_mem_free + total_hold_mem:
                         task.device = None
                         task.gpu_index = -1
+                        task.dml_id = -1
                         return None, []
                     
                     if kill_workers:
@@ -460,11 +462,13 @@ class Pool(ABC):
                 else:
                     task.device = None
                     task.gpu_index = -1
+                    task.dml_id = -1
                     return None, []
 
             if mode == "cpu":
                 task.device = "cpu"
                 task.gpu_index = -1
+                task.dml_id = -1
                 return "cpu", should_kill_workers
 
             gpus = self._sys_info.gpu_infos
@@ -475,6 +479,7 @@ class Pool(ABC):
             if not gpus:
                 task.device = None
                 task.gpu_index = -1
+                task.dml_id = -1
                 return None, []
 
             best_gpu = None
@@ -486,15 +491,18 @@ class Pool(ABC):
         if best_gpu is None:
             task.device = None
             task.gpu_index = -1
+            task.dml_id = -1
             return None, []
         
 
         task.device = best_gpu.device
         task.gpu_index = best_gpu.index
+        task.dml_id = best_gpu.dml_id
         if task.use_onnx:
             if task.onnx_provider[0] == "CPUExecutionProvider":
                 task.device = None
                 task.gpu_index = -1
+                task.dml_id = -1
                 return None, []
             
         return best_gpu.device, should_kill_workers
@@ -591,6 +599,7 @@ class Pool(ABC):
             worker.change_device(best_gpu.device)
             task.device = best_gpu.device
             task.gpu_index = best_gpu.index
+            task.dml_id = best_gpu.dml_id
             best_gpu.n_cores_free -= need_best_gpu_cores
             best_gpu.mem_free -= gpu_res.gpu_mem
 

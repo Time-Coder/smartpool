@@ -35,6 +35,7 @@ class Task:
         
         self._device:Optional[str] = None
         self.gpu_index:int = -1
+        self.dml_id:int = -1
         self.worker:Worker = None
         self.mem_before_enter:int = 0
         self._onnx_provider:Optional[Tuple[str, Dict]] = None
@@ -45,8 +46,11 @@ class Task:
         if Task._all_supported_onnx_providers is not None:
             return
         
-        import onnxruntime
-        Task._all_supported_onnx_providers = onnxruntime.get_available_providers()
+        try:
+            import onnxruntime
+            Task._all_supported_onnx_providers = onnxruntime.get_available_providers()
+        except ImportError:
+            Task._all_supported_onnx_providers = []
 
     @property
     def device(self)->str:
@@ -78,10 +82,12 @@ class Task:
         items = self.device.split(":")
         device_prefix = items[0]
         device_id = int(items[1])
-        gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)        
+        gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)
         for provider_name in gpuinfo_class.supported_onnx_providers:
             if provider_name in Task._all_supported_onnx_providers:
                 options = {"device_id": device_id, "gpu_mem_limit": self.gpu_mode_res.gpu_mem}
+                if provider_name == "DmlExecutionProvider":
+                    options["device_id"] = self.dml_id
                 self._onnx_provider = (provider_name, options)
                 return self._onnx_provider
 
