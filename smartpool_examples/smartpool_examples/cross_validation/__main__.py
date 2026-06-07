@@ -48,6 +48,7 @@ def main(
     )
 ):
     import os
+    import importlib
     os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 
     print(f"Use {pool} to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
@@ -62,9 +63,7 @@ def main(
         print("PyTorch is not installed. Follow https://pytorch.org/ instructions to install PyTorch.")
         exit(1)
 
-    try:
-        import torchvision
-    except ImportError:
+    if importlib.util.find_spec("torchvision") is None:
         print("torchvision is not installed. Use `pip install torchvision` to install torchvision.")
         exit(1)
 

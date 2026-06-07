@@ -1,4 +1,5 @@
 import contextlib
+import importlib
 import os
 import platform
 import subprocess
@@ -168,11 +169,7 @@ class AMDGPUInfo(GPUInfo):
     def is_available(cls) -> bool:
         system = platform.system()
         if system == "Windows":
-            try:
-                import ADLXPybind
-                return True
-            except ImportError:
-                return False
+            return importlib.util.find_spec("ADLXPybind") is not None
         elif system == "Linux":
             try:
                 import pyamdgpuinfo
