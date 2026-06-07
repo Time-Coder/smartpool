@@ -75,15 +75,6 @@ python -m smartpool_examples.onnx_infer --max-workers 4
 - Softmax + top-5 postprocessing
 - Progress bars for downloads and inference steps
 
-#### Extra Dependencies
-
-Install with ONNX / PyTorch support:
-
-```bash
-pip install pysmartpool[onnx,torch]
-pip install smartpool-examples[torch]
-```
-
 
 ## License
 

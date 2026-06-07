@@ -22,10 +22,6 @@ dependencies = [
     "cachetools",
 ]
 
-[project.optional-dependencies]
-torch = ["torch"]
-onnx = ["onnxruntime", "numpy"]
-
 [project.urls]
 Homepage = "https://github.com/Time-Coder/smartpool"
 Repository = "https://github.com/Time-Coder/smartpool.git"
