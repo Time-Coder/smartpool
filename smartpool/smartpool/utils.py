@@ -87,7 +87,6 @@ def batched(iterable, chunksize:int):
 _best_device_lock = None
 _best_device = {}
 _best_stream = {}
-_best_onnx_providers = {}
 
 def _set_best_device(device:str, tid=None)->None:
     import threading
@@ -136,27 +135,3 @@ def best_stream()->Optional[Stream]:
     tid = threading.get_ident()
     with _best_device_lock:
         return _best_stream.get(tid, None)
-
-def _set_best_onnx_provider(providers, tid=None)->None:
-    import threading
-
-    global _best_device_lock
-    if _best_device_lock is None:
-        _best_device_lock = threading.Lock()
-
-    if tid is None:
-        tid = threading.get_ident()
-
-    with _best_device_lock:
-        _best_onnx_providers[tid] = providers
-
-def best_onnx_provider():
-    import threading
-
-    global _best_device_lock
-    if _best_device_lock is None:
-        _best_device_lock = threading.Lock()
-
-    tid = threading.get_ident()
-    with _best_device_lock:
-        return _best_onnx_providers.get(tid, None)

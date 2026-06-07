@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from ..task import Task
     from ..resource import Resource
     from .interpreterworker import InterpreterWorker
+    from concurrent.futures import Future
 
 
 class InterpreterPool(Pool):
@@ -33,6 +34,21 @@ class InterpreterPool(Pool):
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
             need_module_deps=True
+        )
+
+    def submit(
+        self, func:Callable[..., Any],
+        args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+        use_torch: Optional[bool] = None
+    )->Future:
+        return Pool.submit(
+            self, func=func,
+            args=args, kwargs=kwargs,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            use_torch=use_torch
         )
 
     def _take_resource(self, task:Task)->None:

@@ -4,7 +4,7 @@ from queue import SimpleQueue
 from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple
 
 from ..worker import Worker
-from ..utils import _set_best_device, _set_best_stream, _set_best_onnx_provider
+from ..utils import _set_best_device, _set_best_stream
 
 
 if TYPE_CHECKING:
@@ -91,7 +91,6 @@ class ThreadWorker(Worker):
                 break
 
             _set_best_device(task.device)
-            _set_best_onnx_provider(task.onnx_provider)
             self._set_stream(task.device)
             success, result = task.exec()
 

@@ -11,7 +11,6 @@ class NvidiaGPUInfo(GPUInfo):
 
     _lock = threading.Lock()
     _initialized = False
-    _handles = {}
 
     supported_onnx_providers = [
         "TensorrtExecutionProvider",
@@ -45,16 +44,11 @@ class NvidiaGPUInfo(GPUInfo):
                 pynvml.nvmlShutdown()
             finally:
                 cls._initialized = False
-                cls._handles.clear()
 
     def _get_handle(self):
-        if self._handle is not None:
-            return self._handle
-        
-        if self._device_id not in self._handles:
-            self._handles[self._device_id] = pynvml.nvmlDeviceGetHandleByIndex(self._device_id)
+        if self._handle is None:
+            self._handle = pynvml.nvmlDeviceGetHandleByIndex(self._device_id)
 
-        self._handle = self._handles[self._device_id]
         return self._handle
 
     @property
@@ -133,9 +127,13 @@ class NvidiaGPUInfo(GPUInfo):
         with self._lock:
             try:
                 util = pynvml.nvmlDeviceGetUtilizationRates(self._get_handle())
-                return util.gpu / 100.0
             except Exception:
-                return None
+                pynvml.nvmlShutdown()
+                pynvml.nvmlInit()
+                self._handle = None
+                util = pynvml.nvmlDeviceGetUtilizationRates(self._get_handle())
+
+            return util.gpu / 100.0
 
     def _fetch_temperature(self) -> Optional[int]:
         with self._lock:

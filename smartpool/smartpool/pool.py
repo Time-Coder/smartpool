@@ -108,7 +108,7 @@ class Pool(ABC):
         return None
 
     def submit(
-        self, func:Callable[..., Any],
+        self, func:Union[Callable[..., Any], str],
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import uuid
 import sys
+import os
 from concurrent.futures import Future
 from typing import List, Tuple, Any, Dict, Optional, Callable, TYPE_CHECKING
 
@@ -85,9 +86,12 @@ class Task:
         gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)
         for provider_name in gpuinfo_class.supported_onnx_providers:
             if provider_name in Task._all_supported_onnx_providers:
-                options = {"device_id": device_id, "gpu_mem_limit": self.gpu_mode_res.gpu_mem}
+                options = {"device_id": device_id}
                 if provider_name == "DmlExecutionProvider":
                     options["device_id"] = self.dml_id
+                elif provider_name == "TensorrtExecutionProvider":
+                    options["trt_engine_cache_enable"] = True
+                    options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
                 self._onnx_provider = (provider_name, options)
                 return self._onnx_provider
 
@@ -102,7 +106,7 @@ class Task:
         return self.cpu_mode_res
 
     def info(self):
-        return (self.id, self.device, self.onnx_provider, self.func, self.args, self.kwargs)
+        return (self.id, self.device, self.func, self.args, self.kwargs)
     
     @property
     def device_id(self)->int:

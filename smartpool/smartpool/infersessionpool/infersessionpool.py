@@ -1,0 +1,59 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
+
+from ..threadpool.threadpool import ThreadPool
+from ..pool import Pool
+
+if TYPE_CHECKING:
+    from concurrent.futures import Future
+    from .infersessionworker import InferSessionWorker
+    from ..resource import Resource
+
+
+class InferSessionPool(ThreadPool):
+
+    def __init__(
+        self, max_workers:int=0, thread_name_prefix:str="InferSessionPool.worker:",
+        initializer:Optional[Callable[..., Any]]=None,
+        initargs:Tuple[Any, ...]=(),
+        initkwargs:Optional[Dict[str, Any]]=None,
+        *,
+        max_tasks_per_child:Optional[int]=None,
+    ):
+        ThreadPool.__init__(
+            self, max_workers=max_workers, thread_name_prefix=thread_name_prefix,
+            initializer=initializer,
+            initargs=initargs,
+            initkwargs=initkwargs,
+            max_tasks_per_child=max_tasks_per_child,
+            use_torch=False
+        )
+
+    def _add_worker(self)->InferSessionWorker:
+        from .infersessionworker import InferSessionWorker
+
+        worker = InferSessionWorker(
+            len(self._workers), self._thread_name_prefix,
+            thread_pool=self,
+            initializer=self._initializer,
+            initargs=self._initargs,
+            initkwargs=self._initkwargs
+        )
+        self._workers.append(worker)
+        return worker
+
+    def submit(
+        self, model_path:str,
+        args:Optional[Tuple[Any]]=None,
+        kwargs:Optional[Dict[str, Any]]=None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None
+    )->Future:
+        return Pool.submit(
+            self, func=model_path,
+            args=args, kwargs=kwargs,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            use_torch=False,
+            use_onnx=True
+        )

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable, List
 from ..pool import Pool
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future
     from ..task import Task
     from ..resource import Resource
     from .processworker import ProcessWorker
@@ -53,6 +54,21 @@ class ProcessPool(Pool):
         self._feeding_queue:queue.SimpleQueue[Task] = queue.SimpleQueue()
         self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
         self._feeding_thread.start()
+
+    def submit(
+        self, func:Callable[..., Any],
+        args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+        use_torch: Optional[bool] = None
+    )->Future:
+        return Pool.submit(
+            self, func=func,
+            args=args, kwargs=kwargs,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            use_torch=use_torch
+        )
 
     def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:
