@@ -1,12 +1,15 @@
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+
 from ..pool import Pool
-from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
 if TYPE_CHECKING:
-    from ..task import Task
-    from ..resource import Resource
-    from .interpreterworker import InterpreterWorker
     from concurrent.futures import Future
+
+    from ..resource import Resource
+    from ..task import Task
+    from .interpreterworker import InterpreterWorker
 
 
 class InterpreterPool(Pool):
@@ -24,7 +27,7 @@ class InterpreterPool(Pool):
 
         Pool.__init__(
             self, max_workers=max_workers,
-            
+
             initializer=initializer,
             initargs=initargs,
             initkwargs=initkwargs,

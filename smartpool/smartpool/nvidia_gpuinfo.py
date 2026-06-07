@@ -1,6 +1,6 @@
 import threading
 import uuid
-from typing import Optional, List
+from typing import List, Optional
 
 import pynvml
 
@@ -27,7 +27,7 @@ class NvidiaGPUInfo(GPUInfo):
     def _ensure_init(cls) -> None:
         if cls._initialized:
             return
-        
+
         with cls._lock:
             try:
                 pynvml.nvmlInit()
@@ -38,7 +38,7 @@ class NvidiaGPUInfo(GPUInfo):
     def shutdown(cls) -> None:
         if not cls._initialized:
             return
-        
+
         with cls._lock:
             try:
                 pynvml.nvmlShutdown()
@@ -59,10 +59,7 @@ class NvidiaGPUInfo(GPUInfo):
     def is_available(cls) -> bool:
         try:
             import pynvml
-            # Ensure it is the real NVIDIA pynvml, not the AMD compatibility shim
-            if not hasattr(pynvml, 'nvmlDeviceGetUUID'):
-                return False
-            return True
+            return hasattr(pynvml, 'nvmlDeviceGetUUID')
         except ImportError:
             return False
 
@@ -83,7 +80,7 @@ class NvidiaGPUInfo(GPUInfo):
     def _fetch_uuid(self) -> Optional[uuid.UUID]:
         with self._lock:
             uuid_bytes = pynvml.nvmlDeviceGetUUID(self._get_handle())
-        
+
         if isinstance(uuid_bytes, bytes):
             try:
                 uuid_str = uuid_bytes.decode('utf-8')

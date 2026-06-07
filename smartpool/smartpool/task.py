@@ -1,13 +1,14 @@
 from __future__ import annotations
-import uuid
-import sys
+
 import os
+import sys
+import uuid
 from concurrent.futures import Future
-from typing import List, Tuple, Any, Dict, Optional, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
-    from .worker import Worker
     from .resource import Resource
+    from .worker import Worker
 
 
 class Task:
@@ -27,11 +28,11 @@ class Task:
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
         self.module_deps:Dict[str, int] = {}
-        
+
         if calculate_module_deps:
             from .module_deps import module_deps
             self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
-        
+
         self._device:Optional[str] = None
         self.gpu_index:int = -1
         self.dml_id:int = -1
@@ -43,7 +44,7 @@ class Task:
     @property
     def device(self)->str:
         return self._device
-    
+
     @device.setter
     def device(self, device:str)->None:
         if self._device == device:
@@ -56,10 +57,10 @@ class Task:
     def onnx_provider(self)->Optional[Tuple[str, Dict]]:
         if not self.use_onnx or self.device is None:
             return None
-        
+
         if self._onnx_provider is not None:
             return self._onnx_provider
-        
+
         if self.device == "cpu":
             self._onnx_provider = ("CPUExecutionProvider", {})
             return self._onnx_provider
@@ -89,12 +90,12 @@ class Task:
     def effective_res(self) -> Resource:
         if self.device and self.device != "cpu":
             return self.gpu_mode_res
-        
+
         return self.cpu_mode_res
 
     def info(self):
         return (self.id, self.device, self.func, self.args, self.kwargs)
-    
+
     @property
     def device_id(self)->int:
         if isinstance(self.device, str) and ":" in self.device:

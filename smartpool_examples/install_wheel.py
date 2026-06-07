@@ -1,7 +1,6 @@
+import os
 import subprocess
 import sys
-import os
-
 
 self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
 

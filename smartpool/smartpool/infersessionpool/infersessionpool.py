@@ -1,14 +1,16 @@
 from __future__ import annotations
-import os
-from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
-from ..threadpool.threadpool import ThreadPool
+import os
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+
 from ..pool import Pool
+from ..threadpool.threadpool import ThreadPool
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
-    from .infersessionworker import InferSessionWorker
+
     from ..resource import Resource
+    from .infersessionworker import InferSessionWorker
 
 
 class InferSessionPool(ThreadPool):
@@ -53,14 +55,14 @@ class InferSessionPool(ThreadPool):
     )->Future:
         if not os.path.isfile(model_path):
             raise FileNotFoundError(model_path)
-        
+
         name, ext = os.path.splitext(model_path)
         if ext != ".onnx":
             raise ValueError(f"only support .onnx model, {ext} were given")
-        
+
         if os.path.getsize(model_path) <= 0:
-            raise ValueError(f"model file size is zero")
-        
+            raise ValueError("model file size is zero")
+
         return Pool.submit(
             self, func=model_path,
             args=args, kwargs=kwargs,

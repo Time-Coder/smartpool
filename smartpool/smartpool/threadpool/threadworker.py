@@ -1,16 +1,17 @@
 from __future__ import annotations
+
 import threading
 from queue import SimpleQueue
-from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
-from ..worker import Worker
 from ..utils import _set_best_device, _set_best_stream
-
+from ..worker import Worker
 
 if TYPE_CHECKING:
+    from torch.cuda import Stream
+
     from ..task import Task
     from .threadpool import ThreadPool
-    from torch.cuda import Stream
 
 
 class ThreadWorker(Worker):
@@ -77,7 +78,7 @@ class ThreadWorker(Worker):
     def join(self)->None:
         if self.process_or_thread is not None:
             self.process_or_thread.join()
-            
+
         self._clear()
 
     def run(self):

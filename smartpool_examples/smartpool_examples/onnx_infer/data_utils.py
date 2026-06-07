@@ -1,14 +1,23 @@
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 
-from rich.progress import (
-    Progress, BarColumn, DownloadColumn, TransferSpeedColumn,
-    TextColumn, TimeRemainingColumn,
+from config import (
+    COCO_IMAGE_IDS,
+    COCO_IMAGE_URL,
+    DATASET_DIR,
+    MODEL_PATH,
+    MODEL_URL,
 )
-
-from config import MODEL_DIR, MODEL_URL, MODEL_PATH, DATASET_DIR, COCO_IMAGE_URL, COCO_IMAGE_IDS
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 
 
 def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
@@ -51,7 +60,7 @@ def download_model():
     if MODEL_PATH.exists():
         print(f"[SKIP DOWNLOAD] Model {MODEL_PATH.name} exists")
         return
-    print(f"[DOWNLOAD] YOLOv8n ONNX...")
+    print("[DOWNLOAD] YOLOv8n ONNX...")
     download_file(MODEL_URL, MODEL_PATH, "YOLOv8n")
 
 

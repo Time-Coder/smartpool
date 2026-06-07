@@ -1,14 +1,15 @@
 import torch.nn as nn
 
+
 class PreActBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
-        super(PreActBlock, self).__init__()
+        super().__init__()
         self.bn1 = nn.BatchNorm2d(in_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
-        
+
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -26,12 +27,12 @@ class PreActBlock(nn.Module):
 
 class ResNetV2(nn.Module):
     def __init__(self):
-        super(ResNetV2, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
-        
+
         self.layer1 = self._make_layer(32, 64, 2, stride=2)
         self.layer2 = self._make_layer(64, 128, 2, stride=2)
-        
+
         self.bn = nn.BatchNorm2d(128)
         self.relu = nn.ReLU(inplace=True)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))

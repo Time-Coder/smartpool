@@ -1,3 +1,4 @@
+import contextlib
 import os
 import platform
 import subprocess
@@ -6,11 +7,6 @@ import uuid
 from typing import Dict, List, Optional
 
 from .gpuinfo import GPUInfo, GPUVendor
-
-try:
-    import ADLXPybind as ADLX
-except ImportError:
-    ADLX = None
 
 
 class AMDGPUInfo(GPUInfo):
@@ -53,13 +49,15 @@ class AMDGPUInfo(GPUInfo):
 
     @classmethod
     def _init_windows(cls) -> None:
-        cls._adlx_helper = ADLX.ADLXHelper()
+        import ADLXPybind
+
+        cls._adlx_helper = ADLXPybind.ADLXHelper()
         res = cls._adlx_helper.Initialize()
-        if res != ADLX.ADLX_RESULT.ADLX_OK:
-            raise RuntimeError(f"ADLX initialization failed: {res}")
+        if res != ADLXPybind.ADLX_RESULT.ADLX_OK:
+            raise RuntimeError(f"ADLXPybind initialization failed: {res}")
 
         cls._system = cls._adlx_helper.GetSystemServices()
-        gpu_holder = ADLX.ADLXGPUHolder(cls._system)
+        gpu_holder = ADLXPybind.ADLXGPUHolder(cls._system)
         cls._gpu_list = gpu_holder.getGPUList()
         cls._perf_monitoring = cls._system.GetPerformanceMonitoringServices()
 
@@ -115,12 +113,12 @@ class AMDGPUInfo(GPUInfo):
                 device_path = os.path.join(drm_path, device)
                 vendor_path = os.path.join(device_path, 'device', 'vendor')
                 if os.path.exists(vendor_path):
-                    with open(vendor_path, 'r') as f:
+                    with open(vendor_path) as f:
                         if f.read().strip() == '0x1002':
                             name = "AMD GPU"
                             uevent_path = os.path.join(device_path, 'device', 'uevent')
                             if os.path.exists(uevent_path):
-                                with open(uevent_path, 'r') as f:
+                                with open(uevent_path) as f:
                                     for line in f:
                                         if line.startswith('PCI_SLOT_NAME'):
                                             name = f"AMD GPU ({line.split('=')[1].strip()})"
@@ -154,10 +152,9 @@ class AMDGPUInfo(GPUInfo):
             cls._device_info.clear()
 
             if cls._adlx_helper:
-                try:
+                with contextlib.suppress(Exception):
                     cls._adlx_helper.Terminate()
-                except Exception:
-                    pass
+
                 cls._adlx_helper = None
                 cls._system = None
                 cls._gpu_list = None
@@ -204,7 +201,7 @@ class AMDGPUInfo(GPUInfo):
                     device_path = os.path.join(drm_path, device)
                     vendor_path = os.path.join(device_path, 'device', 'vendor')
                     if os.path.exists(vendor_path):
-                        with open(vendor_path, 'r') as f:
+                        with open(vendor_path) as f:
                             if f.read().strip() == '0x1002':
                                 return True
             return False

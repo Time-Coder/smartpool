@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 PACKAGE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = PACKAGE_DIR / "data" / "models"
 DATASET_DIR = PACKAGE_DIR / "data" / "dataset"

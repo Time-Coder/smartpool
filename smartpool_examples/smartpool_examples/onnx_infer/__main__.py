@@ -1,20 +1,23 @@
 if __name__ == "__main__":
-    import sys
     import os
+    import sys
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     target_folder = os.path.abspath(self_folder + "/../../../smartpool").replace("\\", "/")
     sys.path.append(target_folder)
 
 import os
 import time
-import typer
 from concurrent.futures import as_completed
+
+import typer
 from rich.progress import (
-    Progress, BarColumn, TextColumn, TimeRemainingColumn,
+    BarColumn,
+    Progress,
+    TextColumn,
+    TimeRemainingColumn,
 )
 
-from smartpool import Resource, ThreadPool, InferSessionPool
-
+from smartpool import InferSessionPool, Resource, ThreadPool
 
 app = typer.Typer(help="Use smartpool to do YOLOv8n ONNX inference on COCO val2017 with real-time progress.")
 
@@ -30,11 +33,11 @@ def main(
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
 
-    from config import MODEL_PATH, DATASET_DIR, OUTPUT_DIR
-    from data_utils import download_model, download_dataset
+    from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
+    from data_utils import download_dataset, download_model
     from inference import infer_task
 
-    print(f"Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
+    print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     print()
 

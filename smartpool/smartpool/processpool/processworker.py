@@ -1,13 +1,15 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Optional, Callable, Any, Dict, Tuple
+
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 from ..worker import Worker
 
 if TYPE_CHECKING:
-    from ..utils import QueueLike
-
     import multiprocessing as mp
+
     import psutil
+
+    from ..utils import QueueLike
 
 
 class ProcessWorker(Worker):
@@ -62,7 +64,7 @@ class ProcessWorker(Worker):
     def rss(self)->int:
         try:
             return self.process_info.memory_info().rss
-        except:
+        except Exception:
             return 0
 
     @property
@@ -73,7 +75,7 @@ class ProcessWorker(Worker):
     def is_working(self, is_working:bool)->None:
         if self._is_working == is_working:
             return
-        
+
         self._is_working = is_working
         self._is_rss_dirty = True
 
@@ -97,7 +99,7 @@ class ProcessWorker(Worker):
     def start(self)->None:
         if self.process_or_thread is not None:
             return
-        
+
         import psutil
 
         self.process_or_thread:mp.Process = self.ctx.Process(

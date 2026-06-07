@@ -1,13 +1,16 @@
 from __future__ import annotations
-import os
+
 import json
+import os
 import threading
+from typing import TYPE_CHECKING, Dict, Tuple
+
 from cachetools import LRUCache
-from typing import TYPE_CHECKING, Tuple, Dict
 
 if TYPE_CHECKING:
-    from ..task import Task
     from onnxruntime import InferenceSession
+
+    from ..task import Task
 
 from ..threadpool.threadworker import ThreadWorker
 
@@ -30,11 +33,11 @@ class InferSessionWorker(ThreadWorker):
         with InferSessionWorker._session_lock:
             if tid not in InferSessionWorker._sessions:
                 InferSessionWorker._sessions[tid] = LRUCache(maxsize=10)
-            
+
             if key not in InferSessionWorker._sessions[tid]:
                 from onnxruntime import InferenceSession
                 InferSessionWorker._sessions[tid][key] = InferenceSession(model_path, providers=[provider])
-            
+
             return InferSessionWorker._sessions[tid][key]
 
     def _clear(self)->None:
@@ -59,7 +62,7 @@ class InferSessionWorker(ThreadWorker):
             session = self._get_session(model_path, provider)
             if self.thread_pool.print_info:
                 if "device_id" in provider[1]:
-                    print(f"infer with {provider[0]}(device_id={provider[1]["device_id"]}) in session {id(session)}")
+                    print(f"infer with {provider[0]}(device_id={provider[1]['device_id']}) in session {id(session)}")
                 else:
                     print(f"infer with {provider[0]} in session {id(session)}")
 

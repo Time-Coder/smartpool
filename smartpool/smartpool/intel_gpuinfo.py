@@ -100,7 +100,7 @@ class IntelGPUInfo(GPUInfo):
                     device_path = os.path.join(drm_path, device)
                     vendor_path = os.path.join(device_path, 'device', 'vendor')
                     if os.path.exists(vendor_path):
-                        with open(vendor_path, 'r') as f:
+                        with open(vendor_path) as f:
                             if f.read().strip() == '0x8086':
                                 return True
             return False
@@ -156,12 +156,12 @@ class IntelGPUInfo(GPUInfo):
                 vendor_path = os.path.join(device_path, 'device', 'vendor')
 
                 if os.path.exists(vendor_path):
-                    with open(vendor_path, 'r') as f:
+                    with open(vendor_path) as f:
                         if f.read().strip() == '0x8086':
                             name = "Intel GPU"
                             uevent_path = os.path.join(device_path, 'device', 'uevent')
                             if os.path.exists(uevent_path):
-                                with open(uevent_path, 'r') as f:
+                                with open(uevent_path) as f:
                                     for line in f:
                                         if line.startswith('PCI_SLOT_NAME'):
                                             name = f"Intel GPU ({line.split('=')[1].strip()})"

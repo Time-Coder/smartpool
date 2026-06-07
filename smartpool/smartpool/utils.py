@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import List, Tuple, Dict, Any, TypeVar, Protocol, Optional, TYPE_CHECKING
+
+from typing import TYPE_CHECKING, Optional, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from torch.cuda import Stream
@@ -19,7 +20,7 @@ def has_gil()->bool:
         import sys
         try:
             _has_gil = sys._is_gil_enabled()
-        except:
+        except Exception:
             _has_gil = True
 
     return _has_gil
@@ -34,8 +35,8 @@ def limit_num_single_thread():
 
 
 def move_state_dict_to(obj, device):
-    import torch
     import numpy as np
+    import torch
 
     base_types = (int, float, complex, bool, str, bytes, type(None), np.ndarray, np.bool)
 
@@ -97,7 +98,7 @@ def _set_best_device(device:str, tid=None)->None:
 
     if tid is None:
         tid = threading.get_ident()
-        
+
     with _best_device_lock:
         _best_device[tid] = device
 
@@ -111,7 +112,7 @@ def best_device()->str:
     tid = threading.get_ident()
     with _best_device_lock:
         return _best_device[tid]
-    
+
 def _set_best_stream(stream:Optional[Stream], tid=None)->None:
     import threading
 
@@ -121,7 +122,7 @@ def _set_best_stream(stream:Optional[Stream], tid=None)->None:
 
     if tid is None:
         tid = threading.get_ident()
-        
+
     with _best_device_lock:
         _best_stream[tid] = stream
 
@@ -134,4 +135,4 @@ def best_stream()->Optional[Stream]:
 
     tid = threading.get_ident()
     with _best_device_lock:
-        return _best_stream.get(tid, None)
+        return _best_stream.get(tid)

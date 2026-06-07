@@ -2,9 +2,9 @@ import torch.nn as nn
 
 
 class ModernCNN(nn.Module):
-    
+
     def __init__(self):
-        super(ModernCNN, self).__init__()
+        super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(1, 32, 3, padding=1),
             nn.BatchNorm2d(32),
@@ -26,7 +26,7 @@ class ModernCNN(nn.Module):
             nn.Dropout(0.5),
             nn.Linear(256, 10)
         )
-    
+
     def forward(self, x):
         x = self.conv(x)
         x = x.view(x.size(0), -1)

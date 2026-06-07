@@ -1,27 +1,28 @@
+from typing import Any, Dict
+
 import matplotlib.pyplot as plt
 import numpy as np
 import rich
 from rich.table import Table
-from typing import Dict, Any
 
 
 def plot_results(model_results:Dict[str, Any], stats:Dict[str, Any]):
     fig, ax = plt.subplots(figsize=(12, 8))
-    
+
     plt.rcParams["font.family"] = ["Microsoft YaHei", "Arial", "sans-serif"]
     plt.rcParams["axes.unicode_minus"] = False
-    
+
     n_models = len(model_results)
     n_folds = 5
     x_pos = np.arange(n_models)
-    
+
     # 调整柱状图宽度和间距，使柱子整体居中对齐
     total_width = 0.8  # 总宽度
     bar_width = total_width / n_folds  # 每个柱子的宽度
-    
+
     # 定义不同fold的颜色
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-    
+
     for fold_idx in range(n_folds):
         fold_accuracies = []
         for module_result in model_results.values():
@@ -29,29 +30,29 @@ def plot_results(model_results:Dict[str, Any], stats:Dict[str, Any]):
                 fold_accuracies.append(module_result[fold_idx])
             else:
                 fold_accuracies.append(0)
-        
+
         # 计算每个柱子的位置，使其整体居中
         offset = (fold_idx - n_folds/2 + 0.5) * bar_width
-        ax.bar(x_pos + offset, fold_accuracies, 
-               bar_width, alpha=0.7, 
+        ax.bar(x_pos + offset, fold_accuracies,
+               bar_width, alpha=0.7,
                color=colors[fold_idx],
                label=f'Fold {fold_idx+1}')
-    
+
     means = [stat['mean'] for stat in stats.values()]
     stds = [stat['std'] for stat in stats.values()]
-    
-    ax.errorbar(x_pos, means, yerr=stds, fmt='o', color='black', 
+
+    ax.errorbar(x_pos, means, yerr=stds, fmt='o', color='black',
                 capsize=5, capthick=2, elinewidth=2, markersize=8,
                 label='Mean ± Std Dev')
-    
+
     for i, (mean, std) in enumerate(zip(means, stds)):
-        ax.annotate(f'{mean:.4f}\n±{std:.4f}', 
-                   xy=(x_pos[i], mean), 
+        ax.annotate(f'{mean:.4f}\n±{std:.4f}',
+                   xy=(x_pos[i], mean),
                    xytext=(0, 10),
                    textcoords='offset points',
                    ha='center', va='bottom',
                    fontsize=9)
-    
+
     ax.set_xlabel('Model Type', fontsize=12)
     ax.set_ylabel('Validation Accuracy', fontsize=12)
     ax.set_title('Handwritten Digit Recognition Models: 5-Fold Cross-Validation Comparison', fontsize=14, pad=20)
@@ -60,7 +61,7 @@ def plot_results(model_results:Dict[str, Any], stats:Dict[str, Any]):
     ax.legend(loc='lower right')
     ax.grid(True, alpha=0.3)
     ax.set_ylim(0.8, 1.0)
-    
+
     plt.tight_layout()
     plt.savefig('cross_validation_results.png', dpi=300, bbox_inches='tight')
     plt.show()
@@ -72,7 +73,7 @@ def print_results_table(stats:Dict[str, Any]):
     table.add_column("Std Deviation", style="green")
     table.add_column("Min", style="yellow")
     table.add_column("Max", style="blue")
-    
+
     for model_name, stat in stats.items():
         stat = stats[model_name]
         table.add_row(
@@ -82,5 +83,5 @@ def print_results_table(stats:Dict[str, Any]):
             f"{stat['min']:.4f}",
             f"{stat['max']:.4f}"
         )
-    
+
     rich.print(table)

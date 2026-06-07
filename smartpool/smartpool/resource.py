@@ -1,5 +1,6 @@
 from typing import Optional
 
+
 class DataSize:
     B = 1
     KB = 1024 * B
@@ -7,13 +8,13 @@ class DataSize:
     GB = 1024 * MB
     TB = 1024 * GB
     PB = 1024 * TB
-    
+
 
 class Resource:
 
     def __init__(self, *, cpu_cores:float=1, cpu_cores_in_python: Optional[float] = None, cpu_cores_out_of_python: float = 0,
                  cpu_mem: int = 0, gpu_cores: float = 0, gpu_mem: int = 0):
-        
+
         if cpu_cores_in_python is None:
             cpu_cores_in_python = cpu_cores
 

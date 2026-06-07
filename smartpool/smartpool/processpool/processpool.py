@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable, List
+
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from ..pool import Pool
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
-    from ..task import Task
+
     from ..resource import Resource
+    from ..task import Task
     from .processworker import ProcessWorker
 
 
@@ -23,8 +25,8 @@ class ProcessPool(Pool):
         max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
-        import threading
         import queue
+        import threading
 
         if use_torch:
             import torch.multiprocessing as mp
@@ -43,7 +45,7 @@ class ProcessPool(Pool):
 
             result_queue_cls=SimpleQueue,
             result_queue_kwargs={"ctx": self._ctx},
-            
+
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
             need_module_deps=True,
@@ -51,7 +53,7 @@ class ProcessPool(Pool):
         )
 
         self._process_name_prefix:str = process_name_prefix
-        
+
         self._feeding_queue:queue.SimpleQueue[Task] = queue.SimpleQueue()
         self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
         self._feeding_thread.start()
@@ -122,7 +124,7 @@ class ProcessPool(Pool):
         Pool._all_workers_working_count += 1
         worker.imported_modules.update(task.module_deps)
         self._feeding_queue.put(task)
-        
+
     def _feeding(self)->None:
         while not self._shutdown:
             task = self._feeding_queue.get()

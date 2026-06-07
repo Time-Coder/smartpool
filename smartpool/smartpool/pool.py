@@ -1,7 +1,18 @@
 from __future__ import annotations
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Optional, Callable, Union, Iterable
+
 import weakref
+from abc import ABC, abstractmethod
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from .resource import Resource
 
@@ -11,8 +22,8 @@ if TYPE_CHECKING:
 
     from .sysinfo import SysInfo
     from .task import Task
-    from .worker import Worker
     from .utils import QueueLike
+    from .worker import Worker
 
 
 class Pool(ABC):
@@ -33,7 +44,7 @@ class Pool(ABC):
         result_queue_cls:type,
         result_queue_args:Tuple[Any, ...]=(),
         result_queue_kwargs:Dict[str, Any]=None,
-        
+
         *,
 
         max_tasks_per_child:Optional[int],
@@ -43,8 +54,8 @@ class Pool(ABC):
     ):
         self._init_sys_info()
 
-        import threading
         import os
+        import threading
 
         if use_torch:
             import torch
@@ -79,7 +90,7 @@ class Pool(ABC):
 
         if result_queue_cls is not None:
             self._result_queue:QueueLike[Tuple[str, bool, Any]] = result_queue_cls(*result_queue_args, **result_queue_kwargs)
-        
+
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
         self._delayed_tasks:List[Task] = []
@@ -116,6 +127,7 @@ class Pool(ABC):
         use_onnx: bool = False
     )->Future:
         import threading
+
         from .task import Task
 
         if args is None:
@@ -136,7 +148,7 @@ class Pool(ABC):
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot submit after shutdown")
-            
+
             task = Task(
                 func=func,
                 args=args,
@@ -153,14 +165,14 @@ class Pool(ABC):
             if not self._try_assign_task(task):
                 self._delayed_tasks.append(task)
                 return task.future
-            
+
             self._put_task(task)
             if self._need_result_thread and self._result_thread is None:
                 self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
                 self._result_thread.start()
 
             return task.future
-        
+
     def _try_assign_task(self, task: Task) -> bool:
         gpu_res = task.gpu_mode_res
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
@@ -224,8 +236,9 @@ class Pool(ABC):
         if Pool._sys_info is not None:
             return
 
-        from .sysinfo import SysInfo
         import threading
+
+        from .sysinfo import SysInfo
 
         Pool._sys_info = SysInfo()
         Pool._sys_info_lock = threading.Lock()
@@ -249,8 +262,8 @@ class Pool(ABC):
 
     @staticmethod
     def _result_iterator(futures:List[Future], end_time:Optional[float]):
-        from concurrent.futures._base import _result_or_cancel
         import time
+        from concurrent.futures._base import _result_or_cancel
 
         try:
             futures.reverse()
@@ -275,17 +288,24 @@ class Pool(ABC):
     def starmap(
         self, func:Callable[..., Any],
         args_iterables:Iterable[Tuple[Any, ...]],
-        cpu_mode_res:Union[Resource, Iterable[Resource]] = Resource(cpu_cores_in_python=1),
-        gpu_mode_res:Union[Resource, Iterable[Resource], None]=None,
+        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
+        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]:
-        from functools import partial
         import itertools
         import time
         from collections.abc import Iterable
-        from concurrent.futures.process import _process_chunk, _chain_from_iterable_of_lists
+        from concurrent.futures.process import (
+            _chain_from_iterable_of_lists,
+            _process_chunk,
+        )
+        from functools import partial
+
         from .utils import batched
+
+        if cpu_mode_res is None:
+            cpu_mode_res = Resource()
 
         if not isinstance(cpu_mode_res, Iterable):
             cpu_mode_res = itertools.repeat(cpu_mode_res)
@@ -319,13 +339,13 @@ class Pool(ABC):
     def map(
         self, func:Callable[..., Any],
         iterable:Iterable[Any],
-        cpu_mode_res:Union[Resource, Iterable[Resource]] = Resource(cpu_cores_in_python=1),
-        gpu_mode_res:Union[Resource, Iterable[Resource], None]=None,
+        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
+        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
         timeout:Optional[Union[float, int]]=None,
         chunksize:int=1
     )->Iterable[Any]:
         args_iterable = ((item,) for item in iterable)
-        
+
         return self.starmap(
             func=func,
             args_iterables=args_iterable,
@@ -339,7 +359,7 @@ class Pool(ABC):
         with self._lock:
             if self._shutdown:
                 return
-            
+
             self._shutdown = True
 
             for worker in self._workers:
@@ -366,7 +386,7 @@ class Pool(ABC):
                 task.future.set_result(result)
             else:
                 task.future.set_exception(result)
-            
+
             worker:Worker = task.worker
             worker.is_working = False
             Pool._all_workers_working_count -= 1
@@ -387,7 +407,7 @@ class Pool(ABC):
         while not self._shutdown:
             task_id, success, result = self._result_queue.get()
             self._on_task_done(task_id, success, result)
-    
+
     def _postprocess_after_task_done(self)->None:
         if self._delayed_tasks:
             should_pop_indices = []
@@ -408,7 +428,7 @@ class Pool(ABC):
                 del self._delayed_tasks[i]
 
             for task_id in cancelled_task_ids:
-                del self._tasks[task_id] 
+                del self._tasks[task_id]
 
         for task in self._tasks.values():
             self._try_move_to_gpu(task)
@@ -419,10 +439,7 @@ class Pool(ABC):
     def _choose_task_device(self, task:Task, mode:str, kill_workers: bool) -> Tuple[Optional[str], List[Worker]]:
         from .worker import Worker
 
-        if mode == "cpu":
-            res = task.cpu_mode_res
-        else:
-            res = task.gpu_mode_res
+        res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
 
         if task.use_onnx:
             from .gpuinfo import GPUInfo
@@ -449,7 +466,7 @@ class Pool(ABC):
                         task.gpu_index = -1
                         task.dml_id = -1
                         return None, []
-                    
+
                     if kill_workers:
                         for idle_worker in idle_workers:
                             self._sys_info.cpu_mem_free += idle_worker.cached_rss
@@ -479,7 +496,7 @@ class Pool(ABC):
             torch_backend = self._get_task_torch_backend(task)
             if torch_backend:
                 gpus = [g for g in gpus if g.device and g.device.split(":")[0] == torch_backend]
-                
+
             if task.use_torch and torch_backend is None:
                 gpus = []
 
@@ -508,7 +525,7 @@ class Pool(ABC):
             task.gpu_index = -1
             task.dml_id = -1
             return None, []
-        
+
         task.device = best_gpu.device
         task.gpu_index = best_gpu.index
         task.dml_id = best_gpu.dml_id
@@ -542,11 +559,11 @@ class Pool(ABC):
                 if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
                     task.modules_overlap_ratio = current_overlap_ratio
                     best_worker = worker
-            
+
         if best_worker is not None:
             task.worker = best_worker
             return best_worker
-            
+
         task.modules_overlap_ratio = 0.0
         if len(self._workers) < self._max_workers:
             task.worker = self._add_worker()
@@ -582,7 +599,7 @@ class Pool(ABC):
             not task.worker.is_working
         ):
             return
-        
+
         with self._sys_info_lock:
             gpus = self._sys_info.gpu_infos
             torch_backend = self._get_task_torch_backend(task)
@@ -594,10 +611,18 @@ class Pool(ABC):
             best_gpu = None
             need_best_gpu_cores:int = 0
             for gpu in gpus:
-                if gpu.mem_free >= gpu_res.gpu_mem and gpu.n_cores_free >= gpu_res.gpu_cores:
-                    if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
-                        best_gpu = gpu
-                        need_best_gpu_cores = gpu_res.gpu_cores
+                if gpu.mem_free < gpu_res.gpu_mem:
+                    continue
+
+                if gpu.n_cores_free < gpu_res.gpu_cores:
+                    continue
+
+                if task.use_onnx and not gpu.parent_class.supported_onnx_providers:
+                    continue
+
+                if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
+                    best_gpu = gpu
+                    need_best_gpu_cores = gpu_res.gpu_cores
 
             if best_gpu is None:
                 return

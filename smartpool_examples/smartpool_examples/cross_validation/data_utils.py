@@ -1,8 +1,8 @@
 import os
+
+from config import BATCH_SIZE, DATA_ROOT
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
-
-from config import DATA_ROOT, BATCH_SIZE
 
 
 def prepare_data():
@@ -10,16 +10,16 @@ def prepare_data():
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    
+
     mnist_exists = (
         os.path.exists(os.path.join(DATA_ROOT, 'MNIST', 'raw')) and
         os.path.exists(os.path.join(DATA_ROOT, 'MNIST', 'processed'))
     )
-    
+
     dataset = datasets.MNIST(
-        root=DATA_ROOT, 
-        train=True, 
-        download=not mnist_exists, 
+        root=DATA_ROOT,
+        train=True,
+        download=not mnist_exists,
         transform=transform
     )
     dataset.data.share_memory_()
@@ -30,18 +30,18 @@ def prepare_data():
 def create_data_loaders(dataset, train_indices, val_indices):
     train_subset = Subset(dataset, train_indices)
     val_subset = Subset(dataset, val_indices)
-    
+
     train_loader = DataLoader(
-        train_subset, 
-        batch_size=BATCH_SIZE, 
-        shuffle=True, 
+        train_subset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
         pin_memory=True
     )
     val_loader = DataLoader(
-        val_subset, 
-        batch_size=BATCH_SIZE, 
-        shuffle=False, 
+        val_subset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
         pin_memory=True
     )
-    
+
     return train_loader, val_loader

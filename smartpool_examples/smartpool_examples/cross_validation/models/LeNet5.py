@@ -2,9 +2,9 @@ import torch.nn as nn
 
 
 class LeNet5(nn.Module):
-    
+
     def __init__(self):
-        super(LeNet5, self).__init__()
+        super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(1, 6, 5),      # 28x28 -> 24x24
             nn.ReLU(),
@@ -20,7 +20,7 @@ class LeNet5(nn.Module):
             nn.ReLU(),
             nn.Linear(84, 10)
         )
-    
+
     def forward(self, x):
         x = self.conv(x)
         x = x.view(x.size(0), -1)

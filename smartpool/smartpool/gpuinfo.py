@@ -1,8 +1,9 @@
 from __future__ import annotations
-from abc import ABC, abstractmethod
+
 import uuid
+from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Type, Optional, List
+from typing import List, Optional, Type
 
 
 class GPUVendor(Enum):
@@ -145,15 +146,15 @@ class GPUInfo(ABC):
     def init_onnx_providers()->None:
         if GPUInfo.supported_onnx_providers is not None:
             return
-        
+
         try:
             import onnxruntime
             GPUInfo.supported_onnx_providers = onnxruntime.get_available_providers()
         except ImportError:
             GPUInfo.supported_onnx_providers = []
 
-        from .intel_gpuinfo import IntelGPUInfo
         from .amd_gpuinfo import AMDGPUInfo
+        from .intel_gpuinfo import IntelGPUInfo
         from .nvidia_gpuinfo import NvidiaGPUInfo
         children:List[Type[GPUInfo]] = [
             IntelGPUInfo,
@@ -240,10 +241,10 @@ class GPUInfo(ABC):
     def mem_util(self) -> Optional[float]:
         if self.mem_total is None or self.mem_used is None:
             return None
-        
+
         if self.mem_total == 0:
             return None
-        
+
         return self.mem_used / self.mem_total
 
     @property
@@ -271,7 +272,7 @@ class GPUInfo(ABC):
     def n_cores_free(self) -> Optional[int]:
         if self.n_cores is None or self.n_cores_used is None:
             return None
-        
+
         return self.n_cores - self.n_cores_used
 
     @property
@@ -292,7 +293,7 @@ class GPUInfo(ABC):
     def display_active(self) -> Optional[bool]:
         if self._display_active is None:
             self._display_active = self._fetch_display_active()
-            
+
         return self._display_active
 
     def update(self) -> None:

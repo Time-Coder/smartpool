@@ -1,10 +1,9 @@
-from typing import Iterator, List, Optional, Type, Dict
+from typing import Dict, Iterator, List, Optional, Type
 
-from .gpuinfo import GPUInfo, GPUVendor, GPUInfoSnapshot
-
-from .nvidia_gpuinfo import NvidiaGPUInfo
-from .intel_gpuinfo import IntelGPUInfo
 from .amd_gpuinfo import AMDGPUInfo
+from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
+from .intel_gpuinfo import IntelGPUInfo
+from .nvidia_gpuinfo import NvidiaGPUInfo
 
 
 class MetaGPUInfos(type):
@@ -17,7 +16,7 @@ class MetaGPUInfos(type):
         import platform
         if platform.system() != "Windows":
             return {}
-        
+
         import wmi
         c = wmi.WMI()
         adapters = list(c.Win32_VideoController())
@@ -30,7 +29,7 @@ class MetaGPUInfos(type):
     def __init() -> None:
         if MetaGPUInfos.__gpu_infos is not None:
             return
-        
+
         MetaGPUInfos.__gpu_infos = []
         MetaGPUInfos.__n_devices = 0
 

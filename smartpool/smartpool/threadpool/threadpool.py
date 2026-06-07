@@ -1,11 +1,14 @@
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+
 from ..pool import Pool
-from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, Callable
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
-    from ..task import Task
+
     from ..resource import Resource
+    from ..task import Task
     from .threadworker import ThreadWorker
 
 

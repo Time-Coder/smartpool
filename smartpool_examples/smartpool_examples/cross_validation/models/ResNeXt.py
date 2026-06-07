@@ -1,8 +1,9 @@
 import torch.nn as nn
 
+
 class ResNeXtBlock(nn.Module):
     def __init__(self, in_channels, out_channels, cardinality=32, stride=1):
-        super(ResNeXtBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, stride=stride, padding=1, groups=cardinality, bias=False)
@@ -10,7 +11,7 @@ class ResNeXtBlock(nn.Module):
         self.conv3 = nn.Conv2d(out_channels, out_channels * 2, 1, bias=False)
         self.bn3 = nn.BatchNorm2d(out_channels * 2)
         self.relu = nn.ReLU(inplace=True)
-        
+
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels * 2:
             self.shortcut = nn.Sequential(
@@ -29,14 +30,14 @@ class ResNeXtBlock(nn.Module):
 
 class ResNeXt(nn.Module):
     def __init__(self):
-        super(ResNeXt, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.relu = nn.ReLU(inplace=True)
-        
+
         self.layer1 = self._make_layer(32, 64, 2, stride=2)
         self.layer2 = self._make_layer(128, 128, 2, stride=2)
-        
+
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(256, 10)
 

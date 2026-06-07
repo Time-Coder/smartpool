@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, Any, Dict, Tuple, Set, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
-    from .task import Task
-    from .utils import QueueLike
-
     import multiprocessing as mp
     import threading
+
+    from .task import Task
+    from .utils import QueueLike
 
 
 class Worker(ABC):
@@ -34,7 +35,7 @@ class Worker(ABC):
         self.result_queue:QueueLike[Tuple[str, bool, Any]] = result_queue
         self.task_queue:QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
         self.process_or_thread:Optional[Union[mp.Process, threading.Thread]] = None
-    
+
     def add_task(self, task:Task)->None:
         self.start()
         self.task_queue.put(task.info())
@@ -48,7 +49,7 @@ class Worker(ABC):
     def is_working(self, is_working:bool)->None:
         if self._is_working == is_working:
             return
-        
+
         self._is_working = is_working
 
         if is_working:
@@ -75,7 +76,7 @@ class Worker(ABC):
     def stop(self, wait:bool=True, clear:bool=False)->None:
         if self.process_or_thread is None:
             return
-        
+
         self.task_queue.put(None)
         if wait:
             self.join()
@@ -89,7 +90,7 @@ class Worker(ABC):
     def overlap_modules_ratio(self, task:Task)->float:
         if not self.imported_modules:
             return 0
-        
+
         return len(self.imported_modules & task.module_deps) / len(self.imported_modules)
 
     @staticmethod
@@ -112,14 +113,14 @@ class Worker(ABC):
         initkwargs:Optional[Dict[str, Any]]
     ):
         from .utils import _set_best_device
-        
+
 
         if initializer is not None:
             if initkwargs is None:
                 initkwargs = {}
 
             initializer(*initargs, **initkwargs)
-        
+
         if change_device_cmd_queue is not None:
             import threading
 

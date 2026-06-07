@@ -1,13 +1,13 @@
+import functools
 import sys
 import warnings
-import functools
 from types import ModuleType
 from typing import Set
 
 
 def _good_module_name(module_name:str, module_names:Set[str])->bool:
     return (
-        module_name and 
+        module_name and
         module_name not in module_names and
         not module_name.startswith('builtins') and
         module_name in sys.modules
@@ -19,15 +19,15 @@ def _module_deps(module:ModuleType)->Set[str]:
 
     while stack:
         current_module = stack.pop()
-        
+
         for obj in current_module.__dict__.values():
             candidate_name = ""
             if isinstance(obj, ModuleType) and hasattr(obj, '__name__'):
                 candidate_name = obj.__name__
-            
+
             elif hasattr(obj, '__module__'):
                 candidate_name = obj.__module__
-            
+
             elif hasattr(obj, '__class__') and hasattr(obj.__class__, '__module__'):
                 candidate_name = obj.__class__.__module__
 
@@ -35,7 +35,7 @@ def _module_deps(module:ModuleType)->Set[str]:
                 sub_module = sys.modules[candidate_name]
                 module_names.add(candidate_name)
                 stack.append(sub_module)
-    
+
     return module_names
 
 

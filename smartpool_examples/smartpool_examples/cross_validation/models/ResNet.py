@@ -1,14 +1,15 @@
 import torch.nn as nn
 
+
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
-        
+
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -26,14 +27,14 @@ class ResidualBlock(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(self):
-        super(ResNet, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         self.relu = nn.ReLU(inplace=True)
-        
+
         self.layer1 = self._make_layer(32, 64, 2, stride=2)
         self.layer2 = self._make_layer(64, 128, 2, stride=2)
-        
+
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(128, 10)
 

@@ -3,10 +3,9 @@ from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
-
-from smartpool import Resource, InferSessionPool
-
 from config import COCO_CLASSES
+
+from smartpool import InferSessionPool, Resource
 
 
 def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
