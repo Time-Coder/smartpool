@@ -13,4 +13,4 @@ for file in files:
         newest_file = file
 
 subprocess.check_call([sys.executable, "-m", "pip", "uninstall", f"{dist_dir}/{newest_file}", "-y"])
-subprocess.check_call([sys.executable, "-m", "pip", "install", f"{dist_dir}/{newest_file}", "--upgrade"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", f"{dist_dir}/{newest_file}", "--upgrade", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"])
