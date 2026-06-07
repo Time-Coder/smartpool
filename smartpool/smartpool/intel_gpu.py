@@ -240,4 +240,18 @@ class IntelGPUInfo(GPUInfo):
         return None
 
     def _fetch_num_cores(self) -> Optional[int]:
+        try:
+            import pyopencl as cl
+            platforms = cl.get_platforms()
+            for platform in platforms:
+                vendor = platform.vendor.lower()
+                if 'intel' in vendor:
+                    devices = platform.get_devices(device_type=cl.device_type.GPU)
+                    if 0 <= self._device_id < len(devices):
+                        device = devices[self._device_id]
+                        return device.max_compute_units * device.max_work_group_size
+        except ImportError:
+            pass
+        except Exception:
+            pass
         return None

@@ -55,7 +55,7 @@ class ThreadPool(Pool):
         return max_in
 
     def _max_used_gpu_cores(self, gpu_id:int)->int:
-        if gpu_id in self.__max_used_gpu_cores:
+        if gpu_id in self.__max_used_gpu_cores and self.__max_used_gpu_cores[gpu_id] is not None:
             return self.__max_used_gpu_cores[gpu_id]
 
         max_used_cores = 0
