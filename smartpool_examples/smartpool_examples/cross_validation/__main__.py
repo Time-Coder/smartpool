@@ -1,4 +1,12 @@
-from smartpool import ProcessPool, ThreadPool, DataSize, limit_num_single_thread
+if __name__ == "__main__":
+    import sys
+    import os
+    self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
+    target_folder = os.path.abspath(self_folder + "/../../../smartpool").replace("\\", "/")
+    sys.path.append(target_folder)
+
+
+from smartpool import ProcessPool, ThreadPool, DataSize, limit_num_single_thread, Resource
 limit_num_single_thread()
 
 import typer
@@ -146,10 +154,16 @@ def main(
                 future = process_pool.submit(
                     train_single_fold,
                     args=task_args,
-                    cpu_cores_needed=1,
-                    cpu_mem_needed=1.1*DataSize.GB,
-                    gpu_cores_needed=1000,
-                    gpu_mem_needed=0.2*DataSize.GB
+                    cpu_mode_res=Resource(
+                        cpu_cores=1,
+                        cpu_mem=1.1*DataSize.GB
+                    ),
+                    gpu_mode_res=Resource(
+                        cpu_cores=1,
+                        cpu_mem=1.1*DataSize.GB,
+                        gpu_cores=1000,
+                        gpu_mem=0.2*DataSize.GB
+                    )
                 )
             elif pool.startswith("concurrent.futures."):
                 future = process_pool.submit(train_single_fold, *task_args, best_device if i % max_workers < 5 else 'cpu')

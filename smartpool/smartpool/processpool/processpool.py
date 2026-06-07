@@ -46,7 +46,8 @@ class ProcessPool(Pool):
             
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
-            need_module_deps=True
+            need_module_deps=True,
+            need_result_thread=True
         )
 
         self._process_name_prefix:str = process_name_prefix

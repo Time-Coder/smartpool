@@ -475,6 +475,9 @@ class Pool(ABC):
             torch_backend = self._get_task_torch_backend(task)
             if torch_backend:
                 gpus = [g for g in gpus if g.device and g.device.split(":")[0] == torch_backend]
+                
+            if task.use_torch and torch_backend is None:
+                gpus = []
 
             if not gpus:
                 task.device = None
