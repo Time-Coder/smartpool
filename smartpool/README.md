@@ -39,6 +39,7 @@ if __name__ == "__main__":
 ### Resource-Aware Task Scheduling
 
 ```python
+import os
 from smartpool import ProcessPool, DataSize, Resource
 
 
