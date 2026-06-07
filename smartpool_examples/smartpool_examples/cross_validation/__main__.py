@@ -10,12 +10,12 @@ from smartpool import ProcessPool, ThreadPool, DataSize, limit_num_single_thread
 limit_num_single_thread()
 
 import typer
-from typing import Literal
+from typing import Literal, TypeAlias
 
 
 app = typer.Typer(help="Use smartpool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
 
-PoolChoice = Literal[
+PoolChoice: TypeAlias = Literal[
     "smartpool.ProcessPool",
     "smartpool.ThreadPool",
     "multiprocessing.Pool",

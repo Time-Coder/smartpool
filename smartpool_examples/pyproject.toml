@@ -30,3 +30,6 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/Time-Coder/smartpool"
 Repository = "https://github.com/Time-Coder/smartpool.git"
+
+[tool.setuptools.packages.find]
+include = ["smartpool_examples", "smartpool_examples.*"]
