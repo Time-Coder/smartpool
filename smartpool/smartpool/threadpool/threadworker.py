@@ -40,6 +40,7 @@ class ThreadWorker(Worker):
     def add_task(self, task:Task)->None:
         self.start()
         self.task_queue.put(task)
+        task.future.set_running_or_notify_cancel()
 
     def change_device(self, device:str)->None:
         _set_best_device(device, self.process_or_thread.ident)
@@ -74,7 +75,9 @@ class ThreadWorker(Worker):
         self.process_or_thread.start()
 
     def join(self)->None:
-        self.process_or_thread.join()
+        if self.process_or_thread is not None:
+            self.process_or_thread.join()
+            
         self._clear()
 
     def run(self):

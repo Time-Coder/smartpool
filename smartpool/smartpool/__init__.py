@@ -6,9 +6,9 @@ from .resource import DataSize, Resource
 
 from .gpuinfos import GPUInfos
 from .gpuinfo import GPUVendor, GPUInfoSnapshot
-from .nvidia_gpu import NvidiaGPUInfo
-from .intel_gpu import IntelGPUInfo
-from .amd_gpu import AMDGPUInfo
+from .nvidia_gpuinfo import NvidiaGPUInfo
+from .intel_gpuinfo import IntelGPUInfo
+from .amd_gpuinfo import AMDGPUInfo
 
 __all__ = [
     "ProcessPool",

@@ -9,7 +9,7 @@ class DataSize:
 
 class Resource:
 
-    def __init__(self, cpu_cores_in_python: float = 0, cpu_cores_out_of_python: float = 0,
+    def __init__(self, cpu_cores_in_python: float = 1, cpu_cores_out_of_python: float = 0,
                  cpu_mem: int = 0, gpu_cores: float = 0, gpu_mem: int = 0):
         self.cpu_cores_in_python = cpu_cores_in_python
         self.cpu_cores_out_of_python = cpu_cores_out_of_python

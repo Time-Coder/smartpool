@@ -1,9 +1,9 @@
 from typing import Iterator, List, Optional
 
-from .gpuinfo import GPUInfo, GPUVendor
-from .nvidia_gpu import NvidiaGPUInfo
-from .intel_gpu import IntelGPUInfo
-from .amd_gpu import AMDGPUInfo
+from .gpuinfo import GPUInfo, GPUVendor, GPUInfoSnapshot
+from .nvidia_gpuinfo import NvidiaGPUInfo
+from .intel_gpuinfo import IntelGPUInfo
+from .amd_gpuinfo import AMDGPUInfo
 
 
 class MetaGPUInfos(type):
@@ -23,13 +23,16 @@ class MetaGPUInfos(type):
                 AMDGPUInfo,
             ]
 
+            index = 0
             for gpu_class in gpu_classes:
                 if not gpu_class.is_available():
                     continue
 
                 count = gpu_class.get_device_count()
                 for i in range(count):
-                    MetaGPUInfos.__gpu_infos.append(gpu_class(i))
+                    gpu = gpu_class(i, index)
+                    MetaGPUInfos.__gpu_infos.append(gpu)
+                    index += 1
 
                 MetaGPUInfos.__n_devices += count
 

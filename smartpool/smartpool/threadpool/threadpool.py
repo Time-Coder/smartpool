@@ -36,7 +36,6 @@ class ThreadPool(Pool):
 
         self._thread_name_prefix:str = thread_name_prefix
         self.__max_used_cpu_cores_in_python = None
-        self.__max_used_gpu_cores = {}
 
     def _max_used_cpu_cores_in_python(self)->int:
         if self.__max_used_cpu_cores_in_python is not None:
@@ -53,22 +52,6 @@ class ThreadPool(Pool):
 
         self.__max_used_cpu_cores_in_python = max_in
         return max_in
-
-    def _max_used_gpu_cores(self, gpu_id:int)->int:
-        if gpu_id in self.__max_used_gpu_cores and self.__max_used_gpu_cores[gpu_id] is not None:
-            return self.__max_used_gpu_cores[gpu_id]
-
-        max_used_cores = 0
-        for task in self._tasks.values():
-            if task.worker is None or not task.worker.is_working or task.gpu_id != gpu_id:
-                continue
-
-            task_gpu = task.effective_res.gpu_cores
-            if task_gpu > max_used_cores:
-                max_used_cores = task_gpu
-
-        self.__max_used_gpu_cores[gpu_id] = max_used_cores
-        return max_used_cores
 
     def _has_gil(self)->bool:
         from ..utils import has_gil
@@ -89,17 +72,10 @@ class ThreadPool(Pool):
                 self._sys_info.cpu_cores_free -= res.cpu_cores_out_of_python
 
             self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
-            task_gpu_id:int = task.gpu_id
-            if task_gpu_id != -1:
-                if not self._has_gil():
-                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= res.gpu_cores
-                else:
-                    max_used_gpu = self._max_used_gpu_cores(task_gpu_id)
-                    if res.gpu_cores > max_used_gpu:
-                        self.__max_used_gpu_cores[task_gpu_id] = res.gpu_cores
-                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= (res.gpu_cores - max_used_gpu)
-
-                self._sys_info.gpu_infos[task_gpu_id].mem_free -= res.gpu_mem
+            task_gpu_index:int = task.gpu_index
+            if task_gpu_index != -1:
+                self._sys_info.gpu_infos[task_gpu_index].n_cores_free -= res.gpu_cores
+                self._sys_info.gpu_infos[task_gpu_index].mem_free -= res.gpu_mem
 
     def _release_resource(self, task:Task)->None:
         with self._sys_info_lock:
@@ -116,26 +92,12 @@ class ThreadPool(Pool):
                 self._sys_info.cpu_cores_free += res.cpu_cores_out_of_python
 
             self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
-            task_gpu_id:int = task.gpu_id
-            if task_gpu_id != -1:
-                if not self._has_gil():
-                    self._sys_info.gpu_infos[task_gpu_id].n_cores_free += res.gpu_cores
-                else:
-                    max_used_gpu = self._max_used_gpu_cores(task_gpu_id)
-                    if res.gpu_cores >= max_used_gpu:
-                        self.__max_used_gpu_cores[task_gpu_id] = None
-                        max_used_gpu = self._max_used_gpu_cores(task_gpu_id)
-                        self._sys_info.gpu_infos[task_gpu_id].n_cores_free += (res.gpu_cores - max_used_gpu)
+            task_gpu_index:int = task.gpu_index
+            if task_gpu_index != -1:
+                self._sys_info.gpu_infos[task_gpu_index].n_cores_free += res.gpu_cores
+                self._sys_info.gpu_infos[task_gpu_index].mem_free += res.gpu_mem
 
-                self._sys_info.gpu_infos[task_gpu_id].mem_free += res.gpu_mem
-
-    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> int:
-        if self._has_gil():
-            return max(0, res.gpu_cores - self._max_used_gpu_cores(gpu_id))
-        else:
-            return res.gpu_cores
-
-    def _estimate_cpu_cores_needes(self, task:Task, res: Resource) -> int:
+    def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         if self._has_gil():
             max_in = self._max_used_cpu_cores_in_python()
             return max(0, res.cpu_cores_in_python - max_in) + res.cpu_cores_out_of_python
@@ -147,7 +109,6 @@ class ThreadPool(Pool):
         worker:ThreadWorker = task.worker
         worker.is_working = True
         Pool._all_workers_working_count += 1
-        task.future.set_running_or_notify_cancel()
         worker.add_task(task)
 
     def _add_worker(self)->ThreadWorker:

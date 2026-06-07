@@ -169,6 +169,7 @@ class Pool(ABC):
                 device, should_kill_workers = self._choose_task_device(task, "gpu", kill_workers=False)
                 if device is not None:
                     for idle_worker in should_kill_workers:
+                        self._sys_info.cpu_mem_free += idle_worker.cached_rss
                         idle_worker.stop(wait=False, clear=True)
 
                     return True
@@ -427,9 +428,10 @@ class Pool(ABC):
             if Worker.total_working_count() == 0:
                 self._sys_info.update()
 
-            cpu_cores_needed = self._estimate_cpu_cores_needes(task, res)
+            cpu_cores_needed = self._estimate_cpu_cores_needed(res)
             if cpu_cores_needed > self._sys_info.cpu_cores_free:
                 task.device = None
+                task.gpu_index = -1
                 return None, []
 
             should_kill_workers = []
@@ -439,6 +441,7 @@ class Pool(ABC):
                     idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
                     if cpu_mem_needed > self._sys_info.cpu_mem_free + total_hold_mem:
                         task.device = None
+                        task.gpu_index = -1
                         return None, []
                     
                     if kill_workers:
@@ -456,10 +459,12 @@ class Pool(ABC):
                                 break
                 else:
                     task.device = None
+                    task.gpu_index = -1
                     return None, []
 
             if mode == "cpu":
                 task.device = "cpu"
+                task.gpu_index = -1
                 return "cpu", should_kill_workers
 
             gpus = self._sys_info.gpu_infos
@@ -469,20 +474,29 @@ class Pool(ABC):
 
             if not gpus:
                 task.device = None
+                task.gpu_index = -1
                 return None, []
 
             best_gpu = None
             for gpu in gpus:
-                gpu_cores_needed:int = self._estimate_need_gpu_cores(task, gpu.id, res)
-                if gpu.mem_free >= res.gpu_mem and gpu.n_cores_free >= gpu_cores_needed:
+                if gpu.mem_free >= res.gpu_mem and gpu.n_cores_free >= res.gpu_cores:
                     if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                         best_gpu = gpu
 
         if best_gpu is None:
             task.device = None
+            task.gpu_index = -1
             return None, []
+        
 
         task.device = best_gpu.device
+        task.gpu_index = best_gpu.index
+        if task.use_onnx:
+            if task.onnx_provider[0] == "CPUExecutionProvider":
+                task.device = None
+                task.gpu_index = -1
+                return None, []
+            
         return best_gpu.device, should_kill_workers
 
     def _choose_task_worker(self, task:Task, res: Resource) -> Optional[Worker]:
@@ -535,11 +549,7 @@ class Pool(ABC):
         pass
 
     @abstractmethod
-    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> float:
-        pass
-
-    @abstractmethod
-    def _estimate_cpu_cores_needes(self, task:Task, res: Resource) -> float:
+    def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         pass
 
     @abstractmethod
@@ -549,6 +559,7 @@ class Pool(ABC):
     def _try_move_to_gpu(self, task:Task)->None:
         gpu_res = task.gpu_mode_res
         if (
+            not task.use_torch or
             task.device is None or
             task.device != "cpu" or
             gpu_res.gpu_cores == 0 or
@@ -568,11 +579,10 @@ class Pool(ABC):
             best_gpu = None
             need_best_gpu_cores:int = 0
             for gpu in gpus:
-                gpu_cores_needed:int = self._estimate_need_gpu_cores(task, gpu.id, gpu_res)
-                if gpu.mem_free >= gpu_res.gpu_mem and gpu.n_cores_free >= gpu_cores_needed:
+                if gpu.mem_free >= gpu_res.gpu_mem and gpu.n_cores_free >= gpu_res.gpu_cores:
                     if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                         best_gpu = gpu
-                        need_best_gpu_cores = gpu_cores_needed
+                        need_best_gpu_cores = gpu_res.gpu_cores
 
             if best_gpu is None:
                 return
@@ -580,6 +590,7 @@ class Pool(ABC):
             worker:Worker = task.worker
             worker.change_device(best_gpu.device)
             task.device = best_gpu.device
+            task.gpu_index = best_gpu.index
             best_gpu.n_cores_free -= need_best_gpu_cores
             best_gpu.mem_free -= gpu_res.gpu_mem
 

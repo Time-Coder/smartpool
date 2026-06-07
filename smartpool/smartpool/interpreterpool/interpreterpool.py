@@ -43,26 +43,23 @@ class InterpreterPool(Pool):
             task.estimated_need_cpu_mem = (1 - task.modules_overlap_ratio) * res.cpu_mem
             self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
 
-            task_gpu_id:int = task.gpu_id
-            if task_gpu_id != -1:
-                self._sys_info.gpu_infos[task_gpu_id].n_cores_free -= res.gpu_cores
-                self._sys_info.gpu_infos[task_gpu_id].mem_free -= res.gpu_mem
+            task_gpu_index:int = task.gpu_index
+            if task_gpu_index != -1:
+                self._sys_info.gpu_infos[task_gpu_index].n_cores_free -= res.gpu_cores
+                self._sys_info.gpu_infos[task_gpu_index].mem_free -= res.gpu_mem
 
     def _release_resource(self, task:Task)->None:
         with self._sys_info_lock:
             res = task.effective_res
             self._sys_info.cpu_cores_free += res.cpu_cores
             self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
-            task_gpu_id:int = task.gpu_id
-            if task_gpu_id != -1:
-                self._sys_info.gpu_infos[task_gpu_id].n_cores_free += res.gpu_cores
-                self._sys_info.gpu_infos[task_gpu_id].mem_free += res.gpu_mem
+            task_gpu_index:int = task.gpu_index
+            if task_gpu_index != -1:
+                self._sys_info.gpu_infos[task_gpu_index].n_cores_free += res.gpu_cores
+                self._sys_info.gpu_infos[task_gpu_index].mem_free += res.gpu_mem
 
-    def _estimate_cpu_cores_needes(self, task:Task, res: Resource) -> float:
+    def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores
-
-    def _estimate_need_gpu_cores(self, task:Task, gpu_id:int, res: Resource) -> float:
-        return res.gpu_cores
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)
@@ -70,7 +67,6 @@ class InterpreterPool(Pool):
         worker.is_working = True
         Pool._all_workers_working_count += 1
         worker.imported_modules.update(task.module_deps)
-        task.future.set_running_or_notify_cancel()
         worker.add_task(task)
 
     def _add_worker(self)->InterpreterWorker:

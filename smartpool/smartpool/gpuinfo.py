@@ -14,6 +14,7 @@ class GPUVendor(Enum):
 class GPUInfoSnapshot:
 
     def __init__(self):
+        self.index: Optional[int] = None
         self.device_id: Optional[int] = None
         self.name: Optional[str] = None
         self.uuid: Optional[uuid.UUID] = None
@@ -31,39 +32,30 @@ class GPUInfoSnapshot:
         self.n_cores_used: Optional[int] = None
 
     @property
-    def id(self) -> Optional[int]:
-        return self.device_id
-
-    @property
     def mem_free(self) -> Optional[int]:
-        if self.mem_total is None or self.mem_used is None:
-            return None
         return self.mem_total - self.mem_used
 
     @mem_free.setter
     def mem_free(self, value: int) -> None:
-        if self.mem_total is not None:
-            self.mem_used = self.mem_total - value
+        self.mem_used = self.mem_total - value
 
     @property
     def n_cores_free(self) -> Optional[int]:
-        if self.n_cores is None or self.n_cores_used is None:
-            return None
         return self.n_cores - self.n_cores_used
 
     @n_cores_free.setter
     def n_cores_free(self, value: int) -> None:
-        if self.n_cores is not None:
-            self.n_cores_used = self.n_cores - value
+        self.n_cores_used = self.n_cores - value
 
 
 class GPUInfo(ABC):
 
     supported_onnx_providers = []
 
-    def __init__(self, device_id: int):
+    def __init__(self, device_id: int, index: int):
         self._device_id = device_id
-        
+        self._index = index
+
         self._name: Optional[str] = None
         self._uuid: Optional[uuid.UUID] = None
         self._serial: Optional[str] = None
@@ -129,13 +121,13 @@ class GPUInfo(ABC):
     @staticmethod
     def gpuinfo_class(device_prefix:str)->Type[GPUInfo]:
         if device_prefix == "cuda":
-            from .nvidia_gpu import NvidiaGPUInfo
+            from .nvidia_gpuinfo import NvidiaGPUInfo
             return NvidiaGPUInfo
         elif device_prefix == "xpu":
-            from .intel_gpu import IntelGPUInfo
+            from .intel_gpuinfo import IntelGPUInfo
             return IntelGPUInfo
         elif device_prefix == "hip":
-            from .amd_gpu import AMDGPUInfo
+            from .amd_gpuinfo import AMDGPUInfo
             return AMDGPUInfo
         else:
             raise ValueError(f"Unknown device prefix: {device_prefix}")
@@ -143,6 +135,10 @@ class GPUInfo(ABC):
     @property
     def device_id(self) -> int:
         return self._device_id
+
+    @property
+    def index(self) -> int:
+        return self._index
 
     @property
     def device(self) -> str:
@@ -303,6 +299,7 @@ class GPUInfo(ABC):
             n_cores_used = True
 
         snapshot = GPUInfoSnapshot()
+        snapshot.index = self._index
         snapshot.device_id = self.device_id
         snapshot.vendor = self.vendor.value
         snapshot.device = self.device

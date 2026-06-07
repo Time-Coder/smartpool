@@ -30,8 +30,8 @@ class AMDGPUInfo(GPUInfo):
         "DmlExecutionProvider"
     ]
 
-    def __init__(self, device_id: int):
-        GPUInfo.__init__(self, device_id)
+    def __init__(self, device_id: int, index: int):
+        GPUInfo.__init__(self, device_id, index)
         self._ensure_init()
 
     @classmethod

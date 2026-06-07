@@ -34,6 +34,7 @@ class Task:
             self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
         
         self._device:Optional[str] = None
+        self.gpu_index:int = -1
         self.worker:Worker = None
         self.mem_before_enter:int = 0
         self._onnx_provider:Optional[Tuple[str, Dict]] = None
@@ -77,11 +78,7 @@ class Task:
         items = self.device.split(":")
         device_prefix = items[0]
         device_id = int(items[1])
-        gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)
-        if gpuinfo_class is None:
-            self._onnx_provider = ("CPUExecutionProvider", {})
-            return self._onnx_provider
-        
+        gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)        
         for provider_name in gpuinfo_class.supported_onnx_providers:
             if provider_name in Task._all_supported_onnx_providers:
                 options = {"device_id": device_id, "gpu_mem_limit": self.gpu_mode_res.gpu_mem}
@@ -100,9 +97,9 @@ class Task:
 
     def info(self):
         return (self.id, self.device, self.onnx_provider, self.func, self.args, self.kwargs)
-
+    
     @property
-    def gpu_id(self)->int:
+    def device_id(self)->int:
         if isinstance(self.device, str) and ":" in self.device:
             parts = self.device.split(":")
             if len(parts) == 2:
