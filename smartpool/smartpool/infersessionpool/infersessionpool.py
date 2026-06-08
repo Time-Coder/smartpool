@@ -31,7 +31,8 @@ class InferSessionPool(ThreadPool):
             max_tasks_per_child=max_tasks_per_child,
             use_torch=False
         )
-        self.print_info:bool = False
+        self._use_onnx: bool = True
+        self.print_info: bool = False
 
     def _add_worker(self)->InferSessionWorker:
         from .infersessionworker import InferSessionWorker
@@ -68,6 +69,5 @@ class InferSessionPool(ThreadPool):
             args=args, kwargs=kwargs,
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
-            use_torch=False,
-            use_onnx=True
+            use_torch=False
         )

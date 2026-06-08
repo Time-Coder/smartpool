@@ -15,8 +15,7 @@ class Task:
 
     def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any],
                  cpu_mode_res: Resource, gpu_mode_res: Resource,
-                 use_torch: bool, use_onnx: bool,
-                 calculate_module_deps:bool):
+                 use_torch: bool, calculate_module_deps:bool):
         self.id:str = str(uuid.uuid4())
         self.func:Callable[..., Any] = func
         self.args:Tuple[Any] = args
@@ -24,7 +23,6 @@ class Task:
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
         self.use_torch: bool = use_torch
-        self.use_onnx: bool = use_onnx
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
         self.module_deps:Dict[str, int] = {}
@@ -55,7 +53,7 @@ class Task:
 
     @property
     def onnx_provider(self)->Optional[Tuple[str, Dict]]:
-        if not self.use_onnx or self.device is None:
+        if not self._use_onnx or self.device is None:
             return None
 
         if self._onnx_provider is not None:

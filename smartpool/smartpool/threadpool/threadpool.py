@@ -41,21 +41,6 @@ class ThreadPool(Pool):
         self._thread_name_prefix:str = thread_name_prefix
         self.__max_used_cpu_cores_in_python = None
 
-    def submit(
-        self, func:Callable[..., Any],
-        args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
-        cpu_mode_res: Optional[Resource] = None,
-        gpu_mode_res: Optional[Resource] = None,
-        use_torch: Optional[bool] = None
-    )->Future:
-        return Pool.submit(
-            self, func=func,
-            args=args, kwargs=kwargs,
-            cpu_mode_res=cpu_mode_res,
-            gpu_mode_res=gpu_mode_res,
-            use_torch=use_torch
-        )
-
     def _max_used_cpu_cores_in_python(self)->int:
         if self.__max_used_cpu_cores_in_python is not None:
             return self.__max_used_cpu_cores_in_python
@@ -127,7 +112,6 @@ class ThreadPool(Pool):
         self._take_resource(task)
         worker:ThreadWorker = task.worker
         worker.is_working = True
-        Pool._all_workers_working_count += 1
         worker.add_task(task)
 
     def _add_worker(self)->ThreadWorker:

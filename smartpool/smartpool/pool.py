@@ -32,7 +32,6 @@ class Pool(ABC):
     _sys_info:Optional[SysInfo] = None
     _updating_sysinfo_thread:Optional[threading.Thread] = None
     _instances:weakref.WeakSet[Pool] = weakref.WeakSet()
-    _all_workers_working_count: int = 0
 
     def __init__(
         self, max_workers:int,
@@ -98,6 +97,7 @@ class Pool(ABC):
         self._shutdown:bool = False
         self._need_result_thread:bool = need_result_thread
         self._result_thread:Optional[threading.Thread] = None
+        self._use_onnx: bool = False
 
         Pool._instances.add(self)
 
@@ -123,8 +123,7 @@ class Pool(ABC):
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
-        use_torch: Optional[bool] = None,
-        use_onnx: bool = False
+        use_torch: Optional[bool] = None
     )->Future:
         import threading
 
@@ -156,7 +155,6 @@ class Pool(ABC):
                 cpu_mode_res=cpu_mode_res,
                 gpu_mode_res=gpu_mode_res,
                 use_torch=use_torch,
-                use_onnx=use_onnx,
                 calculate_module_deps=self._need_module_deps
             )
             self._validate_resource_feasibility(task)
@@ -250,7 +248,7 @@ class Pool(ABC):
         while True:
             Pool._sys_info.update_cpu_percent()
 
-            if Pool._all_workers_working_count > 0:
+            if Worker.total_working_count() > 0:
                 continue
 
             for pool in Pool._instances:
@@ -389,7 +387,6 @@ class Pool(ABC):
 
             worker:Worker = task.worker
             worker.is_working = False
-            Pool._all_workers_working_count -= 1
             worker.n_finished_tasks += 1
             if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
                 worker.stop(wait=False, clear=True)
@@ -441,9 +438,7 @@ class Pool(ABC):
 
         res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
 
-        if task.use_onnx:
-            from .gpuinfo import GPUInfo
-            GPUInfo.init_onnx_providers()
+        
 
         with self._sys_info_lock:
             if Worker.total_working_count() == 0:
@@ -506,6 +501,10 @@ class Pool(ABC):
                 task.dml_id = -1
                 return None, []
 
+            if self._use_onnx:
+                from .gpuinfo import GPUInfo
+                GPUInfo.init_onnx_providers()
+
             best_gpu = None
             for gpu in gpus:
                 if gpu.mem_free < res.gpu_mem:
@@ -514,7 +513,7 @@ class Pool(ABC):
                 if gpu.n_cores_free < res.gpu_cores:
                     continue
 
-                if task.use_onnx and not gpu.parent_class.supported_onnx_providers:
+                if self._use_onnx and not gpu.parent_class.supported_onnx_providers:
                     continue
 
                 if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
@@ -617,7 +616,7 @@ class Pool(ABC):
                 if gpu.n_cores_free < gpu_res.gpu_cores:
                     continue
 
-                if task.use_onnx and not gpu.parent_class.supported_onnx_providers:
+                if self._use_onnx and not gpu.parent_class.supported_onnx_providers:
                     continue
 
                 if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:

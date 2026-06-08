@@ -39,21 +39,6 @@ class InterpreterPool(Pool):
             need_module_deps=True
         )
 
-    def submit(
-        self, func:Callable[..., Any],
-        args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
-        cpu_mode_res: Optional[Resource] = None,
-        gpu_mode_res: Optional[Resource] = None,
-        use_torch: Optional[bool] = None
-    )->Future:
-        return Pool.submit(
-            self, func=func,
-            args=args, kwargs=kwargs,
-            cpu_mode_res=cpu_mode_res,
-            gpu_mode_res=gpu_mode_res,
-            use_torch=use_torch
-        )
-
     def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:
             res = task.effective_res
@@ -84,7 +69,6 @@ class InterpreterPool(Pool):
         self._take_resource(task)
         worker:InterpreterWorker = task.worker
         worker.is_working = True
-        Pool._all_workers_working_count += 1
         worker.imported_modules.update(task.module_deps)
         worker.add_task(task)
 
