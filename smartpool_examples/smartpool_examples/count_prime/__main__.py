@@ -10,10 +10,10 @@ if __name__ == "__main__":
 
 from count_prime import count_prime
 
-from smartpool import ProcessPool
+from smartpool import InterpreterPool
 
 if __name__ == "__main__":
-    print("Use ProcessPool to count prime numbers lower than 10000.")
+    print("Use InterpreterPool to count prime numbers lower than 10000.")
     print(f"See source code at folder {self_folder}")
 
     tasks = []
@@ -23,7 +23,7 @@ if __name__ == "__main__":
         tasks.append((start, stop))
         start = stop
 
-    with ProcessPool() as pool:
+    with InterpreterPool() as pool:
         futures = []
         for task in tasks:
             future = pool.submit(count_prime, args=task)

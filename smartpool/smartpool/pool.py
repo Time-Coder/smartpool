@@ -11,8 +11,8 @@ from typing import (
     List,
     Optional,
     Tuple,
+    Type,
     Union,
-    Type
 )
 
 from .resource import Resource
@@ -60,11 +60,7 @@ class Pool(ABC):
         if use_torch:
             import torch
             self._torch_gpu_available = False
-            if torch.cuda.is_available():
-                self._torch_gpu_available = True
-            elif getattr(torch, "hip", None) and torch.hip.is_available():
-                self._torch_gpu_available = True
-            elif getattr(torch, "xpu", None) and torch.xpu.is_available():
+            if torch.cuda.is_available() or getattr(torch, "hip", None) and torch.hip.is_available() or getattr(torch, "xpu", None) and torch.xpu.is_available():
                 self._torch_gpu_available = True
         else:
             self._torch_gpu_available = False
@@ -192,18 +188,19 @@ class Pool(ABC):
             ):
                 return
 
-            if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
-                if (
+            if (
+                (gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0) and (
                     gpu_res.cpu_cores <= self._sys_info.cpu_cores_total
                     and gpu_res.cpu_mem <= self._sys_info.cpu_mem_total
-                ):
-                    gpu_infos = task.filter_gpu_infos(self._sys_info.gpu_infos)
-                    for gpu in gpu_infos:
-                        if (
-                            gpu_res.gpu_cores <= gpu.n_cores
-                            and gpu_res.gpu_mem <= gpu.mem_total
-                        ):
-                            return
+                )
+            ):
+                gpu_infos = task.filter_gpu_infos(self._sys_info.gpu_infos)
+                for gpu in gpu_infos:
+                    if (
+                        gpu_res.gpu_cores <= gpu.n_cores
+                        and gpu_res.gpu_mem <= gpu.mem_total
+                    ):
+                        return
 
             raise ValueError("task resources needed exceed system capacity")
 
@@ -222,6 +219,8 @@ class Pool(ABC):
 
     @staticmethod
     def _updating_sysinfo()->None:
+        from .worker import Worker
+        
         while True:
             Pool._sys_info.update_cpu_percent()
 
@@ -579,7 +578,7 @@ class Pool(ABC):
 
             if extra_cpu_cores_needed > 0 and self._sys_info.cpu_cores_free < extra_cpu_cores_needed:
                 return
-            
+
             if extra_cpu_mem_needed > 0 and self._sys_info.cpu_mem_free < extra_cpu_mem_needed:
                 return
 

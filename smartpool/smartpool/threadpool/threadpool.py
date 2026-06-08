@@ -21,6 +21,8 @@ class ThreadPool(Pool):
         max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
+        from .threadworker import ThreadWorker
+
         Pool.__init__(
             self, max_workers=max_workers,
 
@@ -32,6 +34,7 @@ class ThreadPool(Pool):
 
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
+            worker_cls=ThreadWorker,
             need_module_deps=False
         )
 

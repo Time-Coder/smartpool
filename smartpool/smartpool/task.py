@@ -4,12 +4,22 @@ import os
 import sys
 import uuid
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, List, Iterable, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 if TYPE_CHECKING:
+    from .gpuinfo import GPUInfo
     from .resource import Resource
     from .worker import Worker
-    from .gpuinfo import GPUInfo
 
 
 class Task:
@@ -59,7 +69,7 @@ class Task:
 
     @property
     def onnx_provider(self)->Optional[Tuple[str, Dict]]:
-        if not self._use_onnx or self.device is None:
+        if self.device is None:
             return None
 
         if self._onnx_provider is not None:
@@ -124,7 +134,7 @@ class Task:
     def filter_gpu_infos(self, gpu_infos: List[GPUInfo]) -> Iterable[GPUInfo]:
         if not self.use_torch or not gpu_infos:
             return gpu_infos
-        
+
         if Task._torch_gpu_backend is None:
             import torch
             if torch.cuda.is_available():

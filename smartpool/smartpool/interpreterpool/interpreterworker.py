@@ -6,6 +6,7 @@ from ..worker import Worker
 
 if TYPE_CHECKING:
     from concurrent.interpreters import Queue
+
     from .interpreterpool import InterpreterPool
 
 

@@ -1,11 +1,8 @@
-import os
 from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
 from config import COCO_CLASSES
-
-from smartpool import InferSessionPool, Resource
 
 
 def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
@@ -24,11 +21,15 @@ def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
     return img, r, (left, top)
 
 
-def preprocess(img: np.ndarray):
-    img, scale, pad = letterbox(img)
-    img = img.astype(np.float32) / 255.0
-    img = img.transpose(2, 0, 1)[np.newaxis, ...]
-    return img, scale, pad
+def preprocess(image_path: str):
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"failed to read image: {image_path}")
+    
+    blob, scale, pad = letterbox(img)
+    blob = blob.astype(np.float32) / 255.0
+    blob = blob.transpose(2, 0, 1)[np.newaxis, ...]
+    return img, blob, scale, pad
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.5):
@@ -54,8 +55,32 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.5):
     return keep
 
 
-def postprocess(output: np.ndarray, orig_shape: Tuple[int, int], scale: float,
-                pad: Tuple[int, int], conf_thresh: float = 0.5, iou_thresh: float = 0.5):
+def draw_detections(src_img: np.ndarray, output_path: str, detections: List[Dict]):
+    colors = [
+        (56, 56, 255), (151, 157, 255), (31, 112, 255), (29, 178, 255),
+        (49, 210, 207), (10, 249, 72), (23, 204, 146), (134, 219, 61),
+        (52, 147, 26), (187, 135, 1), (132, 145, 137), (168, 229, 11),
+    ]
+    for det in detections:
+        x1, y1, x2, y2 = map(int, det["bbox"])
+        cls_id = det["class_id"]
+        score = det["score"]
+        color = colors[cls_id % len(colors)]
+        label = f"{COCO_CLASSES[cls_id]} {score:.2f}"
+        cv2.rectangle(src_img, (x1, y1), (x2, y2), color, 2)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(src_img, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
+        cv2.putText(src_img, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    
+    cv2.imwrite(output_path, src_img)
+
+
+def postprocess(
+    src_img:np.ndarray, output: np.ndarray, output_path:str,
+    scale: float, pad: Tuple[int, int], conf_thresh: float = 0.5,
+    iou_thresh: float = 0.5
+):
+    orig_shape = (src_img.shape[0], src_img.shape[1])
     predictions = np.squeeze(output).T
     box_data = predictions[:, :4]
     class_scores = predictions[:, 4:]
@@ -86,45 +111,9 @@ def postprocess(output: np.ndarray, orig_shape: Tuple[int, int], scale: float,
     boxes_xyxy = (boxes_xyxy - np.array([left, top, left, top])) / scale
     boxes_xyxy = np.clip(boxes_xyxy, 0, [orig_shape[1], orig_shape[0], orig_shape[1], orig_shape[0]])
 
-    return [
+    detections: List[Dict] = [
         {"bbox": boxes_xyxy[i].tolist(), "score": float(scores[i]), "class_id": int(class_ids[i])}
         for i in range(len(boxes_xyxy))
     ]
 
-
-def draw_detections(img: np.ndarray, detections: List[Dict]) -> np.ndarray:
-    colors = [
-        (56, 56, 255), (151, 157, 255), (31, 112, 255), (29, 178, 255),
-        (49, 210, 207), (10, 249, 72), (23, 204, 146), (134, 219, 61),
-        (52, 147, 26), (187, 135, 1), (132, 145, 137), (168, 229, 11),
-    ]
-    for det in detections:
-        x1, y1, x2, y2 = map(int, det["bbox"])
-        cls_id = det["class_id"]
-        score = det["score"]
-        color = colors[cls_id % len(colors)]
-        label = f"{COCO_CLASSES[cls_id]} {score:.2f}"
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(img, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
-        cv2.putText(img, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    return img
-
-
-def infer_task(image_path: str, model_path_str: str, output_dir_str: str, infer_session_pool: InferSessionPool) -> str:
-    img = cv2.imread(image_path)
-    if img is None:
-        raise ValueError(f"Failed to read image: {image_path}")
-
-    h, w = img.shape[:2]
-    blob, scale, pad = preprocess(img)
-    gpu_res = Resource(cpu_cores_in_python=1, cpu_mem=512*1024**2,
-                       gpu_cores=1000, gpu_mem=2*1024**3)
-    cpu_res = Resource(cpu_cores_in_python=2, cpu_mem=2*1024**3)
-    future = infer_session_pool.submit(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
-    outputs = future.result()[0]
-    detections = postprocess(outputs, (h, w), scale, pad)
-    result_img = draw_detections(img, detections)
-
-    out_path = os.path.join(output_dir_str, os.path.basename(image_path))
-    cv2.imwrite(out_path, result_img)
+    draw_detections(src_img, output_path, detections)

@@ -47,8 +47,8 @@ def main(
         help="max number of workers to use, 0 to use all available cores"
     )
 ):
-    import os
     import importlib
+    import os
     os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 
     print(f"Use {pool} to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")

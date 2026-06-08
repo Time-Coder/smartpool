@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 from ..pool import Pool
 
 if TYPE_CHECKING:
-    from concurrent.futures import Future
 
     from ..resource import Resource
     from ..task import Task
@@ -24,6 +23,7 @@ class InterpreterPool(Pool):
         use_torch:bool=False
     ):
         import concurrent.interpreters as interpreters
+        from .interpreterworker import InterpreterWorker
 
         Pool.__init__(
             self, max_workers=max_workers,
@@ -36,6 +36,7 @@ class InterpreterPool(Pool):
 
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
+            worker_cls=InterpreterWorker,
             need_module_deps=True
         )
 

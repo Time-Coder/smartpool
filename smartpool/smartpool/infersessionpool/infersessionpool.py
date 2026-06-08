@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from ..resource import Resource
-    from .infersessionworker import InferSessionWorker
 
 
 class InferSessionPool(ThreadPool):
@@ -23,6 +22,8 @@ class InferSessionPool(ThreadPool):
         *,
         max_tasks_per_child:Optional[int]=None,
     ):
+        from .infersessionworker import InferSessionWorker
+        
         ThreadPool.__init__(
             self, max_workers=max_workers, thread_name_prefix=thread_name_prefix,
             initializer=initializer,
@@ -31,6 +32,7 @@ class InferSessionPool(ThreadPool):
             max_tasks_per_child=max_tasks_per_child,
             use_torch=False
         )
+        self._worker_cls = InferSessionWorker
         self._use_onnx: bool = True
         self.print_info: bool = False
 

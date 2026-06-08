@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
 class ProcessWorker(Worker):
 
-    def __init__(self, index:int, process_pool:ProcessPool):
+    def __init__(self, process_pool:ProcessPool):
         if process_pool._use_torch:
             from torch.multiprocessing.queue import SimpleQueue
         else:
             from multiprocessing.queues import SimpleQueue
 
         Worker.__init__(
-            self, index, process_pool,
+            self, process_pool,
             task_queue_cls=SimpleQueue,
             task_queue_args=(),
             task_queue_kwargs={"ctx": process_pool._ctx}

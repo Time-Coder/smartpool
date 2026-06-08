@@ -336,7 +336,7 @@ class AMDGPUInfo(GPUInfo):
     def _fetch_utilization_linux(self) -> float:
         if not os.path.exists('/opt/rocm/bin/rocm-smi'):
             raise RuntimeError("cannot fetch load of current AMD GPU")
-        
+
         result = subprocess.run(
             ['/opt/rocm/bin/rocm-smi', '-d', str(self._device_id), '--showuse'],
             capture_output=True, text=True, timeout=5, check=True
@@ -353,7 +353,7 @@ class AMDGPUInfo(GPUInfo):
                 continue
 
             return int(match.group(1)) / 100.0
-        
+
         raise RuntimeError("cannot fetch load of current AMD GPU")
 
     def _fetch_utilization_mac(self) -> float:
@@ -373,7 +373,7 @@ class AMDGPUInfo(GPUInfo):
                     continue
 
                 return float(match.group(1)) / 100.0
-        
+
         result = subprocess.run(
             ['system_profiler', 'SPDisplaysDataType'],
             capture_output=True, text=True, timeout=10, check=True
@@ -407,14 +407,14 @@ class AMDGPUInfo(GPUInfo):
     def _fetch_num_cores(self) -> int:
         import pyopencl as cl
         platforms = cl.get_platforms()
-        for platform in platforms:
-            vendor = platform.vendor.lower()
+        for plat in platforms:
+            vendor = plat.vendor.lower()
             if 'amd' not in vendor and 'advanced micro devices' not in vendor:
                 continue
-        
-            devices = platform.get_devices(device_type=cl.device_type.GPU)
+
+            devices = plat.get_devices(device_type=cl.device_type.GPU)
             if 0 <= self._device_id < len(devices):
                 device = devices[self._device_id]
                 return device.max_compute_units * device.max_work_group_size
-                
+
         raise RuntimeError("cannot fetch num cores of current AMD GPU")

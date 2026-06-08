@@ -35,7 +35,9 @@ def main(
 
     from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
     from data_utils import download_dataset, download_model
-    from inference import infer_task
+    from inference import preprocess, postprocess
+    from concurrent.futures import Future, wait, FIRST_COMPLETED
+    from functools import partial
 
     print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
@@ -57,14 +59,40 @@ def main(
     infer_session_pool = InferSessionPool(max_workers=n_workers)
     infer_session_pool.print_info = True
 
-    futures = []
-    for path in image_paths:
-        future = thread_pool.submit(
-            infer_task,
-            args=(str(path), model_path_str, output_dir_str, infer_session_pool),
+    cpu_res = Resource(cpu_cores_in_python=2, cpu_mem=2*1024**3)
+    gpu_res = Resource(
+        cpu_cores_in_python=1, cpu_mem=512*1024**2,
+        gpu_cores=1000, gpu_mem=2*1024**3
+    )
+
+    not_done_futures = set()
+
+    def infer_done_callback(img, scale, pad, infer_future: Future):
+        outputs = infer_future.result()[0]
+        output_path = output_dir_str + "/" + os.path.basename(image_path)
+        postprocess_future = thread_pool.submit(
+            postprocess,
+            args=(img, outputs, output_path, scale, pad),
             cpu_mode_res=cpu_res
         )
-        futures.append(future)
+        not_done_futures.add(postprocess_future)
+
+    def preprocess_done_callback(preprocess_future: Future):
+        img, blob, scale, pad = preprocess_future.result()
+        infer_future: Future = infer_session_pool.submit(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+        infer_future.add_done_callback(partial(infer_done_callback, img, scale, pad))
+        not_done_futures.add(infer_future)
+
+    
+    for image_path in image_paths:
+        preprocess_future: Future = thread_pool.submit(
+            preprocess,
+            args=(str(image_path),),
+            cpu_mode_res=cpu_res
+        )
+        preprocess_future.add_done_callback(preprocess_done_callback)
+        not_done_futures.add(preprocess_future)
+
 
     start_time = time.perf_counter()
     with Progress(
@@ -73,11 +101,15 @@ def main(
         TextColumn("{task.completed}/{task.total}"),
         TimeRemainingColumn(),
     ) as progress:
-        task = progress.add_task("infer", total=len(futures))
-        for f in as_completed(futures):
-            f.result()
-            progress.update(task, advance=1)
-            progress.update(task, description=f"infer [{progress.tasks[0].completed}/{progress.tasks[0].total}]")
+        task = progress.add_task("infer", total=len(not_done_futures))
+
+        while not_done_futures:
+            done_futures, not_done_futures = wait(not_done_futures, return_when=FIRST_COMPLETED)
+
+            for f in done_futures:
+                f.result()
+                progress.update(task, advance=1/3)
+                progress.update(task, description=f"infer [{progress.tasks[0].completed}/{progress.tasks[0].total}]")
 
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")

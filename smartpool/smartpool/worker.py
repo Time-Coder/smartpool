@@ -7,9 +7,9 @@ if TYPE_CHECKING:
     import multiprocessing as mp
     import threading
 
+    from .pool import Pool
     from .task import Task
     from .utils import QueueLike
-    from .pool import Pool
 
 
 class Worker(ABC):

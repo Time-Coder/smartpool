@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from onnxruntime import InferenceSession
 
     from ..task import Task
+    from .infersessionpool import InferSessionPool
 
 from ..threadpool.threadworker import ThreadWorker
 
@@ -47,8 +48,10 @@ class InferSessionWorker(ThreadWorker):
         ThreadWorker._clear(self)
 
     def run(self):
-        if self.initializer is not None:
-            self.initializer(*self.initargs, **self.initkwargs)
+        infersession_pool: InferSessionPool = self.pool
+
+        if infersession_pool._initializer is not None:
+            infersession_pool._initializer(*infersession_pool._initargs, **infersession_pool._initkwargs)
 
         while True:
             task:Task = self.task_queue.get()
@@ -60,7 +63,7 @@ class InferSessionWorker(ThreadWorker):
             kwargs = task.kwargs
             provider = task.onnx_provider
             session = self._get_session(model_path, provider)
-            if self.thread_pool.print_info:
+            if infersession_pool.print_info:
                 if "device_id" in provider[1]:
                     print(f"infer with {provider[0]}(device_id={provider[1]['device_id']}) in session {id(session)}")
                 else:
@@ -78,4 +81,4 @@ class InferSessionWorker(ThreadWorker):
                 result = e
                 success = False
 
-            self.thread_pool._on_task_done(task.id, success, result)
+            infersession_pool._on_task_done(task.id, success, result)
