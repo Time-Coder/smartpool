@@ -101,23 +101,6 @@ class Pool(ABC):
 
         Pool._instances.add(self)
 
-    def _get_task_torch_backend(self, task: Task) -> Optional[str]:
-        if not task.use_torch:
-            return None
-        if self._torch_gpu_backend is not None:
-            return self._torch_gpu_backend
-        try:
-            import torch
-            if torch.cuda.is_available():
-                return "cuda"
-            if getattr(torch, "hip", None) and torch.hip.is_available():
-                return "hip"
-            if getattr(torch, "xpu", None) and torch.xpu.is_available():
-                return "xpu"
-        except ImportError:
-            pass
-        return None
-
     def submit(
         self, func:Union[Callable[..., Any], str],
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
@@ -209,13 +192,7 @@ class Pool(ABC):
 
             gpu_feasible = True
             if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
-                gpu_infos = self._sys_info.gpu_infos
-                torch_backend = self._get_task_torch_backend(task)
-                if torch_backend:
-                    gpu_infos = [
-                        g for g in (gpu_infos or [])
-                        if g.device and g.device.split(":")[0] == torch_backend
-                    ]
+                gpu_infos = task.filter_gpu_infos(self._sys_info.gpu_infos)
                 gpu_feasible = any(
                     gpu.mem_total is not None and gpu_res.gpu_mem <= gpu.mem_total
                     and gpu.n_cores is not None and gpu_res.gpu_cores <= gpu.n_cores
@@ -438,8 +415,6 @@ class Pool(ABC):
 
         res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
 
-        
-
         with self._sys_info_lock:
             if Worker.total_working_count() == 0:
                 self._sys_info.update()
@@ -487,14 +462,7 @@ class Pool(ABC):
                 task.dml_id = -1
                 return "cpu", should_kill_workers
 
-            gpus = self._sys_info.gpu_infos
-            torch_backend = self._get_task_torch_backend(task)
-            if torch_backend:
-                gpus = [g for g in gpus if g.device and g.device.split(":")[0] == torch_backend]
-
-            if task.use_torch and torch_backend is None:
-                gpus = []
-
+            gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             if not gpus:
                 task.device = None
                 task.gpu_index = -1
@@ -600,15 +568,12 @@ class Pool(ABC):
             return
 
         with self._sys_info_lock:
-            gpus = self._sys_info.gpu_infos
-            torch_backend = self._get_task_torch_backend(task)
-            if torch_backend:
-                gpus = [g for g in gpus if g.device and g.device.split(":")[0] == torch_backend]
+            gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             if not gpus:
                 return
 
             best_gpu = None
-            need_best_gpu_cores:int = 0
+            best_gpu_cores_needed: int = 0
             for gpu in gpus:
                 if gpu.mem_free < gpu_res.gpu_mem:
                     continue
@@ -621,7 +586,7 @@ class Pool(ABC):
 
                 if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                     best_gpu = gpu
-                    need_best_gpu_cores = gpu_res.gpu_cores
+                    best_gpu_cores_needed = gpu_res.gpu_cores
 
             if best_gpu is None:
                 return
@@ -631,7 +596,7 @@ class Pool(ABC):
             task.device = best_gpu.device
             task.gpu_index = best_gpu.index
             task.dml_id = best_gpu.dml_id
-            best_gpu.n_cores_free -= need_best_gpu_cores
+            best_gpu.n_cores_free -= best_gpu_cores_needed
             best_gpu.mem_free -= gpu_res.gpu_mem
 
     @abstractmethod

@@ -20,6 +20,7 @@ dependencies = [
     "nvidia-ml-py",
     "psutil",
     "cachetools",
+    "pyopencl"
 ]
 
 [project.urls]

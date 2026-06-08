@@ -4,14 +4,17 @@ import os
 import sys
 import uuid
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, List, Iterable
 
 if TYPE_CHECKING:
     from .resource import Resource
     from .worker import Worker
+    from .gpuinfo import GPUInfo
 
 
 class Task:
+
+    _torch_gpu_backend: Optional[str] = None
 
     def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any],
                  cpu_mode_res: Resource, gpu_mode_res: Resource,
@@ -114,3 +117,19 @@ class Task:
             success = False
 
         return success, result
+
+    def filter_gpu_infos(self, gpu_infos: List[GPUInfo]) -> Iterable[GPUInfo]:
+        if not self.use_torch or not gpu_infos:
+            return gpu_infos
+        
+        if Task._torch_gpu_backend is None:
+            import torch
+            if torch.cuda.is_available():
+                Task._torch_gpu_backend = "cuda"
+
+            if getattr(torch, "hip", None) and torch.hip.is_available():
+                Task._torch_gpu_backend = "hip"
+            elif getattr(torch, "xpu", None) and torch.xpu.is_available():
+                Task._torch_gpu_backend = "xpu"
+
+        return filter(lambda gpu: gpu.device.startswith(Task._torch_gpu_backend), gpu_infos)

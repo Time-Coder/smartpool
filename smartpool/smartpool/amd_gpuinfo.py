@@ -314,13 +314,10 @@ class AMDGPUInfo(GPUInfo):
 
         if system == "Windows":
             with self._lock:
-                try:
-                    gpu = self._gpu_list.At(self._device_id)
-                    metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
-                    usage = metrics.GPUUsage()
-                    return usage / 100.0
-                except Exception:
-                    return None
+                gpu = self._gpu_list.At(self._device_id)
+                metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
+                usage = metrics.GPUUsage()
+                return usage / 100.0
         elif system == "Linux":
             try:
                 import pyamdgpuinfo
@@ -333,73 +330,73 @@ class AMDGPUInfo(GPUInfo):
             return self._fetch_utilization_linux()
         elif system == "Darwin":
             return self._fetch_utilization_mac()
+        else:
+            raise RuntimeError(f"unsupported system {system}")
 
-        return None
+    def _fetch_utilization_linux(self) -> float:
+        if not os.path.exists('/opt/rocm/bin/rocm-smi'):
+            raise RuntimeError("cannot fetch load of current AMD GPU")
+        
+        result = subprocess.run(
+            ['/opt/rocm/bin/rocm-smi', '-d', str(self._device_id), '--showuse'],
+            capture_output=True, text=True, timeout=5, check=True
+        )
 
-    def _fetch_utilization_linux(self) -> Optional[float]:
-        try:
-            if os.path.exists('/opt/rocm/bin/rocm-smi'):
-                result = subprocess.run(
-                    ['/opt/rocm/bin/rocm-smi', '-d', str(self._device_id), '--showuse'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    output = result.stdout.strip()
-                    for line in output.split('\n'):
-                        if 'GPU use' in line or 'GPU Utilization' in line:
-                            import re
-                            match = re.search(r'(\d+)%', line)
-                            if match:
-                                return int(match.group(1)) / 100.0
-            return None
-        except Exception:
-            return None
+        output = result.stdout.strip()
+        for line in output.split('\n'):
+            if 'GPU use' not in line and 'GPU Utilization' not in line:
+                continue
 
-    def _fetch_utilization_mac(self) -> Optional[float]:
-        try:
-            result = subprocess.run(
-                ['powermetrics', '--samplers', 'gpu_power', '-i', '100', '-n', '1'],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                output = result.stdout
-                for line in output.split('\n'):
-                    if 'GPU' in line and '%' in line:
-                        import re
-                        match = re.search(r'(\d+(\.\d+)?)%', line)
-                        if match:
-                            return float(match.group(1)) / 100.0
-            result = subprocess.run(
-                ['system_profiler', 'SPDisplaysDataType'],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0 and 'AMD' in result.stdout:
-                pass
-            return None
-        except Exception:
-            return None
+            import re
+            match = re.search(r'(\d+)%', line)
+            if not match:
+                continue
+
+            return int(match.group(1)) / 100.0
+        
+        raise RuntimeError("cannot fetch load of current AMD GPU")
+
+    def _fetch_utilization_mac(self) -> float:
+        result = subprocess.run(
+            ['powermetrics', '--samplers', 'gpu_power', '-i', '100', '-n', '1'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            output = result.stdout
+            for line in output.split('\n'):
+                if 'GPU' not in line or '%' not in line:
+                    continue
+
+                import re
+                match = re.search(r'(\d+(\.\d+)?)%', line)
+                if not match:
+                    continue
+
+                return float(match.group(1)) / 100.0
+        
+        result = subprocess.run(
+            ['system_profiler', 'SPDisplaysDataType'],
+            capture_output=True, text=True, timeout=10, check=True
+        )
+        if 'AMD' in result.stdout:
+            pass
 
     def _fetch_temperature(self) -> Optional[int]:
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                try:
-                    gpu = self._gpu_list.At(self._device_id)
-                    metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
-                    temp = int(metrics.GPUTemperature())
-                    return temp
-                except Exception:
-                    return None
+                gpu = self._gpu_list.At(self._device_id)
+                metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
+                temp = int(metrics.GPUTemperature())
+                return temp
         elif system == "Linux":
-            try:
-                import pyamdgpuinfo
-                gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                temp = gpu.query_temperature()
-                if isinstance(temp, (int, float)):
-                    return int(temp)
-            except Exception:
-                pass
-        return None
+            import pyamdgpuinfo
+            gpu = pyamdgpuinfo.get_gpu(self._device_id)
+            temp = gpu.query_temperature()
+            if isinstance(temp, (int, float)):
+                return int(temp)
+        else:
+            raise RuntimeError(f"not supported system: {system}")
 
     def _fetch_display_mode(self) -> Optional[bool]:
         return None
@@ -407,19 +404,17 @@ class AMDGPUInfo(GPUInfo):
     def _fetch_display_active(self) -> Optional[bool]:
         return None
 
-    def _fetch_num_cores(self) -> Optional[int]:
-        try:
-            import pyopencl as cl
-            platforms = cl.get_platforms()
-            for platform in platforms:
-                vendor = platform.vendor.lower()
-                if 'amd' in vendor or 'advanced micro devices' in vendor:
-                    devices = platform.get_devices(device_type=cl.device_type.GPU)
-                    if 0 <= self._device_id < len(devices):
-                        device = devices[self._device_id]
-                        return device.max_compute_units * device.max_work_group_size
-        except ImportError:
-            pass
-        except Exception:
-            pass
-        return None
+    def _fetch_num_cores(self) -> int:
+        import pyopencl as cl
+        platforms = cl.get_platforms()
+        for platform in platforms:
+            vendor = platform.vendor.lower()
+            if 'amd' not in vendor and 'advanced micro devices' not in vendor:
+                continue
+        
+            devices = platform.get_devices(device_type=cl.device_type.GPU)
+            if 0 <= self._device_id < len(devices):
+                device = devices[self._device_id]
+                return device.max_compute_units * device.max_work_group_size
+                
+        raise RuntimeError("cannot fetch num cores of current AMD GPU")
