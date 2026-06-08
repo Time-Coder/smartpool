@@ -69,5 +69,6 @@ class InferSessionPool(ThreadPool):
             args=args, kwargs=kwargs,
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
-            use_torch=False
+            use_torch=False,
+            can_change_device=False
         )

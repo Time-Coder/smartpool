@@ -4,7 +4,7 @@ import os
 import sys
 import uuid
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, List, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, List, Iterable, Union
 
 if TYPE_CHECKING:
     from .resource import Resource
@@ -16,16 +16,19 @@ class Task:
 
     _torch_gpu_backend: Optional[str] = None
 
-    def __init__(self, func:Callable[..., Any], args:Tuple[Any, ...], kwargs:Dict[str, Any],
-                 cpu_mode_res: Resource, gpu_mode_res: Resource,
-                 use_torch: bool, calculate_module_deps:bool):
+    def __init__(
+        self, func: Union[Callable[..., Any], str], args: Tuple[Any, ...], kwargs: Dict[str, Any],
+        cpu_mode_res: Resource, gpu_mode_res: Resource,
+        use_torch: bool, can_change_device: bool, calculate_module_deps: bool
+    ):
         self.id:str = str(uuid.uuid4())
-        self.func:Callable[..., Any] = func
+        self.func:Union[Callable[..., Any], str] = func
         self.args:Tuple[Any] = args
         self.kwargs:Dict[str, Any] = kwargs
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
         self.use_torch: bool = use_torch
+        self.can_change_device: bool = can_change_device
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
         self.module_deps:Dict[str, int] = {}
