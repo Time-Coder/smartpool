@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 from ..pool import Pool
 
 if TYPE_CHECKING:
-    from concurrent.futures import Future
-
     from ..resource import Resource
     from ..task import Task
     from .threadworker import ThreadWorker
@@ -34,8 +32,7 @@ class ThreadPool(Pool):
 
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
-            need_module_deps=False,
-            need_result_thread=False
+            need_module_deps=False
         )
 
         self._thread_name_prefix:str = thread_name_prefix
@@ -113,16 +110,3 @@ class ThreadPool(Pool):
         worker:ThreadWorker = task.worker
         worker.is_working = True
         worker.add_task(task)
-
-    def _add_worker(self)->ThreadWorker:
-        from .threadworker import ThreadWorker
-
-        worker = ThreadWorker(
-            len(self._workers), self._thread_name_prefix,
-            thread_pool=self,
-            initializer=self._initializer,
-            initargs=self._initargs,
-            initkwargs=self._initkwargs
-        )
-        self._workers.append(worker)
-        return worker

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from ..worker import Worker
 
@@ -9,42 +9,29 @@ if TYPE_CHECKING:
 
     import psutil
 
-    from ..utils import QueueLike
+    from .processpool import ProcessPool
 
 
 class ProcessWorker(Worker):
 
-    def __init__(
-        self, index:int, name_prefix:str,
-        result_queue:QueueLike[Optional[Tuple[str, bool, Any]]], ctx,
-        initializer:Optional[Callable[..., Any]],
-        initargs:Tuple[Any, ...],
-        initkwargs:Optional[Dict[str, Any]],
-        use_torch:bool, torch_gpu_available:bool
-    ):
-        if use_torch:
+    def __init__(self, index:int, process_pool:ProcessPool):
+        if process_pool._use_torch:
             from torch.multiprocessing.queue import SimpleQueue
         else:
             from multiprocessing.queues import SimpleQueue
 
         Worker.__init__(
-            self, index,
-            result_queue=result_queue,
+            self, index, process_pool,
             task_queue_cls=SimpleQueue,
             task_queue_args=(),
-            task_queue_kwargs={"ctx": ctx},
-            initializer=initializer,
-            initargs=initargs,
-            initkwargs=initkwargs
+            task_queue_kwargs={"ctx": process_pool._ctx}
         )
 
-        if torch_gpu_available:
-            self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=ctx)
+        if process_pool._torch_gpu_available:
+            self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=process_pool._ctx)
         else:
             self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = None
 
-        self.ctx = ctx
-        self.name_prefix:str = name_prefix
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
         self.process_info:Optional[psutil.Process] = None
@@ -102,11 +89,12 @@ class ProcessWorker(Worker):
 
         import psutil
 
-        self.process_or_thread:mp.Process = self.ctx.Process(
+        process_pool:ProcessPool = self.pool
+        self.process_or_thread:mp.Process = process_pool._ctx.Process(
             target=Worker.run,
-            args=(self.task_queue, self.result_queue, self.change_device_cmd_queue),
-            kwargs={"initializer": self.initializer, "initargs": self.initargs, "initkwargs": self.initkwargs},
-            name=f"{self.name_prefix}{self.index}",
+            args=(self.task_queue, process_pool._result_queue, self.change_device_cmd_queue),
+            kwargs={"initializer": process_pool._initializer, "initargs": process_pool._initargs, "initkwargs": process_pool._initkwargs},
+            name=f"{process_pool._process_name_prefix}{self.index}",
             daemon=True
         )
         self.process_or_thread.start()

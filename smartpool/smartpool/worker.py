@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
     from .task import Task
     from .utils import QueueLike
+    from .pool import Pool
 
 
 class Worker(ABC):
@@ -16,27 +17,20 @@ class Worker(ABC):
     _total_working_count:int = 0
 
     def __init__(
-        self, index:int,
-        result_queue:QueueLike[Tuple[str, bool, Any]],
+        self, pool:Pool,
         task_queue_cls:type,
         task_queue_args:Tuple[Any, ...],
-        task_queue_kwargs:Dict[str, Any],
-        initializer:Optional[Callable[..., Any]],
-        initargs:Tuple[Any, ...],
-        initkwargs:Optional[Dict[str, Any]]
+        task_queue_kwargs:Dict[str, Any]
     ):
-        self.index:int = index
-        self._is_working:bool = False
-        self.initializer:Optional[Callable[..., Any]] = initializer
-        self.initargs:Tuple[Any, ...] = initargs
-        self.initkwargs:Optional[Dict[str, Any]] = initkwargs
-        self.imported_modules:Set[str] = set()
-        self.n_finished_tasks:int = 0
-        self.result_queue:QueueLike[Tuple[str, bool, Any]] = result_queue
-        self.task_queue:QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
-        self.process_or_thread:Optional[Union[mp.Process, threading.Thread]] = None
+        self.index: int = len(pool._workers)
+        self.pool: Pool = pool
+        self._is_working: bool = False
+        self.imported_modules: Set[str] = set()
+        self.n_finished_tasks: int = 0
+        self.task_queue: QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
+        self.process_or_thread: Optional[Union[mp.Process, threading.Thread]] = None
 
-    def add_task(self, task:Task)->None:
+    def add_task(self, task: Task)->None:
         self.start()
         self.task_queue.put(task.info())
         task.future.set_running_or_notify_cancel()
@@ -54,8 +48,10 @@ class Worker(ABC):
 
         if is_working:
             Worker._total_working_count += 1
+            self.pool._workers_working_count += 1
         else:
             Worker._total_working_count -= 1
+            self.pool._workers_working_count -= 1
 
     @staticmethod
     def total_working_count()->int:

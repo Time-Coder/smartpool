@@ -12,6 +12,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    Type
 )
 
 from .resource import Resource
@@ -40,16 +41,16 @@ class Pool(ABC):
         initargs:Tuple[Any, ...],
         initkwargs:Optional[Dict[str, Any]],
 
-        result_queue_cls:type,
+        result_queue_cls:Type[QueueLike],
         result_queue_args:Tuple[Any, ...]=(),
         result_queue_kwargs:Dict[str, Any]=None,
 
         *,
 
         max_tasks_per_child:Optional[int],
+        worker_cls:Type[Worker],
         use_torch:bool,
-        need_module_deps:bool,
-        need_result_thread:bool
+        need_module_deps:bool
     ):
         self._init_sys_info()
 
@@ -59,19 +60,14 @@ class Pool(ABC):
         if use_torch:
             import torch
             self._torch_gpu_available = False
-            self._torch_gpu_backend = None
             if torch.cuda.is_available():
                 self._torch_gpu_available = True
-                self._torch_gpu_backend = "cuda"
             elif getattr(torch, "hip", None) and torch.hip.is_available():
                 self._torch_gpu_available = True
-                self._torch_gpu_backend = "hip"
             elif getattr(torch, "xpu", None) and torch.xpu.is_available():
                 self._torch_gpu_available = True
-                self._torch_gpu_backend = "xpu"
         else:
             self._torch_gpu_available = False
-            self._torch_gpu_backend = None
 
         if not max_workers:
             max_workers = os.cpu_count()
@@ -83,21 +79,23 @@ class Pool(ABC):
         self._initializer:Optional[Callable[..., Any]] = initializer
         self._initargs:Tuple[Any, ...] = initargs
         self._initkwargs:Optional[Dict[str, Any]] = initkwargs
-
-        if result_queue_kwargs is None:
-            result_queue_kwargs = {}
-
-        if result_queue_cls is not None:
-            self._result_queue:QueueLike[Tuple[str, bool, Any]] = result_queue_cls(*result_queue_args, **result_queue_kwargs)
-
+        self._workers_working_count:int = 0
+        self._worker_cls:Type[Worker] = worker_cls
         self._workers:List[Worker] = []
         self._tasks:Dict[str, Task] = {}
         self._delayed_tasks:List[Task] = []
         self._lock:threading.Lock = threading.Lock()
         self._shutdown:bool = False
-        self._need_result_thread:bool = need_result_thread
         self._result_thread:Optional[threading.Thread] = None
         self._use_onnx: bool = False
+
+        if result_queue_cls is not None:
+            if result_queue_kwargs is None:
+                result_queue_kwargs = {}
+
+            self._result_queue:Optional[QueueLike[Tuple[str, bool, Any]]] = result_queue_cls(*result_queue_args, **result_queue_kwargs)
+        else:
+            self._result_queue:Optional[QueueLike[Tuple[str, bool, Any]]] = None
 
         Pool._instances.add(self)
 
@@ -107,7 +105,7 @@ class Pool(ABC):
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         use_torch: Optional[bool] = None,
-        can_change_device: bool = False
+        device_changeable: bool = False
     )->Future:
         import threading
 
@@ -139,7 +137,7 @@ class Pool(ABC):
                 cpu_mode_res=cpu_mode_res,
                 gpu_mode_res=gpu_mode_res,
                 use_torch=use_torch,
-                can_change_device=can_change_device,
+                device_changeable=device_changeable,
                 calculate_module_deps=self._need_module_deps
             )
             self._validate_resource_feasibility(task)
@@ -150,7 +148,7 @@ class Pool(ABC):
                 return task.future
 
             self._put_task(task)
-            if self._need_result_thread and self._result_thread is None:
+            if self._result_queue is not None and self._result_thread is None:
                 self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
                 self._result_thread.start()
 
@@ -231,7 +229,7 @@ class Pool(ABC):
                 continue
 
             for pool in Pool._instances:
-                if not pool._delayed_tasks:
+                if pool._shutdown or not pool._delayed_tasks:
                     continue
 
                 with pool._lock:
@@ -342,6 +340,9 @@ class Pool(ABC):
             for worker in self._workers:
                 worker.stop(wait=False, clear=False)
 
+            if self._result_thread is not None and self._result_thread.is_alive() and self._result_queue is not None:
+                self._result_queue.put(None)
+
             if cancel_futures:
                 for task in self._tasks.values():
                     task.future.cancel()
@@ -349,6 +350,9 @@ class Pool(ABC):
             if wait:
                 for worker in self._workers:
                     worker.join()
+
+                if self._result_thread is not None and self._result_thread.is_alive():
+                    self._result_thread.join()
 
     def __enter__(self)->Pool:
         return self
@@ -373,15 +377,20 @@ class Pool(ABC):
             self._release_resource(task)
             self._postprocess_after_task_done()
 
-        for pool in list(Pool._instances):
-            if pool is self:
+        for pool in Pool._instances:
+            if pool._shutdown or pool is self or pool._workers_working_count > 0 or not pool._delayed_tasks:
                 continue
+
             with pool._lock:
                 pool._postprocess_after_task_done()
 
     def _collecting_result(self)->None:
         while not self._shutdown:
-            task_id, success, result = self._result_queue.get()
+            result_tuple = self._result_queue.get()
+            if result_tuple is None:
+                break
+
+            task_id, success, result = result_tuple
             self._on_task_done(task_id, success, result)
 
     def _postprocess_after_task_done(self)->None:
@@ -555,7 +564,7 @@ class Pool(ABC):
         gpu_res = task.gpu_mode_res
         cpu_res = task.cpu_mode_res
         if (
-            not task.can_change_device or
+            not task.device_changeable or
             task.device is None or
             task.device != "cpu" or
             gpu_res.gpu_cores == 0 or
@@ -599,6 +608,7 @@ class Pool(ABC):
             self._sys_info.cpu_cores_free -= extra_cpu_cores_needed
             self._sys_info.cpu_mem_free -= extra_cpu_mem_needed
 
-    @abstractmethod
     def _add_worker(self)->Worker:
-        pass
+        worker = self._worker_cls(self)
+        self._workers.append(worker)
+        return worker

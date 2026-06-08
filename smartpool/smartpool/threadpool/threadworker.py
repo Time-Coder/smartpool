@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from queue import SimpleQueue
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Optional
 
 from ..utils import _set_best_device, _set_best_stream
 from ..worker import Worker
@@ -16,25 +16,13 @@ if TYPE_CHECKING:
 
 class ThreadWorker(Worker):
 
-    def __init__(
-        self, index:int, name_prefix:str,
-        thread_pool:ThreadPool,
-        initializer:Optional[Callable[..., Any]],
-        initargs:Tuple[Any, ...],
-        initkwargs:Optional[Dict[str, Any]]
-    ):
+    def __init__(self, thread_pool:ThreadPool):
         Worker.__init__(
-            self, index,
-            result_queue=None,
+            self, thread_pool,
             task_queue_cls=SimpleQueue,
             task_queue_args=(),
             task_queue_kwargs={},
-            initializer=initializer,
-            initargs=initargs,
-            initkwargs=initkwargs
         )
-        self.name_prefix:str = name_prefix
-        self.thread_pool:ThreadPool = thread_pool
         self._active_task:Optional[Task] = None
         self._streams:Dict[str, Stream] = {}
 
@@ -68,9 +56,10 @@ class ThreadWorker(Worker):
         if self.process_or_thread is not None:
             return
 
+        thread_pool:ThreadPool = self.pool
         self.process_or_thread = threading.Thread(
             target=self.run,
-            name=f"{self.name_prefix}{self.index}",
+            name=f"{thread_pool._thread_name_prefix}{self.index}",
             daemon=True
         )
         self.process_or_thread.start()
@@ -82,8 +71,9 @@ class ThreadWorker(Worker):
         self._clear()
 
     def run(self):
-        if self.initializer is not None:
-            self.initializer(*self.initargs, **self.initkwargs)
+        thread_pool:ThreadPool = self.pool
+        if thread_pool._initializer is not None:
+            thread_pool._initializer(*thread_pool._initargs, **thread_pool._initkwargs)
 
         while True:
             task:Task = self.task_queue.get()
@@ -95,4 +85,4 @@ class ThreadWorker(Worker):
             self._set_stream(task.device)
             success, result = task.exec()
 
-            self.thread_pool._on_task_done(task.id, success, result)
+            thread_pool._on_task_done(task.id, success, result)

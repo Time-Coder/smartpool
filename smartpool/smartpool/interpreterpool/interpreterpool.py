@@ -71,16 +71,3 @@ class InterpreterPool(Pool):
         worker.is_working = True
         worker.imported_modules.update(task.module_deps)
         worker.add_task(task)
-
-    def _add_worker(self)->InterpreterWorker:
-        from .interpreterworker import InterpreterWorker
-
-        worker = InterpreterWorker(
-            len(self._workers), self._result_queue,
-            initializer=self._initializer,
-            initargs=self._initargs,
-            initkwargs=self._initkwargs,
-            torch_gpu_available=self._torch_gpu_available
-        )
-        self._workers.append(worker)
-        return worker

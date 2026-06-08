@@ -34,19 +34,6 @@ class InferSessionPool(ThreadPool):
         self._use_onnx: bool = True
         self.print_info: bool = False
 
-    def _add_worker(self)->InferSessionWorker:
-        from .infersessionworker import InferSessionWorker
-
-        worker = InferSessionWorker(
-            len(self._workers), self._thread_name_prefix,
-            thread_pool=self,
-            initializer=self._initializer,
-            initargs=self._initargs,
-            initkwargs=self._initkwargs
-        )
-        self._workers.append(worker)
-        return worker
-
     def submit(
         self, model_path:str,
         args:Optional[Tuple[Any]]=None,
@@ -70,5 +57,5 @@ class InferSessionPool(ThreadPool):
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
             use_torch=False,
-            can_change_device=False
+            device_changeable=False
         )

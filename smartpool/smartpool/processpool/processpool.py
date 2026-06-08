@@ -5,8 +5,6 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 from ..pool import Pool
 
 if TYPE_CHECKING:
-    from concurrent.futures import Future
-
     from ..resource import Resource
     from ..task import Task
     from .processworker import ProcessWorker
@@ -48,8 +46,7 @@ class ProcessPool(Pool):
 
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
-            need_module_deps=True,
-            need_result_thread=True
+            need_module_deps=True
         )
 
         self._process_name_prefix:str = process_name_prefix
@@ -119,18 +116,3 @@ class ProcessPool(Pool):
                 task.worker.add_task(task)
             except BaseException as e:
                 task.future.set_exception(e)
-
-    def _add_worker(self)->ProcessWorker:
-        from .processworker import ProcessWorker
-
-        worker = ProcessWorker(
-            len(self._workers), self._process_name_prefix,
-            self._result_queue, self._ctx,
-            initializer=self._initializer,
-            initargs=self._initargs,
-            initkwargs=self._initkwargs,
-            use_torch=self._use_torch,
-            torch_gpu_available=self._torch_gpu_available
-        )
-        self._workers.append(worker)
-        return worker
