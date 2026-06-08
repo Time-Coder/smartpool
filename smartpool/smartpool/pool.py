@@ -404,8 +404,9 @@ class Pool(ABC):
             for task_id in cancelled_task_ids:
                 del self._tasks[task_id]
 
-        for task in self._tasks.values():
-            self._try_move_to_gpu(task)
+        if not self._use_onnx:
+            for task in self._tasks.values():
+                self._try_move_to_gpu(task)
 
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
@@ -558,7 +559,6 @@ class Pool(ABC):
     def _try_move_to_gpu(self, task:Task)->None:
         gpu_res = task.gpu_mode_res
         if (
-            not task.use_torch or
             task.device is None or
             task.device != "cpu" or
             gpu_res.gpu_cores == 0 or
