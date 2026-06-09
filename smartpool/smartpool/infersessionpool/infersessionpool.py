@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 from ..pool import Pool
@@ -8,11 +9,15 @@ from ..threadpool.threadpool import ThreadPool
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
-
+    
+    from onnxruntime import InferenceSession
     from ..resource import Resource
 
 
 class InferSessionPool(ThreadPool):
+
+    _session_lock:threading.Lock = threading.Lock()
+    _sessions:Dict[int, Dict[Tuple[str, str, str], InferenceSession]] = {}
 
     def __init__(
         self, max_workers:int=0, thread_name_prefix:str="InferSessionPool.worker:",
@@ -36,13 +41,7 @@ class InferSessionPool(ThreadPool):
         self._use_onnx: bool = True
         self.print_info: bool = False
 
-    def submit(
-        self, model_path:str,
-        args:Optional[Tuple[Any]]=None,
-        kwargs:Optional[Dict[str, Any]]=None,
-        cpu_mode_res: Optional[Resource] = None,
-        gpu_mode_res: Optional[Resource] = None
-    )->Future:
+    def _check_model_path(self, model_path:str)->None:
         if not os.path.isfile(model_path):
             raise FileNotFoundError(model_path)
 
@@ -52,6 +51,36 @@ class InferSessionPool(ThreadPool):
 
         if os.path.getsize(model_path) <= 0:
             raise ValueError("model file size is zero")
+        
+    @staticmethod
+    def _get_session(model_path:str, provider:tuple):
+        from cachetools import LRUCache
+        import json
+
+        model_path = os.path.abspath(model_path).replace("\\", "/")
+        provider_name = provider[0]
+        provider_options_str = json.dumps(provider[1], sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        tid = 0
+        key = (model_path, provider_name, provider_options_str)
+
+        with InferSessionPool._session_lock:
+            if tid not in InferSessionPool._sessions:
+                InferSessionPool._sessions[tid] = LRUCache(maxsize=10)
+
+            if key not in InferSessionPool._sessions[tid]:
+                from onnxruntime import InferenceSession
+                InferSessionPool._sessions[tid][key] = InferenceSession(model_path, providers=[provider])
+
+            return InferSessionPool._sessions[tid][key]
+
+    def submit(
+        self, model_path:str,
+        args:Optional[Tuple[Any]]=None,
+        kwargs:Optional[Dict[str, Any]]=None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None
+    )->Future:
+        self._check_model_path(model_path)
 
         return Pool.submit(
             self, func=model_path,

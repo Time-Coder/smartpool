@@ -57,10 +57,17 @@ def main(
     infer_session_pool = InferSessionPool(max_workers=n_workers)
     infer_session_pool.print_info = True
 
-    cpu_res = Resource(cpu_cores_in_python=2, cpu_mem=2*1024**3)
+    cpu_res = Resource(
+        cpu_cores_in_python=1,
+        cpu_cores_out_of_python=1,
+        cpu_mem=2*1024**3
+    )
     gpu_res = Resource(
-        cpu_cores_in_python=1, cpu_mem=512*1024**2,
-        gpu_cores=1000, gpu_mem=2*1024**3
+        cpu_cores_in_python=1,
+        cpu_cores_out_of_python=1,
+        cpu_mem=512*1024**2,
+        gpu_cores=1000,
+        gpu_mem=2*1024**3
     )
 
     result_queue = queue.Queue()
@@ -92,7 +99,6 @@ def main(
             cpu_mode_res=cpu_res
         )
         preprocess_future.add_done_callback(partial(preprocess_done_callback, image_path))
-
 
     start_time = time.perf_counter()
     with Progress(
