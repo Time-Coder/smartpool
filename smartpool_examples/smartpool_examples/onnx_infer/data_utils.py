@@ -1,15 +1,10 @@
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
-from config import (
-    COCO_IMAGE_IDS,
-    COCO_IMAGE_URL,
-    DATASET_DIR,
-    MODEL_PATH,
-    MODEL_URL,
-)
+from config import COCO_ZIP_URLS, DATASET_DIR, MODEL_PATH, MODEL_URL
 from rich.progress import (
     BarColumn,
     DownloadColumn,
@@ -27,7 +22,7 @@ def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
     for attempt in range(1, max_retries + 1):
         try:
             req = urllib.request.Request(url, method="GET")
-            resp = urllib.request.urlopen(req, timeout=60)
+            resp = urllib.request.urlopen(req, timeout=120)
             total = int(resp.headers.get("Content-Length", 0))
             chunk_size = 8192
             with Progress(
@@ -48,6 +43,13 @@ def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
                         pbar.update(task, advance=len(chunk))
             tmp.rename(dest)
             return
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise
+            last_err = e
+            if attempt < max_retries:
+                delay = 2 ** attempt
+                time.sleep(delay)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             last_err = e
             if attempt < max_retries:
@@ -56,23 +58,39 @@ def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
     raise last_err
 
 
+def download_dataset():
+    DATASET_DIR.mkdir(parents=True, exist_ok=True)
+
+    existing = len(list(DATASET_DIR.glob("*.jpg")))
+    if existing > 4000:
+        print(f"[SKIP DOWNLOAD] Dataset exists ({existing} images)")
+        return
+
+    print("[DOWNLOAD] val2017.zip (~1GB) ...")
+    zip_path = DATASET_DIR / "val2017.zip"
+
+    for url in COCO_ZIP_URLS:
+        try:
+            download_file(url, zip_path, "COCO val2017")
+            break
+        except Exception:
+            print(f"  mirror failed: {url}")
+            continue
+    else:
+        raise RuntimeError("all mirrors failed")
+
+    print(f"[EXTRACT] val2017.zip -> {DATASET_DIR} ...")
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(DATASET_DIR)
+
+    zip_path.unlink()
+    n = len(list(DATASET_DIR.glob("*.jpg")))
+    print(f"[DONE] {n} images ready")
+
+
 def download_model():
     if MODEL_PATH.exists():
         print(f"[SKIP DOWNLOAD] Model {MODEL_PATH.name} exists")
         return
     print("[DOWNLOAD] YOLOv8n ONNX...")
     download_file(MODEL_URL, MODEL_PATH, "YOLOv8n")
-
-
-def download_dataset():
-    DATASET_DIR.mkdir(parents=True, exist_ok=True)
-    existing = {p.stem for p in DATASET_DIR.glob("*.jpg")}
-    to_dl = [iid for iid in COCO_IMAGE_IDS if iid not in existing]
-    if not to_dl:
-        print(f"[SKIP DOWNLOAD] Dataset exists ({len(COCO_IMAGE_IDS)} images)")
-        return
-    print(f"[DOWNLOAD] {len(to_dl)} COCO images...")
-    for iid in to_dl:
-        url = COCO_IMAGE_URL.format(iid)
-        dest = DATASET_DIR / f"{iid}.jpg"
-        download_file(url, dest, f"COCO {iid}")
