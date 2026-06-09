@@ -5,22 +5,9 @@ if __name__ == "__main__":
     target_folder = os.path.abspath(self_folder + "/../../../smartpool").replace("\\", "/")
     sys.path.append(target_folder)
 
-import os
-import time
-from concurrent.futures import as_completed
-
 import typer
-from rich.progress import (
-    BarColumn,
-    Progress,
-    TextColumn,
-    TimeRemainingColumn,
-)
-
-from smartpool import InferSessionPool, Resource, ThreadPool
 
 app = typer.Typer(help="Use smartpool to do YOLOv8n ONNX inference on COCO val2017 with real-time progress.")
-
 
 @app.command()
 def main(
@@ -30,14 +17,25 @@ def main(
         help="max number of workers to use, 0 to use all available cores"
     ),
 ):
+    import os
+    import time
+    from smartpool import InferSessionPool, Resource, ThreadPool
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+    )
+    
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
 
     from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
     from data_utils import download_dataset, download_model
     from inference import preprocess, postprocess
-    from concurrent.futures import Future, wait, FIRST_COMPLETED
+    from concurrent.futures import Future
     from functools import partial
+    import queue
 
     print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
@@ -65,33 +63,35 @@ def main(
         gpu_cores=1000, gpu_mem=2*1024**3
     )
 
-    not_done_futures = set()
+    result_queue = queue.Queue()
 
-    def infer_done_callback(img, scale, pad, infer_future: Future):
+    def postprocess_done_callback(postprocess_future: Future):
+        postprocess_future.result()
+        result_queue.put(1)
+
+    def infer_done_callback(image_path, img, scale, pad, infer_future: Future):
         outputs = infer_future.result()[0]
         output_path = output_dir_str + "/" + os.path.basename(image_path)
-        postprocess_future = thread_pool.submit(
+        postprocess_future: Future = thread_pool.submit(
             postprocess,
             args=(img, outputs, output_path, scale, pad),
             cpu_mode_res=cpu_res
         )
-        not_done_futures.add(postprocess_future)
+        postprocess_future.add_done_callback(postprocess_done_callback)
 
-    def preprocess_done_callback(preprocess_future: Future):
+    def preprocess_done_callback(image_path, preprocess_future: Future):
         img, blob, scale, pad = preprocess_future.result()
         infer_future: Future = infer_session_pool.submit(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
-        infer_future.add_done_callback(partial(infer_done_callback, img, scale, pad))
-        not_done_futures.add(infer_future)
-
+        infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
     
     for image_path in image_paths:
+        image_path = str(image_path)
         preprocess_future: Future = thread_pool.submit(
             preprocess,
-            args=(str(image_path),),
+            args=(image_path,),
             cpu_mode_res=cpu_res
         )
-        preprocess_future.add_done_callback(preprocess_done_callback)
-        not_done_futures.add(preprocess_future)
+        preprocess_future.add_done_callback(partial(preprocess_done_callback, image_path))
 
 
     start_time = time.perf_counter()
@@ -101,15 +101,13 @@ def main(
         TextColumn("{task.completed}/{task.total}"),
         TimeRemainingColumn(),
     ) as progress:
-        task = progress.add_task("infer", total=len(not_done_futures))
+        n_tasks = len(image_paths)
+        task = progress.add_task("infer", total=n_tasks)
 
-        while not_done_futures:
-            done_futures, not_done_futures = wait(not_done_futures, return_when=FIRST_COMPLETED)
-
-            for f in done_futures:
-                f.result()
-                progress.update(task, advance=1/3)
-                progress.update(task, description=f"infer [{progress.tasks[0].completed}/{progress.tasks[0].total}]")
+        for _ in range(n_tasks):
+            result_queue.get()
+            progress.update(task, advance=1)
+            progress.update(task, description=f"infer [{progress.tasks[0].completed}/{progress.tasks[0].total}]")
 
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")
