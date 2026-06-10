@@ -29,7 +29,7 @@ class Worker(ABC):
         self.imported_modules: Set[str] = set()
         self.n_finished_tasks: int = 0
         self.task_queue: QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
-        self.process_or_thread: Optional[Union[mp.Process, threading.Thread]] = None
+        self.task_executor: Optional[Union[mp.Process, threading.Thread]] = None
 
     def add_task(self, task: Task)->None:
         self.start()
@@ -74,7 +74,7 @@ class Worker(ABC):
         pass
 
     def stop(self, wait:bool=True, clear:bool=False)->None:
-        if self.process_or_thread is None:
+        if self.task_executor is None:
             return
 
         self.task_queue.put(None)

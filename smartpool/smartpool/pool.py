@@ -97,22 +97,21 @@ class Pool(ABC):
         Pool._instances.add(self)
 
     def submit(
-        self, func:Optional[Callable[..., Any]],
-        args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
+        self, func: Optional[Callable[..., Any]],
+        args: Optional[Tuple[Any]] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         use_torch: Optional[bool] = None,
         device_changeable: bool = False
     )->Future:
-        import threading
-
-        from .task import Task
-
         if args is None:
             args = []
 
         if kwargs is None:
             kwargs = {}
+
+        self._check_args(func, args, kwargs)
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource(cpu_cores_in_python=1)
@@ -123,33 +122,49 @@ class Pool(ABC):
         if use_torch is None:
             use_torch = self._use_torch
 
+        from .task import Task
+
+        task = Task(
+            func=func,
+            args=args,
+            kwargs=kwargs,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            use_torch=use_torch,
+            device_changeable=device_changeable,
+            calculate_module_deps=self._need_module_deps
+        )
+        self._validate_resource_feasibility(task)
+
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot submit after shutdown")
-
-            task = Task(
-                func=func,
-                args=args,
-                kwargs=kwargs,
-                cpu_mode_res=cpu_mode_res,
-                gpu_mode_res=gpu_mode_res,
-                use_torch=use_torch,
-                device_changeable=device_changeable,
-                calculate_module_deps=self._need_module_deps
-            )
-            self._validate_resource_feasibility(task)
+            
             self._tasks[task.id] = task
-
             if not self._try_assign_task(task):
                 self._delayed_tasks.append(task)
                 return task.future
 
             self._put_task(task)
             if self._result_queue is not None and self._result_thread is None:
+                import threading
                 self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
                 self._result_thread.start()
 
             return task.future
+
+    def _check_args(self, func:Optional[Callable[..., Any]], args:Tuple[Any], kwargs:Dict[str, Any]) -> None:
+        if func is None:
+            return
+        
+        import inspect
+
+        signature: inspect.Signature = inspect.signature(func)
+        try:
+            signature.bind(*args, **kwargs)
+        except TypeError as e:
+            formatted_msg = f"{func.__name__}() {str(e)}"
+            raise TypeError(formatted_msg) from None
 
     def _try_assign_task(self, task: Task) -> bool:
         gpu_res = task.gpu_mode_res

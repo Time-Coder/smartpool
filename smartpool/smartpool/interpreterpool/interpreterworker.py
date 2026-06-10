@@ -32,13 +32,13 @@ class InterpreterWorker(Worker):
             self.change_device_cmd_queue.put(device)
 
     def _clear(self)->None:
-        self.process_or_thread = None
+        self.task_executor = None
         self.interp = None
         self._is_working = False
         self.imported_modules.clear()
 
     def start(self)->None:
-        if self.process_or_thread is not None:
+        if self.task_executor is not None:
             return
 
         import concurrent.interpreters as interpreters
@@ -46,7 +46,7 @@ class InterpreterWorker(Worker):
 
         interpreter_pool:InterpreterPool = self.pool
         self.interp:Interpreter = interpreters.create()
-        self.process_or_thread = self.interp.call_in_thread(
+        self.task_executor = self.interp.call_in_thread(
             InterpreterWorker.run,
             task_queue=self.task_queue,
             result_queue=interpreter_pool._result_queue,
@@ -57,6 +57,6 @@ class InterpreterWorker(Worker):
         )
 
     def join(self)->None:
-        self.process_or_thread.join()
+        self.task_executor.join()
         self.interp.close()
         self._clear()

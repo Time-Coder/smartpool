@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
+import inspect
 from typing import Dict, Tuple, Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import onnxruntime as ort
-    import inspect
 
 
 class ModelInfo:
@@ -14,6 +14,8 @@ class ModelInfo:
     file_size: int
     inputs: Dict[str, ort.NodeArg]
     signature: inspect.Signature
+
+    _onnx_type_map: Optional[Dict[str, type]] = None
 
     def __init__(self, model_path: str):
         self.model_path = model_path
@@ -36,7 +38,7 @@ class ModelInfo:
         import onnx
         onnx.checker.check_model(model_path, full_check=True)
 
-    def fetch_info(self, session: ort.InferenceSession)->None:
+    def _fetch_info(self, session: ort.InferenceSession) -> None:
         if self.inputs is not None:
             return
         
@@ -52,8 +54,28 @@ class ModelInfo:
             self.inputs[node.name] = node
 
         self.signature = inspect.Signature(params)
+
+    @staticmethod
+    def _get_onnx_to_numpy_map() -> Dict[str, type]:
+        if ModelInfo._onnx_type_map is not None:
+            return ModelInfo._onnx_type_map
+
+        from onnx import TensorProto, helper
+        ModelInfo._onnx_type_map = {}
+        for attr_name in dir(TensorProto):
+            if attr_name.isupper() and not attr_name.startswith('_'):
+                try:
+                    onnx_enum = getattr(TensorProto, attr_name)
+                    np_dtype = helper.tensor_dtype_to_np_dtype(onnx_enum)
+                    ModelInfo._onnx_type_map[f'tensor({attr_name.lower()})'] = np_dtype
+                except Exception:
+                    continue
+                
+        return ModelInfo._onnx_type_map
         
-    def check_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None)->Dict[str, Any]:
+    def check_args(self, session: ort.InferenceSession, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        self._fetch_info(session)
+        
         if kwargs is None:
             kwargs = {}
 
@@ -62,20 +84,37 @@ class ModelInfo:
             bound_args.apply_defaults()
             kwargs = bound_args.arguments
         except TypeError as e:
-            formatted_msg = f"onnx model '{self.model_name}' arguments error: {str(e)}"
+            formatted_msg = f"model '{self.model_name}' arguments error: {str(e)}"
             raise TypeError(formatted_msg) from None
         
         if self.inputs:
+            type_map = ModelInfo._get_onnx_to_numpy_map()
+            
             import numpy as np
             for name, value in kwargs.items():
                 if not isinstance(value, np.ndarray):
-                    raise TypeError(f"onnx model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
+                    raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
                 
-                node = self.inputs[name]
-                if node.shape != value.shape:
-                    raise ValueError(f"onnx model '{self.model_name}' input node '{name}' need shape {node.shape}, {value.shape} were given")
+                if not value.flags['C_CONTIGUOUS']:
+                    raise ValueError(f"model '{self.model_name}' input node '{name}' need contiguous memory layout, non contiguous one were given")
 
-                if node.type != value.dtype:
-                    raise TypeError(f"onnx model '{self.model_name}' input node '{name}' need dtype {node.type}, {value.dtype} were given")
+                node = self.inputs[name]
+
+                expected_type = type_map[node.type]
+                actual_type = value.dtype
+                if actual_type != expected_type:
+                    raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
+
+                expected_shape = node.shape
+                actual_shape = value.shape
+                if len(expected_shape) != len(actual_shape):
+                    raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
+
+                for i, dim in enumerate(expected_shape):
+                    if isinstance(dim, str) or dim is None or dim == -1:
+                        continue
+
+                    if actual_shape[i] != dim:
+                        raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
 
         return kwargs

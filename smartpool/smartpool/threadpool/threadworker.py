@@ -32,7 +32,7 @@ class ThreadWorker(Worker):
         task.future.set_running_or_notify_cancel()
 
     def change_device(self, device:str)->None:
-        _set_best_device(device, self.process_or_thread.ident)
+        _set_best_device(device, self.task_executor.ident)
         self._set_stream(device)
 
     def _set_stream(self, device:str):
@@ -46,27 +46,27 @@ class ThreadWorker(Worker):
             else:
                 self._streams[device] = None
 
-        _set_best_stream(self._streams[device], self.process_or_thread.ident)
+        _set_best_stream(self._streams[device], self.task_executor.ident)
 
     def _clear(self)->None:
-        self.process_or_thread = None
+        self.task_executor = None
         self._is_working = False
 
     def start(self)->None:
-        if self.process_or_thread is not None:
+        if self.task_executor is not None:
             return
 
         thread_pool:ThreadPool = self.pool
-        self.process_or_thread = threading.Thread(
+        self.task_executor = threading.Thread(
             target=self.run,
             name=f"{thread_pool._thread_name_prefix}{self.index}",
             daemon=True
         )
-        self.process_or_thread.start()
+        self.task_executor.start()
 
     def join(self)->None:
-        if self.process_or_thread is not None:
-            self.process_or_thread.join()
+        if self.task_executor is not None:
+            self.task_executor.join()
 
         self._clear()
 
