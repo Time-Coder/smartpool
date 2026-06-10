@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
-import inspect
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Set, List
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Set
 
 from ..pool import Pool
 
@@ -12,13 +10,8 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
     import onnxruntime as ort
     from ..resource import Resource
+    from .model_info import ModelInfo
 
-@dataclass
-class ModelInfo:
-    file_size: int
-    model_name: str
-    inputs: List[ort.NodeArg]
-    signature: inspect.Signature
 
 class InferSessionPool(Pool):
 
@@ -32,23 +25,12 @@ class InferSessionPool(Pool):
     _session_options: Optional[ort.SessionOptions] = None
 
     def __init__(self, model_path:str, max_workers:int=0):
+        from .model_info import ModelInfo
+        
         model_path: str = os.path.abspath(model_path).replace("\\", "/")
-        if model_path not in InferSessionPool._valid_model_paths:
-            if not os.path.isfile(model_path):
-                raise FileNotFoundError(model_path)
-
-            _, ext = os.path.splitext(model_path)
-            if ext != ".onnx":
-                raise ValueError(f"only support .onnx model, {ext} were given")
-
-            file_size = os.path.getsize(model_path)
-            if file_size <= 0:
-                raise ValueError("model file size is zero")
+        if model_path not in InferSessionPool._model_infos:
             
-            import onnx
-            onnx.checker.check_model(model_path, full_check=True)
-
-            InferSessionPool._valid_model_file_sizes[model_path] = file_size
+            InferSessionPool._model_infos[model_path] = ModelInfo(model_path)
         
         from .infersessionworker import InferSessionWorker
         
@@ -62,9 +44,7 @@ class InferSessionPool(Pool):
             use_onnx = True,
         )
         self.print_info: bool = False
-        self._model_path: str = model_path
-        self._model_file_size: int = InferSessionPool._valid_model_file_sizes[model_path]
-        self._min_mem_size: int = int(1.5 * self._model_file_size)
+        self._model_info: ModelInfo = InferSessionPool._model_infos[model_path]
         self._session_lock: threading.Lock = threading.Lock()
         self._sessions: Dict[threading.Thread, Dict[Tuple[str, str, str], ort.InferenceSession]] = {}
         self._cpu_session: Optional[ort.InferenceSession] = None
@@ -78,10 +58,9 @@ class InferSessionPool(Pool):
             import onnxruntime as ort
             self._cpu_session = ort.InferenceSession(self._model_path, InferSessionPool._get_session_options(), providers=[("CPUExecutionProvider", {})])
 
+        self._model_info.fetch_info(self._cpu_session)
+        inputs = self._model_info.check_args(args, kwargs)
         
-    def _get_model_info(self)->ModelInfo:
-        if self._model_path in InferSessionPool._model_infos:
-            return InferSessionPool._model_infos[self._model_path]
         
     @staticmethod
     def _get_session_options()->ort.SessionOptions:
