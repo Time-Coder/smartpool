@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 import inspect
-from typing import Dict, Tuple, Any, Optional, TYPE_CHECKING
+import os
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
     import onnxruntime as ort
@@ -34,14 +34,14 @@ class ModelInfo:
         self.file_size = os.path.getsize(model_path)
         if self.file_size <= 0:
             raise ValueError("model file size is zero")
-        
+
         import onnx
         onnx.checker.check_model(model_path, full_check=True)
 
     def _fetch_info(self, session: ort.InferenceSession) -> None:
         if self.inputs is not None:
             return
-        
+
         model_name = session.get_modelmeta().name
         if model_name:
             self.model_name = model_name
@@ -70,12 +70,12 @@ class ModelInfo:
                     ModelInfo._onnx_type_map[f'tensor({attr_name.lower()})'] = np_dtype
                 except Exception:
                     continue
-                
+
         return ModelInfo._onnx_type_map
-        
+
     def check_args(self, session: ort.InferenceSession, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._fetch_info(session)
-        
+
         if kwargs is None:
             kwargs = {}
 
@@ -86,15 +86,15 @@ class ModelInfo:
         except TypeError as e:
             formatted_msg = f"model '{self.model_name}' arguments error: {str(e)}"
             raise TypeError(formatted_msg) from None
-        
+
         if self.inputs:
             type_map = ModelInfo._get_onnx_to_numpy_map()
-            
+
             import numpy as np
             for name, value in kwargs.items():
                 if not isinstance(value, np.ndarray):
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
-                
+
                 if not value.flags['C_CONTIGUOUS']:
                     raise ValueError(f"model '{self.model_name}' input node '{name}' need contiguous memory layout, non contiguous one were given")
 
