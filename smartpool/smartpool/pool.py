@@ -35,22 +35,23 @@ class Pool(ABC):
     _instances:weakref.WeakSet[Pool] = weakref.WeakSet()
 
     def __init__(
-        self, max_workers:int,
+        self, max_workers: int,
 
-        initializer:Optional[Callable[..., Any]],
-        initargs:Tuple[Any, ...],
-        initkwargs:Optional[Dict[str, Any]],
+        initializer: Optional[Callable[..., Any]],
+        initargs: Tuple[Any, ...],
+        initkwargs: Optional[Dict[str, Any]],
 
-        result_queue_cls:Type[QueueLike],
-        result_queue_args:Tuple[Any, ...]=(),
-        result_queue_kwargs:Dict[str, Any]=None,
+        result_queue_cls: Type[QueueLike],
+        result_queue_args: Tuple[Any, ...]=(),
+        result_queue_kwargs: Dict[str, Any]=None,
 
         *,
 
-        max_tasks_per_child:Optional[int],
-        worker_cls:Type[Worker],
-        use_torch:bool,
-        need_module_deps:bool
+        max_tasks_per_child: Optional[int]=None,
+        worker_cls: Type[Worker],
+        use_torch: bool = False,
+        use_onnx: bool = False,
+        need_module_deps: bool = False
     ):
         self._init_sys_info()
 
@@ -68,22 +69,22 @@ class Pool(ABC):
         if not max_workers:
             max_workers = os.cpu_count()
 
-        self._max_tasks_per_child:int = max_tasks_per_child
-        self._need_module_deps:bool = need_module_deps
-        self._use_torch:bool = use_torch
-        self._max_workers:int = max_workers
-        self._initializer:Optional[Callable[..., Any]] = initializer
-        self._initargs:Tuple[Any, ...] = initargs
-        self._initkwargs:Optional[Dict[str, Any]] = initkwargs
-        self._workers_working_count:int = 0
-        self._worker_cls:Type[Worker] = worker_cls
-        self._workers:List[Worker] = []
-        self._tasks:Dict[str, Task] = {}
-        self._delayed_tasks:List[Task] = []
-        self._lock:threading.Lock = threading.Lock()
-        self._shutdown:bool = False
-        self._result_thread:Optional[threading.Thread] = None
-        self._use_onnx: bool = False
+        self._max_tasks_per_child: int = max_tasks_per_child
+        self._need_module_deps: bool = need_module_deps
+        self._use_torch: bool = use_torch
+        self._max_workers: int = max_workers
+        self._initializer: Optional[Callable[..., Any]] = initializer
+        self._initargs: Tuple[Any, ...] = initargs
+        self._initkwargs: Optional[Dict[str, Any]] = initkwargs
+        self._workers_working_count: int = 0
+        self._worker_cls: Type[Worker] = worker_cls
+        self._workers: List[Worker] = []
+        self._tasks: Dict[str, Task] = {}
+        self._delayed_tasks: List[Task] = []
+        self._lock: threading.Lock = threading.Lock()
+        self._shutdown: bool = False
+        self._result_thread: Optional[threading.Thread] = None
+        self._use_onnx: bool = use_onnx
 
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -96,7 +97,7 @@ class Pool(ABC):
         Pool._instances.add(self)
 
     def submit(
-        self, func:Union[Callable[..., Any], str],
+        self, func:Optional[Callable[..., Any]],
         args:Optional[Tuple[Any]]=None, kwargs:Optional[Dict[str, Any]]=None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,

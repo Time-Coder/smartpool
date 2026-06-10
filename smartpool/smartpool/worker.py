@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Union
 
 if TYPE_CHECKING:
     import multiprocessing as mp
-    import threading
 
     from .pool import Pool
     from .task import Task
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 class Worker(ABC):
 
+    _total_working_count_lock:threading.Lock = threading.Lock()
     _total_working_count:int = 0
 
     def __init__(
@@ -47,15 +48,18 @@ class Worker(ABC):
         self._is_working = is_working
 
         if is_working:
-            Worker._total_working_count += 1
-            self.pool._workers_working_count += 1
+            with Worker._total_working_count_lock:
+                Worker._total_working_count += 1
+                self.pool._workers_working_count += 1
         else:
-            Worker._total_working_count -= 1
-            self.pool._workers_working_count -= 1
+            with Worker._total_working_count_lock:
+                Worker._total_working_count -= 1
+                self.pool._workers_working_count -= 1
 
     @staticmethod
     def total_working_count()->int:
-        return Worker._total_working_count
+        with Worker._total_working_count_lock:
+            return Worker._total_working_count
 
     @abstractmethod
     def _clear(self)->None:
