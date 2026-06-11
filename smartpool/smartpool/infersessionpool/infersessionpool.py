@@ -181,9 +181,19 @@ class InferSessionPool(Pool):
         self._in_flight_counts[device_key] = self._in_flight_counts.get(device_key, 0) + 1
         return True
 
+    def _decrement_in_flight_count(self, task: Task) -> None:
+        self._in_flight_count -= 1
+        device = task.device
+        val = self._in_flight_counts.get(device, 0) - 1
+        if val <= 0:
+            self._in_flight_counts.pop(device, None)
+        else:
+            self._in_flight_counts[device] = val
+        if self._shutdown and self._in_flight_count == 0:
+            self._all_done.set()
+
     def _dispatch_infer(self, task: Task) -> None:
         self._take_resource(task)
-        session = self._get_or_create_session(task)
         task.future.set_running_or_notify_cancel()
 
         output_names = task.output_names
@@ -194,32 +204,20 @@ class InferSessionPool(Pool):
                 task = self._tasks.pop(task_id, None)
                 if task is None:
                     return
-                
+
                 self._release_resource(task)
-                self._in_flight_count -= 1
-                device = task.device
-                self._in_flight_counts[device] = self._in_flight_counts.get(device, 0) - 1
-                if self._shutdown and self._in_flight_count == 0:
-                    self._all_done.set()
-
+                self._decrement_in_flight_count(task)
                 self._postprocess_after_task_done()
-
-            task.future.set_result(result)
+                task.future.set_result(result)
 
         try:
+            session = self._get_or_create_session(task)
             session.run_async(output_names, task.kwargs, callback)
         except BaseException as e:
-            with self._lock:
-                self._tasks.pop(task_id, None)
-                self._release_resource(task)
-                self._in_flight_count -= 1
-                device = task.device
-                self._in_flight_counts[device] = self._in_flight_counts.get(device, 0) - 1
-                if self._shutdown and self._in_flight_count == 0:
-                    self._all_done.set()
-
-                self._postprocess_after_task_done()
-
+            self._tasks.pop(task_id, None)
+            self._release_resource(task)
+            self._decrement_in_flight_count(task)
+            self._postprocess_after_task_done()
             task.future.set_exception(e)
 
     def _get_or_create_session(self, task: Task) -> ort.InferenceSession:
@@ -281,7 +279,7 @@ class InferSessionPool(Pool):
             self._session_reserved.clear()
 
     def _postprocess_after_task_done(self) -> None:
-        if not self._delayed_tasks:
+        if self._shutdown or not self._delayed_tasks:
             return
         
         remaining = []
@@ -323,6 +321,9 @@ class InferSessionPool(Pool):
             if task.gpu_index != -1:
                 self._sys_info.gpu_infos[task.gpu_index].n_cores_free += res.gpu_cores
                 self._sys_info.gpu_infos[task.gpu_index].mem_free += res.gpu_mem
+
+    def _choose_task_worker(self, task, res):
+        return None
 
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores
