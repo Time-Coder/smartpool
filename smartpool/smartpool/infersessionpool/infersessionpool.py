@@ -4,6 +4,7 @@ import os
 import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
+from ..gpuinfo import GPUInfo
 from ..pool import Pool
 
 if TYPE_CHECKING:
@@ -93,6 +94,19 @@ class InferSessionPool(Pool):
     def _effective_primary_provider(self, task: Task) -> str:
         return self._get_primary_provider(self._effective_provider(task))
 
+    @staticmethod
+    def _check_providers(providers):
+        if providers is None:
+            return
+        GPUInfo.init_onnx_providers()
+        user_names = {p[0] if isinstance(p, tuple) else p for p in providers}
+        supported = set(GPUInfo.supported_onnx_providers)
+        if not user_names & supported:
+            raise ValueError(
+                f"none of the requested providers {user_names} are available. "
+                f"supported: {list(supported)}"
+            )
+
     @property
     def _model_mem(self) -> int:
         return int(self._model_info.file_size * self._model_mem_multiplier)
@@ -118,6 +132,8 @@ class InferSessionPool(Pool):
             )
 
         validated_kwargs = self._model_info.check_args(self._cpu_session, args, kwargs)
+        self._model_info.check_outputs(output_names)
+        self._check_providers(providers)
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource(cpu_cores_in_python=1)
@@ -140,35 +156,61 @@ class InferSessionPool(Pool):
                 raise RuntimeError("cannot submit after shutdown")
             
             self._tasks[task.id] = task
-            if not self._try_assign_infer(task):
+            if not self._try_assign_task(task):
                 self._delayed_tasks.append(task)
 
         return task.future
 
-    def _try_assign_infer(self, task: Task) -> bool:
-        if not self._try_assign_device(task):
-            return False
-        
-        if not self._try_acquire_slot(task):
-            task.device = None
-            task.gpu_index = -1
-            task.dml_id = -1
-            return False
-        
-        self._dispatch_infer(task)
-        return True
-
-    def _try_assign_device(self, task: Task) -> bool:
+    def _try_assign_task(self, task: Task) -> bool:
         gpu_res = task.gpu_mode_res
+        modes = []
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
-            device, _ = self._choose_task_device(task, "gpu", kill_workers=False)
-            if device is not None:
-                return True
-            
-        device, _ = self._choose_task_device(task, "cpu", kill_workers=True)
-        return device is not None
+            modes.append("gpu")
+        modes.append("cpu")
 
-    def _try_acquire_slot(self, task: Task) -> bool:
+        for mode in modes:
+            kill = (mode == "cpu")
+            device, should_kill_workers = self._choose_task_device(task, mode, kill_workers=kill)
+
+            for idle_worker in should_kill_workers:
+                self._sys_info.cpu_mem_free += idle_worker.cached_rss
+                idle_worker.stop(wait=False, clear=True)
+
+            if device is None and self._reclaim_idle_session_resources():
+                device, _ = self._choose_task_device(task, mode, kill_workers=True)
+
+            if device is None:
+                continue
+
+            if not self._choose_task_worker(task):
+                task.device = None
+                task.gpu_index = -1
+                task.dml_id = -1
+                continue
+
+            self._put_task(task)
+            return True
+
+        return False
+
+    def _reclaim_idle_session_resources(self) -> bool:
+        reclaimed = False
+        with self._sys_info_lock:
+            for key, gpu_idx in list(self._session_reserved.items()):
+                if key == "cpu":
+                    continue
+                device_key = key.split(":")[1] if ":" in key else key
+                if self._in_flight_counts.get(device_key, 0) > 0:
+                    continue
+                if gpu_idx == -1:
+                    self._sys_info.cpu_mem_free += self._model_mem
+                else:
+                    self._sys_info.gpu_infos[gpu_idx].mem_free += self._model_mem
+                del self._session_reserved[key]
+                reclaimed = True
+        return reclaimed
+
+    def _choose_task_worker(self, task: Task) -> bool:
         provider = self._effective_provider(task)
         device_key = task.device
         if self._in_flight_count >= self._max_workers:
@@ -192,7 +234,7 @@ class InferSessionPool(Pool):
         if self._shutdown and self._in_flight_count == 0:
             self._all_done.set()
 
-    def _dispatch_infer(self, task: Task) -> None:
+    def _put_task(self, task: Task) -> None:
         self._take_resource(task)
         task.future.set_running_or_notify_cancel()
 
@@ -213,7 +255,7 @@ class InferSessionPool(Pool):
         try:
             session = self._get_or_create_session(task)
             session.run_async(output_names, task.kwargs, callback)
-        except BaseException as e:
+        except Exception as e:
             self._tasks.pop(task_id, None)
             self._release_resource(task)
             self._decrement_in_flight_count(task)
@@ -288,18 +330,8 @@ class InferSessionPool(Pool):
                 self._tasks.pop(delayed_task.id, None)
                 continue
 
-            if not self._try_assign_device(delayed_task):
+            if not self._try_assign_task(delayed_task):
                 remaining.append(delayed_task)
-                continue
-
-            if not self._try_acquire_slot(delayed_task):
-                delayed_task.device = None
-                delayed_task.gpu_index = -1
-                delayed_task.dml_id = -1
-                remaining.append(delayed_task)
-                continue
-
-            self._dispatch_infer(delayed_task)
 
         self._delayed_tasks = remaining
 
@@ -321,9 +353,6 @@ class InferSessionPool(Pool):
             if task.gpu_index != -1:
                 self._sys_info.gpu_infos[task.gpu_index].n_cores_free += res.gpu_cores
                 self._sys_info.gpu_infos[task.gpu_index].mem_free += res.gpu_mem
-
-    def _choose_task_worker(self, task, res):
-        return None
 
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores

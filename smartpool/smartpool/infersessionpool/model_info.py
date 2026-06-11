@@ -13,6 +13,7 @@ class ModelInfo:
     model_name: str
     file_size: int
     inputs: Dict[str, ort.NodeArg]
+    outputs: Dict[str, ort.NodeArg]
     signature: inspect.Signature
 
     _onnx_type_map: Optional[Dict[str, type]] = None
@@ -22,6 +23,7 @@ class ModelInfo:
         self.model_name = os.path.basename(self.model_path).split(".")[0]
         self.file_size = None
         self.inputs = None
+        self.outputs = None
         self.signature = None
 
         if not os.path.isfile(model_path):
@@ -42,16 +44,15 @@ class ModelInfo:
         if self.inputs is not None:
             return
 
-        model_name = session.get_modelmeta().name
-        if model_name:
-            self.model_name = model_name
-
         params = []
         self.inputs = {}
-        inputs = session.get_inputs()
-        for node in inputs:
+        for node in session.get_inputs():
             params.append(inspect.Parameter(node.name, inspect.Parameter.POSITIONAL_OR_KEYWORD))
             self.inputs[node.name] = node
+
+        self.outputs = {}
+        for node in session.get_outputs():
+            self.outputs[node.name] = node
 
         self.signature = inspect.Signature(params)
 
@@ -95,9 +96,6 @@ class ModelInfo:
                 if not isinstance(value, np.ndarray):
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
 
-                if not value.flags['C_CONTIGUOUS']:
-                    raise ValueError(f"model '{self.model_name}' input node '{name}' need contiguous memory layout, non contiguous one were given")
-
                 node = self.inputs[name]
 
                 expected_type = type_map[node.type]
@@ -118,3 +116,11 @@ class ModelInfo:
                         raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
 
         return kwargs
+
+    def check_outputs(self, output_names):
+        if output_names is None:
+            return
+        for name in output_names:
+            if name not in self.outputs:
+                valid = list(self.outputs.keys())
+                raise ValueError(f"model '{self.model_name}' has no output named '{name}'. valid outputs: {valid}")

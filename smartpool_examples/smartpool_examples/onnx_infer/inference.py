@@ -28,7 +28,7 @@ def preprocess(image_path: str):
     
     blob, scale, pad = letterbox(img)
     blob = blob.astype(np.float32) / 255.0
-    blob = blob.transpose(2, 0, 1)[np.newaxis, ...]
+    blob = np.ascontiguousarray(blob.transpose(2, 0, 1)[np.newaxis, ...])
     return img, blob, scale, pad
 
 

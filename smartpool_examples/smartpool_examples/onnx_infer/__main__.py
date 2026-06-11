@@ -54,7 +54,7 @@ def main(
 
     print(f"\nSubmit {len(image_paths)} tasks to ThreadPool({n_workers})...")
     thread_pool = ThreadPool(max_workers=n_workers)
-    infer_session_pool = InferSessionPool(max_workers=n_workers)
+    infer_session_pool = InferSessionPool(MODEL_PATH, max_workers=n_workers)
     infer_session_pool.print_info = True
 
     cpu_res = Resource(
@@ -88,7 +88,7 @@ def main(
 
     def preprocess_done_callback(image_path, preprocess_future: Future):
         img, blob, scale, pad = preprocess_future.result()
-        infer_future: Future = infer_session_pool.submit(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+        infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
         infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
     
     for image_path in image_paths:

@@ -58,12 +58,31 @@ def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
     raise last_err
 
 
+def _count_images():
+    return len(list(DATASET_DIR.rglob("*.jpg")))
+
+
+def _flatten_images():
+    for p in list(DATASET_DIR.rglob("*.jpg")):
+        if p.parent is not DATASET_DIR:
+            p.replace(DATASET_DIR / p.name)
+    for p in list(DATASET_DIR.iterdir()):
+        if p.is_dir() and p.name != "val2017":
+            for f in list(p.rglob("*")):
+                if f.is_file():
+                    f.unlink()
+            try:
+                p.rmdir()
+            except OSError:
+                pass
+
+
 def download_dataset():
     DATASET_DIR.mkdir(parents=True, exist_ok=True)
 
-    existing = len(list(DATASET_DIR.glob("*.jpg")))
-    if existing > 4000:
-        print(f"[SKIP DOWNLOAD] Dataset exists ({existing} images)")
+    _flatten_images()
+    if _count_images() > 4000:
+        print(f"[SKIP DOWNLOAD] Dataset exists ({_count_images()} images)")
         return
 
     print("[DOWNLOAD] val2017.zip (~1GB) ...")
@@ -84,7 +103,8 @@ def download_dataset():
         zf.extractall(DATASET_DIR)
 
     zip_path.unlink()
-    n = len(list(DATASET_DIR.glob("*.jpg")))
+    _flatten_images()
+    n = _count_images()
     print(f"[DONE] {n} images ready")
 
 

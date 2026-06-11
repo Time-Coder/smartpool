@@ -8,10 +8,6 @@ OUTPUT_DIR = PACKAGE_DIR / "data" / "output"
 MODEL_URL = "https://hf-mirror.com/Kalray/yolov8/resolve/main/yolov8n.onnx"
 MODEL_PATH = MODEL_DIR / "yolov8n.onnx"
 
-# Mirror URLs for val2017.zip (tried in order, first successful wins)
-# 国内已知直链镜像较少，TUNA/USTC 已停止服务，pjreddie 只有 2014 版。
-# 如你有内网或自建镜像，在前面加一条即可优先使用，例如：
-#   "https://your-mirror.example.com/val2017.zip",
 COCO_ZIP_URLS = [
     "http://images.cocodataset.org/zips/val2017.zip",
 ]
