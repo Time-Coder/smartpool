@@ -571,7 +571,6 @@ class Pool(ABC):
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         pass
 
-    @abstractmethod
     def _put_task(self, task:Task)->None:
         pass
 

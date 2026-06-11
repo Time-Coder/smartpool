@@ -58,6 +58,7 @@ class InferSessionPool(Pool):
             InferSessionPool._session_options = ort.SessionOptions()
             InferSessionPool._session_options.enable_cpu_mem_arena = True
             InferSessionPool._session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
         return InferSessionPool._session_options
 
     @staticmethod
@@ -71,6 +72,7 @@ class InferSessionPool(Pool):
                 p[0] if isinstance(p, tuple) else p for p in user_providers
             )
             key += f":providers={providers_str}"
+
         return key
 
     def _device_capacity(self, provider: Tuple[str, Dict]) -> int:
@@ -81,10 +83,11 @@ class InferSessionPool(Pool):
         return provider[0] if isinstance(provider, tuple) else provider
 
     def _effective_provider(self, task: Task) -> Tuple[str, Dict]:
-        user = getattr(task, "_user_providers", None)
+        user = task.user_providers
         if user:
             p = user[0]
             return (p, {}) if isinstance(p, str) else p
+        
         return task.onnx_provider
 
     def _effective_primary_provider(self, task: Task) -> str:
@@ -96,9 +99,9 @@ class InferSessionPool(Pool):
 
     def submit(
         self,
-        output_names: Optional[Union[List[str], None]] = None,
         args: Optional[Tuple[Any]] = None,
         kwargs: Optional[Dict[str, Any]] = None,
+        output_names: Optional[Union[List[str], None]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
@@ -118,6 +121,7 @@ class InferSessionPool(Pool):
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource(cpu_cores_in_python=1)
+
         if gpu_mode_res is None:
             gpu_mode_res = cpu_mode_res
 
@@ -127,13 +131,14 @@ class InferSessionPool(Pool):
             use_torch=False, device_changeable=False,
             calculate_module_deps=False,
         )
-        task._output_names = output_names
-        task._user_providers = providers
+        task.output_names = output_names
+        task.user_providers = providers
         self._validate_resource_feasibility(task)
 
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot submit after shutdown")
+            
             self._tasks[task.id] = task
             if not self._try_assign_infer(task):
                 self._delayed_tasks.append(task)
@@ -143,11 +148,13 @@ class InferSessionPool(Pool):
     def _try_assign_infer(self, task: Task) -> bool:
         if not self._try_assign_device(task):
             return False
+        
         if not self._try_acquire_slot(task):
             task.device = None
             task.gpu_index = -1
             task.dml_id = -1
             return False
+        
         self._dispatch_infer(task)
         return True
 
@@ -157,6 +164,7 @@ class InferSessionPool(Pool):
             device, _ = self._choose_task_device(task, "gpu", kill_workers=False)
             if device is not None:
                 return True
+            
         device, _ = self._choose_task_device(task, "cpu", kill_workers=True)
         return device is not None
 
@@ -165,8 +173,10 @@ class InferSessionPool(Pool):
         device_key = task.device
         if self._in_flight_count >= self._max_workers:
             return False
+        
         if self._in_flight_counts.get(device_key, 0) >= self._device_capacity(provider):
             return False
+        
         self._in_flight_count += 1
         self._in_flight_counts[device_key] = self._in_flight_counts.get(device_key, 0) + 1
         return True
@@ -176,41 +186,46 @@ class InferSessionPool(Pool):
         session = self._get_or_create_session(task)
         task.future.set_running_or_notify_cancel()
 
-        output_names = getattr(task, "_output_names", None)
-        tid = task.id
+        output_names = task.output_names
+        task_id = task.id
 
         def callback(result, user_data):
             with self._lock:
-                t = self._tasks.pop(tid, None)
-                if t is None:
+                task = self._tasks.pop(task_id, None)
+                if task is None:
                     return
-                self._release_resource(t)
+                
+                self._release_resource(task)
                 self._in_flight_count -= 1
-                dk = t.device
-                self._in_flight_counts[dk] = self._in_flight_counts.get(dk, 0) - 1
+                device = task.device
+                self._in_flight_counts[device] = self._in_flight_counts.get(device, 0) - 1
                 if self._shutdown and self._in_flight_count == 0:
                     self._all_done.set()
-                self._try_process_delayed()
-            t.future.set_result(result)
+
+                self._postprocess_after_task_done()
+
+            task.future.set_result(result)
 
         try:
             session.run_async(output_names, task.kwargs, callback)
         except BaseException as e:
             with self._lock:
-                self._tasks.pop(tid, None)
+                self._tasks.pop(task_id, None)
                 self._release_resource(task)
                 self._in_flight_count -= 1
-                dk = task.device
-                self._in_flight_counts[dk] = self._in_flight_counts.get(dk, 0) - 1
+                device = task.device
+                self._in_flight_counts[device] = self._in_flight_counts.get(device, 0) - 1
                 if self._shutdown and self._in_flight_count == 0:
                     self._all_done.set()
-                self._try_process_delayed()
+
+                self._postprocess_after_task_done()
+
             task.future.set_exception(e)
 
     def _get_or_create_session(self, task: Task) -> ort.InferenceSession:
         import onnxruntime as ort
 
-        user_providers = getattr(task, "_user_providers", None)
+        user_providers = task.user_providers
         device_key = task.device
 
         if device_key == "cpu":
@@ -221,14 +236,15 @@ class InferSessionPool(Pool):
                     providers=["CPUExecutionProvider"],
                 )
                 self._reserve_session_mem("cpu", -1)
+                
             return self._cpu_session
 
-        sk = self._session_key(device_key, user_providers)
-        if sk in InferSessionPool._shared_sessions and sk in self._session_reserved:
-            return InferSessionPool._shared_sessions[sk]
+        key = self._session_key(device_key, user_providers)
+        if key in InferSessionPool._shared_sessions and key in self._session_reserved:
+            return InferSessionPool._shared_sessions[key]
 
         with InferSessionPool._class_session_creation_lock:
-            if sk not in InferSessionPool._shared_sessions:
+            if key not in InferSessionPool._shared_sessions:
                 if user_providers:
                     providers = [*user_providers, ("CPUExecutionProvider", {})]
                 else:
@@ -239,12 +255,12 @@ class InferSessionPool(Pool):
                     InferSessionPool._get_session_options(),
                     providers=providers,
                 )
-                InferSessionPool._shared_sessions[sk] = session
+                InferSessionPool._shared_sessions[key] = session
 
-            if sk not in self._session_reserved:
-                self._reserve_session_mem(sk, task.gpu_index)
+            if key not in self._session_reserved:
+                self._reserve_session_mem(key, task.gpu_index)
 
-            return InferSessionPool._shared_sessions[sk]
+            return InferSessionPool._shared_sessions[key]
 
     def _reserve_session_mem(self, session_key: str, gpu_index: int) -> None:
         with self._sys_info_lock:
@@ -252,6 +268,7 @@ class InferSessionPool(Pool):
                 self._sys_info.cpu_mem_free -= self._model_mem
             else:
                 self._sys_info.gpu_infos[gpu_index].mem_free -= self._model_mem
+
             self._session_reserved[session_key] = gpu_index
 
     def _release_all_session_resources(self) -> None:
@@ -263,35 +280,30 @@ class InferSessionPool(Pool):
                     self._sys_info.gpu_infos[gpu_index].mem_free += self._model_mem
             self._session_reserved.clear()
 
-    def _try_process_delayed(self) -> None:
+    def _postprocess_after_task_done(self) -> None:
         if not self._delayed_tasks:
             return
+        
         remaining = []
-        for dt in self._delayed_tasks:
-            if dt.future.cancelled():
-                self._tasks.pop(dt.id, None)
+        for delayed_task in self._delayed_tasks:
+            if delayed_task.future.cancelled():
+                self._tasks.pop(delayed_task.id, None)
                 continue
-            if not self._try_assign_device(dt):
-                remaining.append(dt)
+
+            if not self._try_assign_device(delayed_task):
+                remaining.append(delayed_task)
                 continue
-            if not self._try_acquire_slot(dt):
-                dt.device = None
-                dt.gpu_index = -1
-                dt.dml_id = -1
-                remaining.append(dt)
+
+            if not self._try_acquire_slot(delayed_task):
+                delayed_task.device = None
+                delayed_task.gpu_index = -1
+                delayed_task.dml_id = -1
+                remaining.append(delayed_task)
                 continue
-            self._dispatch_infer(dt)
+
+            self._dispatch_infer(delayed_task)
+
         self._delayed_tasks = remaining
-
-    # --- Override Pool base methods ---
-
-    def _choose_task_worker(self, task, res):
-        return None
-
-    def _postprocess_after_task_done(self) -> None:
-        self._try_process_delayed()
-
-    # --- Abstract methods from Pool ---
 
     def _take_resource(self, task: Task) -> None:
         with self._sys_info_lock:
@@ -315,19 +327,20 @@ class InferSessionPool(Pool):
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores
 
-    def _put_task(self, task: Task) -> None:
-        pass
-
     def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
         with self._lock:
             if self._shutdown:
                 return
+            
             self._shutdown = True
             if cancel_futures:
-                for t in self._tasks.values():
-                    t.future.cancel()
+                for task in self._tasks.values():
+                    task.future.cancel()
+
             if self._in_flight_count == 0:
                 self._all_done.set()
+
         if wait:
             self._all_done.wait()
+
         self._release_all_session_resources()

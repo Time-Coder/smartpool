@@ -42,6 +42,7 @@ class Task:
         self.estimated_need_cpu_mem:float = 0.0
         self.modules_overlap_ratio:float = 0.0
         self.module_deps:Dict[str, int] = {}
+        self.user_providers:Optional[List[str]] = None
 
         if calculate_module_deps:
             from .module_deps import module_deps
