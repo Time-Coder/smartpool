@@ -115,10 +115,6 @@ class GPUInfo(ABC):
     def _fetch_num_cores(self) -> Optional[int]:
         pass
 
-    @abstractmethod
-    def is_available(self) -> bool:
-        pass
-
     @classmethod
     def get_device_count(cls) -> int:
         return 0

@@ -2,30 +2,39 @@ from __future__ import annotations
 
 import inspect
 import os
-import threading
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import onnxruntime as ort
+    import onnx
+
+
+class NodeInfo:
+
+    def __init__(self, node: onnx.ValueInfoProto)->None:
+        import onnx
+
+        self.name = node.name
+        self.dtype = onnx.helper.tensor_dtype_to_np_dtype(node.type.tensor_type.elem_type)
+        dims = node.type.tensor_type.shape.dim
+        shape = []
+        for dim in dims:
+            if dim.dim_value > 0:
+                shape.append(dim.dim_value)
+            elif dim.dim_param:
+                shape.append(dim.dim_param)
+            else:
+                shape.append(None)
+        self.shape = tuple(shape)
 
 
 class ModelInfo:
-    model_path: str
-    model_name: str
-    file_size: int
-    inputs: Dict[str, ort.NodeArg]
-    outputs: Dict[str, ort.NodeArg]
-    signature: inspect.Signature
-
-    _onnx_type_map_lock: threading.Lock = threading.Lock()
-    _onnx_type_map: Optional[Dict[str, type]] = None
 
     def __init__(self, model_path: str):
         self.model_path = model_path
         self.model_name = os.path.basename(self.model_path).split(".")[0]
         self.file_size = None
-        self.inputs = None
-        self.outputs = None
+        self.input_nodes: Dict[str, NodeInfo] = {}
+        self.output_names: Set[str] = set()
         self.signature = None
 
         if not os.path.isfile(model_path):
@@ -40,46 +49,21 @@ class ModelInfo:
             raise ValueError("model file size is zero")
 
         import onnx
-        onnx.checker.check_model(model_path, full_check=True)
 
-    def _fetch_info(self, session: ort.InferenceSession) -> None:
-        if self.inputs is not None:
-            return
+        model = onnx.load(model_path)
+        onnx.checker.check_model(model, full_check=True)
 
         params = []
-        self.inputs = {}
-        for node in session.get_inputs():
+        for node in model.graph.input:
             params.append(inspect.Parameter(node.name, inspect.Parameter.POSITIONAL_OR_KEYWORD))
-            self.inputs[node.name] = node
+            self.input_nodes[node.name] = NodeInfo(node)
 
-        self.outputs = {}
-        for node in session.get_outputs():
-            self.outputs[node.name] = node
+        for node in model.graph.output:
+            self.output_names.add(node.name)
 
         self.signature = inspect.Signature(params)
 
-    @staticmethod
-    def _get_onnx_to_numpy_map() -> Dict[str, type]:
-        with ModelInfo._onnx_type_map_lock:
-            if ModelInfo._onnx_type_map is not None:
-                return ModelInfo._onnx_type_map
-
-            from onnx import TensorProto, helper
-            ModelInfo._onnx_type_map = {}
-            for attr_name in dir(TensorProto):
-                if attr_name.isupper() and not attr_name.startswith('_'):
-                    try:
-                        onnx_enum = getattr(TensorProto, attr_name)
-                        np_dtype = helper.tensor_dtype_to_np_dtype(onnx_enum)
-                        ModelInfo._onnx_type_map[f'tensor({attr_name.lower()})'] = np_dtype
-                    except Exception:
-                        continue
-
-            return ModelInfo._onnx_type_map
-
-    def check_args(self, session: ort.InferenceSession, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        self._fetch_info(session)
-
+    def check_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if kwargs is None:
             kwargs = {}
 
@@ -91,17 +75,15 @@ class ModelInfo:
             formatted_msg = f"model '{self.model_name}' arguments error: {str(e)}"
             raise TypeError(formatted_msg) from None
 
-        if self.inputs:
-            type_map = ModelInfo._get_onnx_to_numpy_map()
-
+        if self.input_nodes:
             import numpy as np
             for name, value in kwargs.items():
                 if not isinstance(value, np.ndarray):
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
 
-                node = self.inputs[name]
+                node = self.input_nodes[name]
 
-                expected_type = type_map[node.type]
+                expected_type = node.dtype
                 actual_type = value.dtype
                 if actual_type != expected_type:
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
@@ -123,7 +105,7 @@ class ModelInfo:
     def check_outputs(self, output_names):
         if output_names is None:
             return
+        
         for name in output_names:
-            if name not in self.outputs:
-                valid = list(self.outputs.keys())
-                raise ValueError(f"model '{self.model_name}' has no output named '{name}'. valid outputs: {valid}")
+            if name not in self.output_names:
+                raise ValueError(f"model '{self.model_name}' has no output named '{name}'. valid outputs: {self.output_names}")

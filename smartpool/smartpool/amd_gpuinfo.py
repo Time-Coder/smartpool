@@ -166,57 +166,6 @@ class AMDGPUInfo(GPUInfo):
         return GPUVendor.AMD
 
     @classmethod
-    def is_available(cls) -> bool:
-        system = platform.system()
-        if system == "Windows":
-            return importlib.util.find_spec("ADLXPybind") is not None
-        elif system == "Linux":
-            try:
-                import pyamdgpuinfo
-                return pyamdgpuinfo.detect_gpus() > 0
-            except ImportError:
-                return cls._detect_linux_fallback()
-            except Exception:
-                return cls._detect_linux_fallback()
-        elif system == "Darwin":
-            return cls._detect_mac()
-        return False
-
-    @classmethod
-    def _detect_linux_fallback(cls) -> bool:
-        try:
-            if os.path.exists('/opt/rocm/bin/rocm-smi'):
-                result = subprocess.run(
-                    ['/opt/rocm/bin/rocm-smi', '--showid'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0 and 'GPU' in result.stdout:
-                    return True
-            drm_path = '/sys/class/drm'
-            if os.path.exists(drm_path):
-                for device in os.listdir(drm_path):
-                    device_path = os.path.join(drm_path, device)
-                    vendor_path = os.path.join(device_path, 'device', 'vendor')
-                    if os.path.exists(vendor_path):
-                        with open(vendor_path) as f:
-                            if f.read().strip() == '0x1002':
-                                return True
-            return False
-        except Exception:
-            return False
-
-    @classmethod
-    def _detect_mac(cls) -> bool:
-        try:
-            result = subprocess.run(
-                ['system_profiler', 'SPDisplaysDataType'],
-                capture_output=True, text=True, timeout=10
-            )
-            return 'AMD' in result.stdout or 'Radeon' in result.stdout
-        except Exception:
-            return False
-
-    @classmethod
     def get_device_count(cls) -> int:
         cls._ensure_init()
         system = platform.system()

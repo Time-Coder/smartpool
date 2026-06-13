@@ -81,7 +81,7 @@ class Pool(ABC):
         self._workers: List[Worker] = []
         self._tasks: Dict[str, Task] = {}
         self._delayed_tasks: List[Task] = []
-        self._lock: threading.Lock = threading.Lock()
+        self._lock: threading.RLock = threading.RLock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
         self._use_onnx: bool = use_onnx
@@ -378,11 +378,6 @@ class Pool(ABC):
     def _on_task_done(self, task_id:str, success:bool, result:Any)->None:
         with self._lock:
             task = self._tasks.pop(task_id)
-            if success:
-                task.future.set_result(result)
-            else:
-                task.future.set_exception(result)
-
             worker:Worker = task.worker
             worker.is_working = False
             worker.n_finished_tasks += 1
@@ -391,6 +386,11 @@ class Pool(ABC):
 
             self._release_resource(task)
             self._postprocess_after_task_done()
+
+        if success:
+            task.future.set_result(result)
+        else:
+            task.future.set_exception(result)
 
         for pool in Pool._instances:
             if pool._shutdown or pool is self or pool._workers_working_count > 0 or not pool._delayed_tasks:

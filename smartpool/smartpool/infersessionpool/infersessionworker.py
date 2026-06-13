@@ -90,13 +90,13 @@ class InferSessionWorker(Worker):
     def add_task(self, task:Task)->None:
         self.start()
         if self.infer_session_pool.print_info:
-            print("infer with provider", self.provider)
+            print("infer with provider", self.provider, "in session", id(self.session))
 
-        self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
         with self.infer_session_pool._running_count_lock:
             self.running_count += 1
             self.infer_session_pool._running_count += 1
 
+        self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
         task.future.set_running_or_notify_cancel()
 
     def start(self)->None:

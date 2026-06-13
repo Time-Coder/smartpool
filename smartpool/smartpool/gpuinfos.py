@@ -12,18 +12,111 @@ class MetaGPUInfos(type):
     __n_devices: Optional[int] = None
 
     @staticmethod
-    def _dxgi_enumerate_name_map() -> Dict[str, int]:
+    def _dxgi_enumerate_name_map() -> Dict[str, List[int]]:
         import platform
         if platform.system() != "Windows":
             return {}
 
-        import wmi
-        c = wmi.WMI()
-        adapters = list(c.Win32_VideoController())
-        return {
-            (getattr(a, 'Name', None) or getattr(a, 'Description', '') or '').lower().strip(): i
-            for i, a in enumerate(adapters)
-        }
+        import ctypes
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", wintypes.BYTE * 8),
+            ]
+
+        class _DXGI_ADAPTER_DESC(ctypes.Structure):
+            _fields_ = [
+                ("Description", wintypes.WCHAR * 128),
+                ("VendorId", wintypes.UINT),
+                ("DeviceId", wintypes.UINT),
+                ("SubSysId", wintypes.UINT),
+                ("Revision", wintypes.UINT),
+                ("DedicatedVideoMemory", ctypes.c_size_t),
+                ("DedicatedSystemMemory", ctypes.c_size_t),
+                ("SharedSystemMemory", ctypes.c_size_t),
+                ("AdapterLuid", wintypes.LARGE_INTEGER),
+            ]
+
+        IID_IDXGIFactory = _GUID(
+            0x7b7166ec, 0x21c7, 0x44ae,
+            (wintypes.BYTE * 8)(0xb2, 0x1a, 0xc9, 0xae, 0x32, 0x1a, 0xe3, 0x69),
+        )
+
+        try:
+            dxgi_lib = ctypes.WinDLL("dxgi.dll")
+        except Exception:
+            return {}
+
+        CreateDXGIFactory = dxgi_lib.CreateDXGIFactory
+        CreateDXGIFactory.restype = wintypes.LONG
+        CreateDXGIFactory.argtypes = [
+            ctypes.POINTER(_GUID),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+
+        factory = ctypes.c_void_p()
+        hr = CreateDXGIFactory(ctypes.byref(IID_IDXGIFactory), ctypes.byref(factory))
+        if hr != 0 or not factory:
+            return {}
+
+        result: Dict[str, List[int]] = {}
+        ptr_size = ctypes.sizeof(ctypes.c_void_p)
+        fac_vtable = ctypes.c_void_p.from_address(factory.value).value
+
+        EnumAdaptersFunc = ctypes.WINFUNCTYPE(
+            wintypes.LONG, ctypes.c_void_p, wintypes.UINT,
+            ctypes.POINTER(ctypes.c_void_p),
+        )
+        GetDescFunc = ctypes.WINFUNCTYPE(
+            wintypes.LONG, ctypes.c_void_p,
+            ctypes.POINTER(_DXGI_ADAPTER_DESC),
+        )
+        ReleaseFunc = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)
+
+        # IDXGIFactory vtable: IUnknown(0-2) + IDXGIObject(3-6) + IDXGIFactory(7+)
+        enum_adapters = EnumAdaptersFunc(
+            ctypes.c_void_p.from_address(fac_vtable + 7 * ptr_size).value,
+        )
+        factory_release = ReleaseFunc(
+            ctypes.c_void_p.from_address(fac_vtable + 2 * ptr_size).value,
+        )
+
+        i = 0
+        while i < 64:
+            adapter = ctypes.c_void_p()
+            hr = enum_adapters(factory, i, ctypes.byref(adapter))
+            if hr != 0:
+                break
+
+            if adapter:
+                try:
+                    ad_vtable = ctypes.c_void_p.from_address(adapter.value).value
+                    # IDXGIAdapter vtable: IUnknown(0-2) + IDXGIObject(3-6) + EnumOutputs(7) + GetDesc(8)
+                    get_desc = GetDescFunc(
+                        ctypes.c_void_p.from_address(ad_vtable + 8 * ptr_size).value,
+                    )
+                    adapter_release = ReleaseFunc(
+                        ctypes.c_void_p.from_address(ad_vtable + 2 * ptr_size).value,
+                    )
+
+                    desc = _DXGI_ADAPTER_DESC()
+                    if get_desc(adapter, ctypes.byref(desc)) == 0:
+                        name = desc.Description
+                        if name:
+                            result.setdefault(name.lower().strip(), []).append(i)
+
+                    adapter_release(adapter)
+                except Exception:
+                    pass
+
+            i += 1
+
+        factory_release(factory)
+        return result
 
     @staticmethod
     def __init() -> None:
@@ -35,17 +128,17 @@ class MetaGPUInfos(type):
 
         gpu_classes:List[Type[GPUInfo]] = [
             NvidiaGPUInfo,
-            IntelGPUInfo,
             AMDGPUInfo,
+            IntelGPUInfo,
         ]
 
         index = 0
         dml_map = MetaGPUInfos._dxgi_enumerate_name_map()
         for gpu_class in gpu_classes:
-            if not gpu_class.is_available():
-                continue
-
             count = gpu_class.get_device_count()
+            if count == 0:
+                continue
+            
             for i in range(count):
                 gpu = gpu_class(i, index)
                 MetaGPUInfos.__gpu_infos.append(gpu)
@@ -55,12 +148,14 @@ class MetaGPUInfos(type):
                     continue
 
                 gpu_name = gpu.name.lower().strip()
-                if gpu_name in dml_map:
-                    gpu._dml_id = dml_map[gpu_name]
+                if gpu_name in dml_map and dml_map[gpu_name]:
+                    gpu._dml_id = dml_map[gpu_name][0]
                 else:
-                    for dml_name, dml_id in dml_map.items():
-                        if gpu_name and (gpu_name in dml_name or dml_name in gpu_name):
-                            gpu._dml_id = dml_id
+                    for dml_name, dml_ids in dml_map.items():
+                        if dml_ids and gpu_name and (
+                            gpu_name in dml_name or dml_name in gpu_name
+                        ):
+                            gpu._dml_id = dml_ids[0]
                             break
 
             MetaGPUInfos.__n_devices += count

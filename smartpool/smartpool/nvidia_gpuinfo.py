@@ -56,14 +56,6 @@ class NvidiaGPUInfo(GPUInfo):
         return GPUVendor.NVIDIA
 
     @classmethod
-    def is_available(cls) -> bool:
-        try:
-            import pynvml
-            return hasattr(pynvml, 'nvmlDeviceGetUUID')
-        except ImportError:
-            return False
-
-    @classmethod
     def get_device_count(cls) -> int:
         cls._ensure_init()
 

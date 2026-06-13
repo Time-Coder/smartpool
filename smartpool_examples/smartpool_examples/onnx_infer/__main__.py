@@ -19,13 +19,16 @@ def main(
 ):
     import os
     import time
-    from smartpool import InferSessionPool, Resource, ThreadPool
+    import queue
+    from functools import partial
+    from smartpool import InferSessionPool, Resource, ThreadPool, DataSize
     from rich.progress import (
         BarColumn,
         Progress,
         TextColumn,
         TimeRemainingColumn,
     )
+    from inference import preprocess, postprocess
     
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
@@ -44,8 +47,6 @@ def main(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     image_paths = sorted(DATASET_DIR.glob("*.jpg"))
-    cpu_res = Resource(cpu_cores_in_python=1, cpu_mem=2*1024**3)
-
     model_path_str = str(MODEL_PATH.resolve())
     output_dir_str = str(OUTPUT_DIR.resolve())
     n_workers = max_workers
@@ -53,6 +54,23 @@ def main(
     print(f"\nSubmit {len(image_paths)} tasks to ThreadPool({n_workers})...")
     thread_pool = ThreadPool(max_workers=n_workers)
     infer_session_pool = InferSessionPool(model_path_str, max_workers=n_workers)
+    infer_session_pool.print_info = True
+
+    cpu_res = Resource(
+        cpu_cores_in_python=1,
+        cpu_cores_out_of_python=1,
+        cpu_mem=81*DataSize.MB
+    )
+    gpu_res = Resource(
+        cpu_cores_in_python=1,
+        cpu_cores_out_of_python=1,
+        cpu_mem=200*DataSize.MB,
+        gpu_cores=100,
+        gpu_mem=200*DataSize.MB
+    )
+    
+    thread_pool = ThreadPool(max_workers=n_workers)
+    infer_session_pool = InferSessionPool(MODEL_PATH, max_workers=n_workers)
     infer_session_pool.print_info = True
 
     cpu_res = Resource(
@@ -67,18 +85,9 @@ def main(
         gpu_cores=1000,
         gpu_mem=2*1024**3
     )
-    
-    all_futures = []
-    for image_path in image_paths:
-        image_path = str(image_path)
-        future: Future = thread_pool.submit(
-            infer_task,
-            args=(image_path, output_dir_str, infer_session_pool, cpu_res, gpu_res),
-            cpu_mode_res=cpu_res
-        )
-        all_futures.append(future)
 
-    start_time = time.perf_counter()
+    result_queue = queue.Queue()
+
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -86,13 +95,53 @@ def main(
         TimeRemainingColumn(),
     ) as progress:
         n_tasks = len(image_paths)
-        task = progress.add_task("infer", total=n_tasks)
+        preprocess_submit_progress_task = progress.add_task("preprocess submit", total=n_tasks)
+        preprocess_done_progress_task = progress.add_task("preprocess done", total=n_tasks)
+        infer_submit_progress_task = progress.add_task("infer submit", total=n_tasks)
+        infer_done_progress_task = progress.add_task("infer done", total=n_tasks)
+        postprocess_submit_progress_task = progress.add_task("postprocess submit", total=n_tasks)
+        postprocess_done_progress_task = progress.add_task("postprocess done", total=n_tasks)
 
-        for future in as_completed(all_futures):
-            future.result()
-            progress.update(task, advance=1)
-            progress.update(task, description=f"infer [{progress.tasks[0].completed}/{progress.tasks[0].total}]")
+        def postprocess_done_callback(postprocess_future: Future):
+            postprocess_future.result()
+            progress.update(postprocess_done_progress_task, advance=1)
+            result_queue.put(1)
 
+        def infer_done_callback(image_path, img, scale, pad, infer_future: Future):
+            outputs = infer_future.result()[0]
+            progress.update(infer_done_progress_task, advance=1)
+
+            output_path = output_dir_str + "/" + os.path.basename(image_path)
+            postprocess_future: Future = thread_pool.submit(
+                postprocess,
+                args=(img, outputs, output_path, scale, pad),
+                cpu_mode_res=cpu_res
+            )
+            progress.update(postprocess_submit_progress_task, advance=1)
+            postprocess_future.add_done_callback(postprocess_done_callback)
+
+        def preprocess_done_callback(image_path, preprocess_future: Future):
+            progress.update(preprocess_done_progress_task, advance=1)
+            img, blob, scale, pad = preprocess_future.result()
+            infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+            progress.update(infer_submit_progress_task, advance=1)
+            infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
+        
+        for image_path in image_paths:
+            image_path = str(image_path)
+            preprocess_future: Future = thread_pool.submit(
+                preprocess,
+                args=(image_path,),
+                cpu_mode_res=cpu_res
+            )
+            progress.update(preprocess_submit_progress_task, advance=1)
+            preprocess_future.add_done_callback(partial(preprocess_done_callback, image_path))
+
+        start_time = time.perf_counter()
+
+        for _ in range(n_tasks):
+            result_queue.get()
+            
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")
     print(f"Output: {OUTPUT_DIR.resolve()}")

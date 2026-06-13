@@ -43,7 +43,6 @@ class InferSessionPool(Pool):
             use_onnx=True,
         )
         self._model_info: ModelInfo = InferSessionPool._model_infos[model_path]
-        self._cpu_session: Optional[ort.InferenceSession] = None
         self._workers_dict: Dict[str, List[InferSessionWorker]] = defaultdict(list)
         self._running_count_lock: threading.Lock = threading.Lock()
         self._running_count: int = 0
@@ -74,13 +73,7 @@ class InferSessionPool(Pool):
         from ..resource import Resource
         from ..task import Task
 
-        with self._lock:
-            if self._cpu_session is None:
-                worker = self._add_worker(("CPUExecutionProvider", {}), -1)
-                worker.start()
-                self._cpu_session = worker.session
-
-        validated_kwargs = self._model_info.check_args(self._cpu_session, args, kwargs)
+        validated_kwargs = self._model_info.check_args(args, kwargs)
         self._model_info.check_outputs(output_names)
 
         if cpu_mode_res is None:

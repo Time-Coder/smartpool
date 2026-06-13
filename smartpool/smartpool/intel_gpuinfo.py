@@ -55,68 +55,9 @@ class IntelGPUInfo(GPUInfo):
         return GPUVendor.INTEL
 
     @classmethod
-    def is_available(cls) -> bool:
-        system = platform.system()
-        if system == "Windows":
-            return cls._detect_windows()
-        elif system == "Linux":
-            return cls._detect_linux()
-        elif system == "Darwin":
-            return cls._detect_mac()
-        return False
-
-    @classmethod
     def get_device_count(cls) -> int:
         cls._ensure_init()
         return len(cls._device_info)
-
-    @classmethod
-    def _detect_windows(cls) -> bool:
-        try:
-            import wmi
-            c = wmi.WMI()
-            intel_gpus = [
-                gpu for gpu in c.Win32_VideoController()
-                if 'Intel' in (gpu.Name or '')
-            ]
-            return len(intel_gpus) > 0
-        except Exception:
-            try:
-                result = subprocess.run(
-                    ['powershell', '-Command',
-                     'Get-WmiObject Win32_VideoController | Where-Object {$_.Name -like "*Intel*"} | Select-Object -Property Name'],
-                    capture_output=True, text=True, timeout=5
-                )
-                return 'Intel' in result.stdout
-            except Exception:
-                return False
-
-    @classmethod
-    def _detect_linux(cls) -> bool:
-        try:
-            drm_path = '/sys/class/drm'
-            if os.path.exists(drm_path):
-                for device in os.listdir(drm_path):
-                    device_path = os.path.join(drm_path, device)
-                    vendor_path = os.path.join(device_path, 'device', 'vendor')
-                    if os.path.exists(vendor_path):
-                        with open(vendor_path) as f:
-                            if f.read().strip() == '0x8086':
-                                return True
-            return False
-        except Exception:
-            return False
-
-    @classmethod
-    def _detect_mac(cls) -> bool:
-        try:
-            result = subprocess.run(
-                ['system_profiler', 'SPDisplaysDataType'],
-                capture_output=True, text=True, timeout=10
-            )
-            return 'Intel' in result.stdout
-        except Exception:
-            return False
 
     @classmethod
     def _init_windows(cls) -> None:
