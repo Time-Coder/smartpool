@@ -18,10 +18,8 @@ if TYPE_CHECKING:
 
 class InferSessionPool(Pool):
 
-    _thread_safe_providers: Set[str] = {
-        "TensorrtExecutionProvider",
-        "CUDAExecutionProvider",
-        "CPUExecutionProvider",
+    _not_thread_safe_providers: Dict[str, Set[int]] = {
+        "DmlExecutionProvider": set(),
     }
 
     _model_infos: Dict[str, ModelInfo] = {}
@@ -29,7 +27,6 @@ class InferSessionPool(Pool):
     def __init__(self, model_path: str, max_workers: int = 0):
         from .model_info import ModelInfo
         import threading
-        from collections import defaultdict
 
         model_path = os.path.abspath(model_path).replace("\\", "/")
         if model_path not in InferSessionPool._model_infos:
@@ -43,7 +40,7 @@ class InferSessionPool(Pool):
             use_onnx=True,
         )
         self._model_info: ModelInfo = InferSessionPool._model_infos[model_path]
-        self._workers_dict: Dict[str, List[InferSessionWorker]] = defaultdict(list)
+        self._workers_dict: Dict[str, InferSessionWorker] = {}
         self._running_count_lock: threading.Lock = threading.Lock()
         self._running_count: int = 0
         self.print_info: bool = False
@@ -58,7 +55,7 @@ class InferSessionPool(Pool):
         worker = InferSessionWorker(self, provider, gpu_index)
         self._workers.append(worker)
         key = self._provider_key(provider)
-        self._workers_dict[key].append(worker)
+        self._workers_dict[key] = worker
         return worker
 
     def submit(
@@ -133,15 +130,17 @@ class InferSessionPool(Pool):
         provider_key: str = self._provider_key(provider)
         is_thread_safe: bool = (provider[0] in InferSessionPool._thread_safe_providers)
         if provider_key in self._workers_dict:
-            workers = self._workers_dict[provider_key]
-            for worker in workers:
-                if is_thread_safe or worker.running_count == 0:
-                    task.worker = worker
-                    return worker
-
-        worker = self._add_worker(provider, task.gpu_index)
-        task.worker = worker
-        return worker
+            worker = self._workers_dict[provider_key]
+            if is_thread_safe or worker.running_count == 0:
+                task.worker = worker
+                return worker
+            else:
+                task.worker = None
+                return None
+        else:
+            worker = self._add_worker(provider, task.gpu_index)
+            task.worker = worker
+            return worker
 
     def _put_task(self, task: Task) -> None:
         self._take_resource(task)

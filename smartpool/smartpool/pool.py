@@ -387,10 +387,13 @@ class Pool(ABC):
             self._release_resource(task)
             self._postprocess_after_task_done()
 
-        if success:
-            task.future.set_result(result)
-        else:
-            task.future.set_exception(result)
+        try:
+            if success:
+                task.future.set_result(result)
+            else:
+                task.future.set_exception(result)
+        except Exception:
+            pass
 
         for pool in Pool._instances:
             if pool._shutdown or pool is self or pool._workers_working_count > 0 or not pool._delayed_tasks:

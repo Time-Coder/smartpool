@@ -43,7 +43,7 @@ def main(
     print()
 
     download_model()
-    # download_dataset()
+    download_dataset()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     image_paths = sorted(DATASET_DIR.glob("*.jpg"))
@@ -67,23 +67,6 @@ def main(
         cpu_mem=200*DataSize.MB,
         gpu_cores=100,
         gpu_mem=200*DataSize.MB
-    )
-    
-    thread_pool = ThreadPool(max_workers=n_workers)
-    infer_session_pool = InferSessionPool(MODEL_PATH, max_workers=n_workers)
-    infer_session_pool.print_info = True
-
-    cpu_res = Resource(
-        cpu_cores_in_python=1,
-        cpu_cores_out_of_python=1,
-        cpu_mem=2*1024**3
-    )
-    gpu_res = Resource(
-        cpu_cores_in_python=1,
-        cpu_cores_out_of_python=1,
-        cpu_mem=512*1024**2,
-        gpu_cores=1000,
-        gpu_mem=2*1024**3
     )
 
     result_queue = queue.Queue()

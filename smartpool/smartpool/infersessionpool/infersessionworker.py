@@ -49,14 +49,14 @@ class InferSessionWorker(Worker):
 
     @is_working.setter
     def is_working(self, is_working:bool)->None:
-        is_working = (self.running_count > 0)
+        after = is_working or self.running_count > 0
 
-        if self._is_working == is_working:
+        if self._is_working == after:
             return
 
-        self._is_working = is_working
+        self._is_working = after
 
-        if is_working:
+        if after:
             with Worker._total_working_count_lock:
                 Worker._total_working_count += 1
                 self.pool._workers_working_count += 1
@@ -96,8 +96,15 @@ class InferSessionWorker(Worker):
             self.running_count += 1
             self.infer_session_pool._running_count += 1
 
-        self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
-        task.future.set_running_or_notify_cancel()
+        try:
+            self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
+            task.future.set_running_or_notify_cancel()
+        except Exception as e:
+            with self.infer_session_pool._running_count_lock:
+                self.running_count -= 1
+                self.infer_session_pool._running_count -= 1
+            self.is_working = False
+            self.infer_session_pool._on_task_done(task.id, False, e)
 
     def start(self)->None:
         if self.executor is not None:
