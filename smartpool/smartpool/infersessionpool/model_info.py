@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -16,6 +17,7 @@ class ModelInfo:
     outputs: Dict[str, ort.NodeArg]
     signature: inspect.Signature
 
+    _onnx_type_map_lock: threading.Lock = threading.Lock()
     _onnx_type_map: Optional[Dict[str, type]] = None
 
     def __init__(self, model_path: str):
@@ -58,21 +60,22 @@ class ModelInfo:
 
     @staticmethod
     def _get_onnx_to_numpy_map() -> Dict[str, type]:
-        if ModelInfo._onnx_type_map is not None:
+        with ModelInfo._onnx_type_map_lock:
+            if ModelInfo._onnx_type_map is not None:
+                return ModelInfo._onnx_type_map
+
+            from onnx import TensorProto, helper
+            ModelInfo._onnx_type_map = {}
+            for attr_name in dir(TensorProto):
+                if attr_name.isupper() and not attr_name.startswith('_'):
+                    try:
+                        onnx_enum = getattr(TensorProto, attr_name)
+                        np_dtype = helper.tensor_dtype_to_np_dtype(onnx_enum)
+                        ModelInfo._onnx_type_map[f'tensor({attr_name.lower()})'] = np_dtype
+                    except Exception:
+                        continue
+
             return ModelInfo._onnx_type_map
-
-        from onnx import TensorProto, helper
-        ModelInfo._onnx_type_map = {}
-        for attr_name in dir(TensorProto):
-            if attr_name.isupper() and not attr_name.startswith('_'):
-                try:
-                    onnx_enum = getattr(TensorProto, attr_name)
-                    np_dtype = helper.tensor_dtype_to_np_dtype(onnx_enum)
-                    ModelInfo._onnx_type_map[f'tensor({attr_name.lower()})'] = np_dtype
-                except Exception:
-                    continue
-
-        return ModelInfo._onnx_type_map
 
     def check_args(self, session: ort.InferenceSession, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._fetch_info(session)

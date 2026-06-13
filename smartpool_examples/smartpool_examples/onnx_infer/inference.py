@@ -1,8 +1,14 @@
-from typing import Dict, List, Tuple
+from __future__ import annotations
+from typing import Dict, List, Tuple, TYPE_CHECKING
 
+import os
 import cv2
 import numpy as np
 from config import COCO_CLASSES
+from concurrent.futures import Future
+
+if TYPE_CHECKING:
+    from smartpool import InferSessionPool, Resource
 
 
 def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
@@ -117,3 +123,10 @@ def postprocess(
     ]
 
     draw_detections(src_img, output_path, detections)
+
+def infer_task(image_path:str, output_dir_path:str, infer_session_pool: InferSessionPool, cpu_res: Resource, gpu_res: Resource)->None:
+    img, blob, scale, pad = preprocess(image_path)
+    infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+    outputs = infer_future.result()[0]
+    output_path = output_dir_path + "/" + os.path.basename(image_path)
+    postprocess(img, outputs, output_path, scale, pad)

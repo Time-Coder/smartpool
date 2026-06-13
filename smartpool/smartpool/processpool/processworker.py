@@ -37,6 +37,14 @@ class ProcessWorker(Worker):
         self.process_info:Optional[psutil.Process] = None
 
     @property
+    def process(self)->mp.Process:
+        return self.executor
+    
+    @property
+    def process_pool(self)->ProcessPool:
+        return self.pool
+
+    @property
     def cached_rss(self)->int:
         if self._is_working:
             return self.rss
@@ -76,30 +84,29 @@ class ProcessWorker(Worker):
             self.change_device_cmd_queue.put(device)
 
     def _clear(self)->None:
-        self.task_executor = None
+        Worker._clear(self)
         self.process_info = None
-        self._is_working = False
         self.imported_modules.clear()
         self._is_rss_dirty = True
         self._cached_rss = 0
 
     def start(self)->None:
-        if self.task_executor is not None:
+        if self.executor is not None:
             return
 
         import psutil
 
-        process_pool:ProcessPool = self.pool
-        self.task_executor:mp.Process = process_pool._ctx.Process(
+        process_pool:ProcessPool = self.process_pool
+        self.executor:mp.Process = process_pool._ctx.Process(
             target=Worker.run,
             args=(self.task_queue, process_pool._result_queue, self.change_device_cmd_queue),
             kwargs={"initializer": process_pool._initializer, "initargs": process_pool._initargs, "initkwargs": process_pool._initkwargs},
             name=f"{process_pool._process_name_prefix}{self.index}",
             daemon=True
         )
-        self.task_executor.start()
-        self.process_info = psutil.Process(self.task_executor.pid)
+        self.executor.start()
+        self.process_info = psutil.Process(self.executor.pid)
 
     def join(self)->None:
-        self.task_executor.join()
+        self.executor.join()
         self._clear()

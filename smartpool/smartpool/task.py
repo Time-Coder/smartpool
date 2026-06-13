@@ -31,29 +31,30 @@ class Task:
         cpu_mode_res: Resource, gpu_mode_res: Resource,
         use_torch: bool, device_changeable: bool, calculate_module_deps: bool
     ):
-        self.id:str = str(uuid.uuid4())
-        self.func:Union[Callable[..., Any], str] = func
-        self.args:Tuple[Any] = args
-        self.kwargs:Dict[str, Any] = kwargs
+        self.id: str = str(uuid.uuid4())
+        self.func: Union[Callable[..., Any], str] = func
+        self.args: Tuple[Any] = args
+        self.kwargs: Dict[str, Any] = kwargs
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
         self.use_torch: bool = use_torch
         self.device_changeable: bool = device_changeable
-        self.estimated_need_cpu_mem:float = 0.0
-        self.modules_overlap_ratio:float = 0.0
-        self.module_deps:Dict[str, int] = {}
-        self.user_providers:Optional[List[str]] = None
+        self.estimated_need_cpu_mem: float = 0.0
+        self.modules_overlap_ratio: float = 0.0
+        self.module_deps: Dict[str, int] = {}
+        self.user_providers: Optional[List[str]] = None
+        self.output_names: List[str] = []
 
         if calculate_module_deps:
             from .module_deps import module_deps
             self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
 
-        self._device:Optional[str] = None
-        self.gpu_index:int = -1
-        self.dml_id:int = -1
-        self.worker:Worker = None
-        self.mem_before_enter:int = 0
-        self._onnx_provider:Optional[Tuple[str, Dict]] = None
+        self._device: Optional[str] = None
+        self.gpu_index: int = -1
+        self.dml_id: int = -1
+        self.worker: Worker = None
+        self.mem_before_enter: int = 0
+        self._onnx_provider: Optional[Tuple[str, Dict]] = None
         self.future = Future()
 
     @property

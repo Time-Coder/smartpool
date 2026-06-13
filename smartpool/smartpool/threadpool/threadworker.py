@@ -26,13 +26,21 @@ class ThreadWorker(Worker):
         self._active_task:Optional[Task] = None
         self._streams:Dict[str, Stream] = {}
 
+    @property
+    def thread(self)->threading.Thread:
+        return self.executor
+    
+    @property
+    def thread_pool(self)->ThreadPool:
+        return self.pool
+
     def add_task(self, task:Task)->None:
         self.start()
         self.task_queue.put(task)
         task.future.set_running_or_notify_cancel()
 
     def change_device(self, device:str)->None:
-        _set_best_device(device, self.task_executor.ident)
+        _set_best_device(device, self.executor.ident)
         self._set_stream(device)
 
     def _set_stream(self, device:str):
@@ -46,32 +54,27 @@ class ThreadWorker(Worker):
             else:
                 self._streams[device] = None
 
-        _set_best_stream(self._streams[device], self.task_executor.ident)
-
-    def _clear(self)->None:
-        self.task_executor = None
-        self._is_working = False
+        _set_best_stream(self._streams[device], self.executor.ident)
 
     def start(self)->None:
-        if self.task_executor is not None:
+        if self.executor is not None:
             return
 
-        thread_pool:ThreadPool = self.pool
-        self.task_executor = threading.Thread(
+        self.executor = threading.Thread(
             target=self.run,
-            name=f"{thread_pool._thread_name_prefix}{self.index}",
+            name=f"{self.thread_pool._thread_name_prefix}{self.index}",
             daemon=True
         )
-        self.task_executor.start()
+        self.executor.start()
 
     def join(self)->None:
-        if self.task_executor is not None:
-            self.task_executor.join()
+        if self.executor is not None:
+            self.executor.join()
 
         self._clear()
 
     def run(self):
-        thread_pool:ThreadPool = self.pool
+        thread_pool:ThreadPool = self.thread_pool
         if thread_pool._initializer is not None:
             thread_pool._initializer(*thread_pool._initargs, **thread_pool._initkwargs)
 

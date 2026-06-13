@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Uni
 
 if TYPE_CHECKING:
     import multiprocessing as mp
+    import onnxruntime as ort
 
     from .pool import Pool
     from .task import Task
@@ -28,8 +29,10 @@ class Worker(ABC):
         self._is_working: bool = False
         self.imported_modules: Set[str] = set()
         self.n_finished_tasks: int = 0
-        self.task_queue: QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
-        self.task_executor: Optional[Union[mp.Process, threading.Thread]] = None
+        if task_queue_cls is not None:
+            self.task_queue: QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
+
+        self.executor: Optional[Union[mp.Process, threading.Thread, ort.InferenceSession]] = None
 
     def add_task(self, task: Task)->None:
         self.start()
@@ -61,11 +64,10 @@ class Worker(ABC):
         with Worker._total_working_count_lock:
             return Worker._total_working_count
 
-    @abstractmethod
     def _clear(self)->None:
-        pass
+        self.executor = None
+        self._is_working = False
 
-    @abstractmethod
     def change_device(self, device:str)->None:
         pass
 
@@ -74,7 +76,7 @@ class Worker(ABC):
         pass
 
     def stop(self, wait:bool=True, clear:bool=False)->None:
-        if self.task_executor is None:
+        if self.executor is None:
             return
 
         self.task_queue.put(None)
