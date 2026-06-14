@@ -36,23 +36,21 @@ def main(
     from rich.live import Live
     from rich.text import Text
     from rich.console import Group
-    
-    from inference import preprocess, postprocess
-    
+
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
-
+    
+    from inference import preprocess, postprocess
     from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
     from data_utils import download_dataset, download_model
-    from inference import infer_task
-    from concurrent.futures import Future, as_completed
+    from concurrent.futures import Future
 
     print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     print()
 
     download_model()
-    # download_dataset()
+    download_dataset()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     image_paths = sorted(DATASET_DIR.glob("*.jpg"))
