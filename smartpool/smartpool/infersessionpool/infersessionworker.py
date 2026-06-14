@@ -100,9 +100,10 @@ class InferSessionWorker(Worker):
         provider = task.onnx_provider
         self.infer_session_pool._add_provider_running_device(provider)
 
+        task.future.set_running_or_notify_cancel()
+
         try:
             self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
-            task.future.set_running_or_notify_cancel()
         except Exception as e:
             with self.infer_session_pool._running_count_lock:
                 self.running_count -= 1
