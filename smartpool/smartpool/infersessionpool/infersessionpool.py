@@ -90,6 +90,26 @@ class InferSessionPool(Pool):
                 provider_name not in self._not_thread_safe_providers or
                 device_id not in self._not_thread_safe_providers[provider_name]
             )
+        
+    def _check_providers(self, providers:Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]])->None:
+        if providers is None:
+            return
+        
+        for provider in providers:
+            if isinstance(provider, str):
+                provider_name = provider
+            else:
+                provider_name = provider[0]
+
+            if provider_name == "CPUExecutionProvider":
+                return
+            
+        with self._sys_info_lock:
+            for gpu_info in self._sys_info.gpu_infos:
+                if gpu_info.onnx_provider(providers):
+                    return
+        
+        raise ValueError(f"all providers are not supported: {providers}")
 
     def submit(
         self,
@@ -105,6 +125,7 @@ class InferSessionPool(Pool):
 
         validated_kwargs = self._model_info.check_args(args, kwargs)
         self._model_info.check_outputs(output_names)
+        self._check_providers(providers)
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource(cpu_cores_in_python=1)
@@ -143,6 +164,21 @@ class InferSessionPool(Pool):
         modes.append("cpu")
 
         for mode in modes:
+            if mode == "cpu" and task.user_providers is not None:
+                has_cpu_provider: bool = False
+                for provider in task.user_providers:
+                    if isinstance(provider, str):
+                        provider_name = provider
+                    else:
+                        provider_name = provider[0]
+
+                    if provider_name == "CPUExecutionProvider":
+                        has_cpu_provider: bool = True
+                        break
+
+                if not has_cpu_provider:
+                    continue
+            
             devices, _ = self._choose_task_device(task, mode, kill_workers=False)
             for device in devices:
                 if isinstance(device, str):

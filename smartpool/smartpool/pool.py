@@ -503,7 +503,7 @@ class Pool(ABC):
                     continue
 
                 if self._use_onnx:
-                    if not gpu.parent_class.supported_onnx_providers():
+                    if not gpu.onnx_provider(task.user_providers):
                         continue
 
                 available_gpus.append(gpu)

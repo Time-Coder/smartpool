@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Optional, Type
+from typing import List, Optional, Type, Tuple, Dict, Any, Union
 
 
 class GPUVendor(Enum):
@@ -20,6 +20,7 @@ class GPUInfoSnapshot:
         self.device_id: Optional[int] = None
         self.dml_id: Optional[int] = None
         self.parent_class: Optional[Type[GPUInfo]] = None
+        self._onnx_provider: Optional[Tuple[str, Dict[str, Any]]] = None
 
         self.name: Optional[str] = None
         self.uuid: Optional[uuid.UUID] = None
@@ -52,6 +53,49 @@ class GPUInfoSnapshot:
     def n_cores_free(self, value: int) -> None:
         self.n_cores_used = self.n_cores - value
 
+    def onnx_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
+        if providers is None and self._onnx_provider is not None:
+            return self._onnx_provider
+
+        import os
+
+        for provider_name in self.parent_class.supported_onnx_providers():
+            options = {"device_id": self.device_id}
+            if provider_name == "DmlExecutionProvider":
+                options["device_id"] = self.dml_id
+            elif provider_name == "TensorrtExecutionProvider":
+                options["trt_engine_cache_enable"] = True
+                options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
+            current_provider = (provider_name, options)
+
+            if self._onnx_provider is None:
+                self._onnx_provider = current_provider
+
+            if providers is None:
+                return self._onnx_provider
+            
+            for provider in providers:
+                if isinstance(provider, str):
+                    if provider == provider_name:
+                        return current_provider
+                else:
+                    user_provider_name = provider[0]
+                    if user_provider_name != provider_name:
+                        continue
+
+                    user_provider_options = provider[1]
+                    if "device_id" in user_provider_options:
+                        device_id: int = user_provider_options["device_id"]
+
+                        if device_id != options["device_id"]:
+                            continue
+                    else:
+                        user_provider_options["device_id"] = options["device_id"]
+
+                    return (user_provider_name, user_provider_options)
+        
+        return None
+
 
 class GPUInfo(ABC):
 
@@ -61,6 +105,7 @@ class GPUInfo(ABC):
         self._device_id: int = device_id
         self._index: int = index
         self._dml_id: int = -1
+        self._onnx_provider: Optional[Tuple[str, Dict[str, Any]]] = None
 
         self._name: Optional[str] = None
         self._uuid: Optional[uuid.UUID] = None
@@ -167,6 +212,49 @@ class GPUInfo(ABC):
     def supported_onnx_providers(cls)->List[str]:
         cls._init_onnx_providers()
         return cls._supported_onnx_providers
+    
+    def onnx_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
+        if providers is None and self._onnx_provider is not None:
+            return self._onnx_provider
+
+        import os
+
+        for provider_name in self.supported_onnx_providers():
+            options = {"device_id": self.device_id}
+            if provider_name == "DmlExecutionProvider":
+                options["device_id"] = self.dml_id
+            elif provider_name == "TensorrtExecutionProvider":
+                options["trt_engine_cache_enable"] = True
+                options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
+            current_provider = (provider_name, options)
+
+            if self._onnx_provider is None:
+                self._onnx_provider = current_provider
+
+            if providers is None:
+                return self._onnx_provider
+            
+            for provider in providers:
+                if isinstance(provider, str):
+                    if provider == provider_name:
+                        return current_provider
+                else:
+                    user_provider_name = provider[0]
+                    if user_provider_name != provider_name:
+                        continue
+
+                    user_provider_options = provider[1]
+                    if "device_id" in user_provider_options:
+                        device_id: int = user_provider_options["device_id"]
+
+                        if device_id != options["device_id"]:
+                            continue
+                    else:
+                        user_provider_options["device_id"] = options["device_id"]
+
+                    return (user_provider_name, user_provider_options)
+        
+        return None
 
     @property
     def device_id(self) -> int:

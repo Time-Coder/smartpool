@@ -17,7 +17,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
-    from .gpuinfo import GPUInfo
+    from .gpuinfo import GPUInfoSnapshot
     from .resource import Resource
     from .worker import Worker
 
@@ -94,20 +94,11 @@ class Task:
             self._onnx_provider = ("CPUExecutionProvider", {})
             return self._onnx_provider
 
-        from .gpuinfo import GPUInfo
-
-        gpuinfo_class = GPUInfo.gpuinfo_class(self.device_prefix)
-        for provider_name in gpuinfo_class.supported_onnx_providers():
-            options = {"device_id": self.device_id}
-            if provider_name == "DmlExecutionProvider":
-                options["device_id"] = self.dml_id
-            elif provider_name == "TensorrtExecutionProvider":
-                options["trt_engine_cache_enable"] = True
-                options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
-            self._onnx_provider = (provider_name, options)
-            return self._onnx_provider
-
-        self._onnx_provider = ("CPUExecutionProvider", {})
+        from .pool import Pool
+        with Pool._sys_info_lock:
+            gpuinfo_snapshot = Pool._sys_info.gpu_infos[self.gpu_index]
+            
+        self._onnx_provider = gpuinfo_snapshot.onnx_provider(self.user_providers)
         return self._onnx_provider
 
     @property
@@ -174,7 +165,7 @@ class Task:
 
         return success, result
 
-    def filter_gpu_infos(self, gpu_infos: List[GPUInfo]) -> Iterable[GPUInfo]:
+    def filter_gpu_infos(self, gpu_infos: List[GPUInfoSnapshot]) -> Iterable[GPUInfoSnapshot]:
         if not self.use_torch or not gpu_infos:
             return gpu_infos
 

@@ -106,7 +106,7 @@ def main(
         def preprocess_done_callback(image_path, preprocess_future: Future):
             progress.update(preprocess_done_progress_task, advance=1)
             img, blob, scale, pad = preprocess_future.result()
-            infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+            infer_future: Future = infer_session_pool.submit(args=(blob,), providers=["CPUExecutionProvider"], cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
             progress.update(infer_submit_progress_task, advance=1)
             infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
         
