@@ -1,3 +1,5 @@
+__version__ = "0.1.7"
+
 from .amd_gpuinfo import AMDGPUInfo
 from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .gpuinfos import GPUInfos
