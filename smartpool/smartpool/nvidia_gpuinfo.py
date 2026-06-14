@@ -138,4 +138,19 @@ class NvidiaGPUInfo(GPUInfo):
 
     def _fetch_num_cores(self) -> Optional[int]:
         with self._lock:
-            return pynvml.nvmlDeviceGetNumGpuCores(self._get_handle())
+            try:
+                return pynvml.nvmlDeviceGetNumGpuCores(self._get_handle())
+            except Exception:
+                import pyopencl as cl
+                platforms = cl.get_platforms()
+                for plat in platforms:
+                    vendor = plat.vendor.lower()
+                    if 'nvidia' not in vendor:
+                        continue
+
+                    devices = plat.get_devices(device_type=cl.device_type.GPU)
+                    if 0 <= self._device_id < len(devices):
+                        device = devices[self._device_id]
+                        return device.max_compute_units * device.max_work_group_size
+
+                raise RuntimeError("cannot fetch num cores of current NVIDIA GPU")

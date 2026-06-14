@@ -20,6 +20,7 @@ dependencies = [
     "nvidia-ml-py",
     "psutil",
     "pyopencl",
+    "onnx",
     "wmi; platform_system == 'Windows'",
     "ADLXPybind; platform_system == 'Windows'",
     "pyamdgpuinfo; platform_system == 'Linux'"

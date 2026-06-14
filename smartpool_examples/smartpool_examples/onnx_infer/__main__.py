@@ -22,6 +22,16 @@ def main(
         help="max number of infer session pool workers to use, 0 to use all available cores"
     ),
 ):
+    print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
+    print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
+    print()
+
+    try:
+        import onnxruntime
+    except ImportError:
+        print("ONNX Runtime is not installed. Follow https://onnxruntime.ai/docs/install/ instructions to install ONNX Runtime.")
+        exit(1)
+
     import os
     import time
     import queue
@@ -44,10 +54,6 @@ def main(
     from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
     from data_utils import download_dataset, download_model
     from concurrent.futures import Future
-
-    print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
-    print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
-    print()
 
     download_model()
     download_dataset()
