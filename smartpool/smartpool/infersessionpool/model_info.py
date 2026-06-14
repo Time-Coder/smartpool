@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from typing import Any, Dict, Optional, Tuple, Set, TYPE_CHECKING
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import onnx
@@ -30,38 +30,94 @@ class NodeInfo:
 class ModelInfo:
 
     def __init__(self, model_path: str):
-        self.model_path = model_path
-        self.model_name = os.path.basename(self.model_path).split(".")[0]
-        self.file_size = None
-        self.input_nodes: Dict[str, NodeInfo] = {}
-        self.output_names: Set[str] = set()
-        self.signature = None
+        self._model_path: str = model_path
+        self._model_name: str = os.path.basename(model_path).split(".")[0]
+        self._file_size: Optional[int] = None
+        self._file_mtime: Optional[float] = None
+        self._inputs: Optional[Dict[str, NodeInfo]] = None
+        self._outputs: Optional[Dict[str, NodeInfo]] = None
+        self._signature: Optional[inspect.Signature] = None
+        self.load()
 
-        if not os.path.isfile(model_path):
-            raise FileNotFoundError(model_path)
+    @property
+    def model_path(self)->str:
+        return self._model_path
+    
+    @property
+    def model_name(self)->str:
+        return self._model_name
+    
+    @property
+    def file_size(self)->int:
+        self.load()
+        return self._file_size
+    
+    @property
+    def file_mtime(self)->float:
+        self.load()
+        return self._file_mtime
+    
+    @property
+    def inputs(self)->Dict[str, NodeInfo]:
+        self.load()
+        return self._inputs
+    
+    @property
+    def outputs(self)->Dict[str, NodeInfo]:
+        self.load()
+        return self._outputs
+    
+    @property
+    def signature(self)->inspect.Signature:
+        self.load()
+        return self._signature
 
-        _, ext = os.path.splitext(model_path)
+    def load(self):
+        if (
+            self._file_size is not None and
+            self._file_mtime is not None and
+            self._inputs is not None and
+            self._outputs is not None and
+            self._signature is not None
+        ):
+            mtime = 0
+            if os.path.isfile(self._model_path):
+                mtime = os.path.getmtime(self._model_path)
+
+            if self._file_mtime == mtime:
+                return
+            
+        if not os.path.isfile(self._model_path):
+            raise FileNotFoundError(self._model_path)
+
+        _, ext = os.path.splitext(self._model_path)
         if ext != ".onnx":
             raise ValueError(f"only support .onnx model, {ext} were given")
 
-        self.file_size = os.path.getsize(model_path)
-        if self.file_size <= 0:
+        self._file_size = os.path.getsize(self._model_path)
+        if self._file_size <= 0:
             raise ValueError("model file size is zero")
+        
+        self._file_mtime = os.path.getmtime(self._model_path)
 
         import onnx
 
-        model = onnx.load(model_path)
+        model = onnx.load(self._model_path)
         onnx.checker.check_model(model, full_check=True)
 
         params = []
+        inputs = {}
+        outputs = {}
         for node in model.graph.input:
             params.append(inspect.Parameter(node.name, inspect.Parameter.POSITIONAL_OR_KEYWORD))
-            self.input_nodes[node.name] = NodeInfo(node)
+            inputs[node.name] = NodeInfo(node)
 
         for node in model.graph.output:
-            self.output_names.add(node.name)
+            outputs[node.name] = NodeInfo(node)
 
-        self.signature = inspect.Signature(params)
+        self._inputs = inputs
+        self._outputs = outputs
+        self._signature = inspect.Signature(params)
 
     def check_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if kwargs is None:
@@ -75,13 +131,13 @@ class ModelInfo:
             formatted_msg = f"model '{self.model_name}' arguments error: {str(e)}"
             raise TypeError(formatted_msg) from None
 
-        if self.input_nodes:
+        if self.inputs:
             import numpy as np
             for name, value in kwargs.items():
                 if not isinstance(value, np.ndarray):
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
 
-                node = self.input_nodes[name]
+                node = self.inputs[name]
 
                 expected_type = node.dtype
                 actual_type = value.dtype
@@ -107,5 +163,5 @@ class ModelInfo:
             return
         
         for name in output_names:
-            if name not in self.output_names:
-                raise ValueError(f"model '{self.model_name}' has no output named '{name}'. valid outputs: {self.output_names}")
+            if name not in self.outputs:
+                raise ValueError(f"model '{self.model_name}' has no output named '{name}'. valid outputs: {self.outputs.keys()}")

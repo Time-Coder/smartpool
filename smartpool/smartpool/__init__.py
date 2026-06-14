@@ -1,7 +1,7 @@
 from .amd_gpuinfo import AMDGPUInfo
 from .gpuinfo import GPUInfoSnapshot, GPUVendor
 from .gpuinfos import GPUInfos
-from .infersessionpool import InferSessionPool
+from .infersessionpool import InferSessionPool, ModelInfo
 from .intel_gpuinfo import IntelGPUInfo
 from .interpreterpool import InterpreterPool
 from .nvidia_gpuinfo import NvidiaGPUInfo
@@ -15,6 +15,7 @@ __all__ = [
     "ThreadPool",
     "InterpreterPool",
     "InferSessionPool",
+    "ModelInfo",
     "DataSize",
     "Resource",
     "move_optimizer_to",

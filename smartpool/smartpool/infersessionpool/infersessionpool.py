@@ -9,9 +9,6 @@ from .infersessionworker import InferSessionWorker
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
-
-    import onnxruntime as ort
-
     from ..resource import Resource
     from ..task import Task
     from .model_info import ModelInfo
@@ -45,6 +42,10 @@ class InferSessionPool(Pool):
         self._running_count_lock: threading.Lock = threading.Lock()
         self._running_count: int = 0
         self.print_info: bool = False
+
+    @property
+    def model_info(self)->ModelInfo:
+        return self._model_info
 
     @staticmethod
     def _provider_key(provider: Tuple[str, Dict[str, Any]])->str:

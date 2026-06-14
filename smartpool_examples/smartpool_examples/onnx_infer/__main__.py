@@ -55,7 +55,7 @@ def main(
     thread_pool = ThreadPool(max_workers=n_workers)
     infer_session_pool = InferSessionPool(model_path_str, max_workers=n_workers)
     infer_session_pool.print_info = True
-
+    
     cpu_res = Resource(
         cpu_cores_in_python=1,
         cpu_cores_out_of_python=1,
@@ -106,7 +106,7 @@ def main(
         def preprocess_done_callback(image_path, preprocess_future: Future):
             progress.update(preprocess_done_progress_task, advance=1)
             img, blob, scale, pad = preprocess_future.result()
-            infer_future: Future = infer_session_pool.submit(args=(blob,), providers=["CPUExecutionProvider"], cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+            infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
             progress.update(infer_submit_progress_task, advance=1)
             infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
         
