@@ -19,8 +19,15 @@ classifiers = [
 dependencies = [
     "nvidia-ml-py",
     "psutil",
-    "cachetools",
     "pyopencl"
+]
+
+[project.optional-dependencies]
+windows = [
+    "wmi; platform_system == 'Windows'"
+]
+linux = [
+    "pyamdgpuinfo; platform_system == 'Linux'"
 ]
 
 [project.urls]
