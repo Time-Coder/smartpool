@@ -24,7 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 windows = [
-    "wmi; platform_system == 'Windows'"
+    "wmi; platform_system == 'Windows'",
+    "ADLXPybind; platform_system == 'Windows'"
 ]
 linux = [
     "pyamdgpuinfo; platform_system == 'Linux'"
