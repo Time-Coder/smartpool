@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from ..pool import Pool
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 
 class InferSessionPool(Pool):
 
+    _not_thread_safe_providers_lock: threading.Lock = threading.Lock()
     _not_thread_safe_providers: Dict[str, Set[int]] = {
         "DmlExecutionProvider": set(),
     }
@@ -26,7 +28,6 @@ class InferSessionPool(Pool):
 
     def __init__(self, model_path: str, max_workers: int = 0):
         from .model_info import ModelInfo
-        import threading
 
         model_path = os.path.abspath(model_path).replace("\\", "/")
         if model_path not in InferSessionPool._model_infos:
@@ -57,6 +58,38 @@ class InferSessionPool(Pool):
         key = self._provider_key(provider)
         self._workers_dict[key] = worker
         return worker
+    
+    def _add_provider_running_device(self, provider: Tuple[str, Dict[str, Any]])->None:
+        provider_name: str = provider[0]
+        device_id: int = 0
+        if "device_id" in provider[1]:
+            device_id: int = provider[1]["device_id"]
+
+        with self._not_thread_safe_providers_lock:
+            if provider_name in self._not_thread_safe_providers:
+                self._not_thread_safe_providers[provider_name].add(device_id)
+
+    def _remove_provider_running_device(self, provider: Tuple[str, Dict[str, Any]])->None:
+        provider_name: str = provider[0]
+        device_id: int = 0
+        if "device_id" in provider[1]:
+            device_id: int = provider[1]["device_id"]
+
+        with self._not_thread_safe_providers_lock:
+            if provider_name in self._not_thread_safe_providers:
+                self._not_thread_safe_providers[provider_name].remove(device_id)
+
+    def _can_use_provider(self, provider: Tuple[str, Dict[str, Any]])->bool:
+        provider_name: str = provider[0]
+        device_id: int = 0
+        if "device_id" in provider[1]:
+            device_id: int = provider[1]["device_id"]
+
+        with self._not_thread_safe_providers_lock:
+            return (
+                provider_name not in self._not_thread_safe_providers or
+                device_id not in self._not_thread_safe_providers[provider_name]
+            )
 
     def submit(
         self,
@@ -110,41 +143,47 @@ class InferSessionPool(Pool):
         modes.append("cpu")
 
         for mode in modes:
-            device, _ = self._choose_task_device(task, mode, kill_workers=False)
-            if device is None:
-                continue
+            devices, _ = self._choose_task_device(task, mode, kill_workers=False)
+            for device in devices:
+                if isinstance(device, str):
+                    task.device = device
+                    task.gpu_index = -1
+                    task.dml_id = -1
+                else:
+                    task.device = device.device
+                    task.gpu_index = device.index
+                    task.dml_id = device.dml_id
 
-            if not self._choose_task_worker(task):
-                task.device = None
-                task.gpu_index = -1
-                task.dml_id = -1
-                continue
+                if not self._choose_task_worker(task):
+                    task.device = None
+                    task.gpu_index = -1
+                    task.dml_id = -1
+                    continue
 
-            self._put_task(task)
-            return True
+            if task.device is not None:
+                self._put_task(task)
+                return True
 
         return False
 
     def _choose_task_worker(self, task: Task) -> Optional[InferSessionWorker]:        
         provider: Tuple[str, Dict[str, Any]] = task.onnx_provider
         provider_key: str = self._provider_key(provider)
-        is_thread_safe: bool = (provider[0] in InferSessionPool._thread_safe_providers)
+        if not self._can_use_provider(provider):
+            task.worker = None
+            return None
+
         if provider_key in self._workers_dict:
             worker = self._workers_dict[provider_key]
-            if is_thread_safe or worker.running_count == 0:
-                task.worker = worker
-                return worker
-            else:
-                task.worker = None
-                return None
         else:
             worker = self._add_worker(provider, task.gpu_index)
-            task.worker = worker
-            return worker
+
+        task.worker = worker
+        return worker
 
     def _put_task(self, task: Task) -> None:
         self._take_resource(task)
-        worker:InferSessionWorker = task.worker
+        worker: InferSessionWorker = task.worker
         worker.is_working = True
         worker.add_task(task)
 

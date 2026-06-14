@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from .sysinfo import SysInfo
+    from .gpuinfo import GPUInfoSnapshot
     from .task import Task
     from .utils import QueueLike
     from .worker import Worker
@@ -171,8 +172,8 @@ class Pool(ABC):
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             self._choose_task_worker(task, gpu_res)
             if task.worker is not None:
-                device, should_kill_workers = self._choose_task_device(task, "gpu", kill_workers=False)
-                if device is not None:
+                devices, should_kill_workers = self._choose_task_device(task, "gpu", kill_workers=False)
+                if devices:
                     for idle_worker in should_kill_workers:
                         self._sys_info.cpu_mem_free += idle_worker.cached_rss
                         idle_worker.stop(wait=False, clear=True)
@@ -185,8 +186,8 @@ class Pool(ABC):
         cpu_res = task.cpu_mode_res
         self._choose_task_worker(task, cpu_res)
         if task.worker is not None:
-            device, _ = self._choose_task_device(task, "cpu", kill_workers=True)
-            if device is not None:
+            devices, _ = self._choose_task_device(task, "cpu", kill_workers=True)
+            if devices:
                 return True
 
         task.worker = None
@@ -440,7 +441,7 @@ class Pool(ABC):
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
 
-    def _choose_task_device(self, task:Task, mode:str, kill_workers: bool) -> Tuple[Optional[str], List[Worker]]:
+    def _choose_task_device(self, task:Task, mode:str, kill_workers: bool) -> Tuple[List[Union[GPUInfoSnapshot], str], List[Worker]]:
         from .worker import Worker
 
         res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
@@ -454,7 +455,7 @@ class Pool(ABC):
                 task.device = None
                 task.gpu_index = -1
                 task.dml_id = -1
-                return None, []
+                return [], []
 
             should_kill_workers = []
             cpu_mem_needed = res.cpu_mem
@@ -465,7 +466,7 @@ class Pool(ABC):
                         task.device = None
                         task.gpu_index = -1
                         task.dml_id = -1
-                        return None, []
+                        return [], []
 
                     if kill_workers:
                         for idle_worker in idle_workers:
@@ -484,16 +485,16 @@ class Pool(ABC):
                     task.device = None
                     task.gpu_index = -1
                     task.dml_id = -1
-                    return None, []
+                    return [], []
 
             if mode == "cpu":
                 task.device = "cpu"
                 task.gpu_index = -1
                 task.dml_id = -1
-                return "cpu", should_kill_workers
+                return ["cpu"], should_kill_workers
 
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
-            best_gpu = None
+            available_gpus = []
             for gpu in gpus:
                 if gpu.mem_free < res.gpu_mem:
                     continue
@@ -502,24 +503,23 @@ class Pool(ABC):
                     continue
 
                 if self._use_onnx:
-                    from .gpuinfo import GPUInfo
-                    GPUInfo.init_onnx_providers()
-                    if not gpu.parent_class.supported_onnx_providers:
+                    if not gpu.parent_class.supported_onnx_providers():
                         continue
 
-                if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
-                    best_gpu = gpu
+                available_gpus.append(gpu)
 
-        if best_gpu is None:
+        if not available_gpus:
             task.device = None
             task.gpu_index = -1
             task.dml_id = -1
-            return None, []
+            return [], []
 
+        available_gpus.sort(key=lambda gpu: gpu.n_cores_free, reverse=True)
+        best_gpu: GPUInfoSnapshot = available_gpus[0]
         task.device = best_gpu.device
         task.gpu_index = best_gpu.index
         task.dml_id = best_gpu.dml_id
-        return best_gpu.device, should_kill_workers
+        return available_gpus, should_kill_workers
 
     def _choose_task_worker(self, task: Task, res: Resource) -> Optional[Worker]:
         best_worker:Optional[Worker] = None

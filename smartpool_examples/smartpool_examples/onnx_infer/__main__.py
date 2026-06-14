@@ -43,7 +43,7 @@ def main(
     print()
 
     download_model()
-    download_dataset()
+    # download_dataset()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     image_paths = sorted(DATASET_DIR.glob("*.jpg"))

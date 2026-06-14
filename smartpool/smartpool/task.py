@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-from concurrent.futures import Future
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -17,6 +16,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future
     from .gpuinfo import GPUInfo
     from .resource import Resource
     from .worker import Worker
@@ -50,12 +50,23 @@ class Task:
             self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
 
         self._device: Optional[str] = None
+        self._device_prefix: Optional[str] = None
+        self._device_id: Optional[int] = None
         self.gpu_index: int = -1
         self.dml_id: int = -1
         self.worker: Worker = None
         self.mem_before_enter: int = 0
         self._onnx_provider: Optional[Tuple[str, Dict]] = None
-        self.future = Future()
+        self._future: Optional[Future] = None
+
+    @property
+    def future(self)->Future:
+        if self._future is None:
+            from concurrent.futures import Future
+
+            self._future = Future()
+
+        return self._future
 
     @property
     def device(self)->str:
@@ -67,6 +78,8 @@ class Task:
             return
 
         self._device = device
+        self._device_prefix = None
+        self._device_id = None
         self._onnx_provider = None
 
     @property
@@ -83,14 +96,9 @@ class Task:
 
         from .gpuinfo import GPUInfo
 
-        items = self.device.split(":")
-        device_prefix = items[0]
-        device_id = int(items[1])
-
-        GPUInfo.init_onnx_providers()
-        gpuinfo_class = GPUInfo.gpuinfo_class(device_prefix)
-        for provider_name in gpuinfo_class.supported_onnx_providers:
-            options = {"device_id": device_id}
+        gpuinfo_class = GPUInfo.gpuinfo_class(self.device_prefix)
+        for provider_name in gpuinfo_class.supported_onnx_providers():
+            options = {"device_id": self.device_id}
             if provider_name == "DmlExecutionProvider":
                 options["device_id"] = self.dml_id
             elif provider_name == "TensorrtExecutionProvider":
@@ -114,14 +122,47 @@ class Task:
 
     @property
     def device_id(self)->int:
-        if isinstance(self.device, str) and ":" in self.device:
-            parts = self.device.split(":")
-            if len(parts) == 2:
-                try:
-                    return int(parts[1])
-                except (ValueError, IndexError):
-                    pass
-        return -1
+        if self._device_id is not None:
+            return self._device_id
+
+        self._device_prefix = ""
+        self._device_id = 0
+        device = self._device
+        if isinstance(device, str):
+            if ":" in device:
+                parts = device.split(":")
+                if len(parts) == 2:
+                    try:
+                        self._device_prefix = parts[0]
+                        self._device_id = int(parts[1])
+                    except (ValueError, IndexError):
+                        pass
+            else:
+                self._device_prefix = device
+
+        return self._device_id
+    
+    @property
+    def device_prefix(self)->str:
+        if self._device_prefix is not None:
+            return self._device_prefix
+
+        self._device_prefix = ""
+        self._device_id = -1
+        device = self._device
+        if isinstance(device, str):
+            if ":" in device:
+                parts = device.split(":")
+                if len(parts) == 2:
+                    try:
+                        self._device_prefix = parts[0]
+                        self._device_id = int(parts[1])
+                    except (ValueError, IndexError):
+                        pass
+            else:
+                self._device_prefix = device
+
+        return self._device_prefix
 
     def exec(self)->Tuple[bool, Any]:
         try:

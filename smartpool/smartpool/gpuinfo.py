@@ -55,7 +55,7 @@ class GPUInfoSnapshot:
 
 class GPUInfo(ABC):
 
-    supported_onnx_providers:Optional[List[str]] = None
+    _supported_onnx_providers:Optional[List[str]] = None
 
     def __init__(self, device_id: int, index: int):
         self._device_id: int = device_id
@@ -139,15 +139,15 @@ class GPUInfo(ABC):
             raise ValueError(f"Unknown device prefix: {device_prefix}")
 
     @staticmethod
-    def init_onnx_providers()->None:
-        if GPUInfo.supported_onnx_providers is not None:
+    def _init_onnx_providers()->None:
+        if GPUInfo._supported_onnx_providers is not None:
             return
 
         try:
             import onnxruntime
-            GPUInfo.supported_onnx_providers = onnxruntime.get_available_providers()
+            GPUInfo._supported_onnx_providers = onnxruntime.get_available_providers()
         except ImportError:
-            GPUInfo.supported_onnx_providers = []
+            GPUInfo._supported_onnx_providers = []
 
         from .amd_gpuinfo import AMDGPUInfo
         from .intel_gpuinfo import IntelGPUInfo
@@ -158,10 +158,15 @@ class GPUInfo(ABC):
             NvidiaGPUInfo
         ]
         for child in children:
-            for i in range(len(child.supported_onnx_providers)-1, -1, -1):
-                provider = child.supported_onnx_providers[i]
-                if provider not in GPUInfo.supported_onnx_providers:
-                    del child.supported_onnx_providers[i]
+            for i in range(len(child._supported_onnx_providers)-1, -1, -1):
+                provider = child._supported_onnx_providers[i]
+                if provider not in GPUInfo._supported_onnx_providers:
+                    del child._supported_onnx_providers[i]
+
+    @classmethod
+    def supported_onnx_providers(cls)->List[str]:
+        cls._init_onnx_providers()
+        return cls._supported_onnx_providers
 
     @property
     def device_id(self) -> int:

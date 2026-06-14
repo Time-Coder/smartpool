@@ -89,12 +89,16 @@ class InferSessionWorker(Worker):
 
     def add_task(self, task:Task)->None:
         self.start()
+
         if self.infer_session_pool.print_info:
             print("infer with provider", self.provider, "in session", id(self.session))
 
         with self.infer_session_pool._running_count_lock:
             self.running_count += 1
             self.infer_session_pool._running_count += 1
+
+        provider = task.onnx_provider
+        self.infer_session_pool._add_provider_running_device(provider)
 
         try:
             self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
@@ -103,7 +107,8 @@ class InferSessionWorker(Worker):
             with self.infer_session_pool._running_count_lock:
                 self.running_count -= 1
                 self.infer_session_pool._running_count -= 1
-            self.is_working = False
+
+            self.infer_session_pool._remove_provider_running_device(provider)
             self.infer_session_pool._on_task_done(task.id, False, e)
 
     def start(self)->None:
@@ -144,5 +149,8 @@ class InferSessionWorker(Worker):
         with self.infer_session_pool._running_count_lock:
             self.running_count -= 1
             self.infer_session_pool._running_count -= 1
+
+        task = self.infer_session_pool._tasks[task_id]
+        self.infer_session_pool._remove_provider_running_device(task.onnx_provider)
 
         self.infer_session_pool._on_task_done(task_id, success, result)
