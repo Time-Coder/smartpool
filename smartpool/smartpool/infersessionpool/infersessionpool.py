@@ -8,6 +8,7 @@ from ..pool import Pool
 from .infersessionworker import InferSessionWorker
 
 if TYPE_CHECKING:
+    import onnxruntime as ort
     from concurrent.futures import Future
     from ..resource import Resource
     from ..task import Task
@@ -23,7 +24,7 @@ class InferSessionPool(Pool):
 
     _model_infos: Dict[str, ModelInfo] = {}
 
-    def __init__(self, model_path: str, max_workers: int = 0):
+    def __init__(self, model_path: str, max_workers: int = 0, session_options: Optional[ort.SessionOptions] = None):
         from .model_info import ModelInfo
 
         model_path = os.path.abspath(model_path).replace("\\", "/")
@@ -37,6 +38,7 @@ class InferSessionPool(Pool):
             worker_cls=None,
             use_onnx=True,
         )
+        self._session_options: Optional[ort.SessionOptions] = session_options
         self._model_info: ModelInfo = InferSessionPool._model_infos[model_path]
         self._workers_dict: Dict[str, InferSessionWorker] = {}
         self._running_count_lock: threading.Lock = threading.Lock()
@@ -46,6 +48,16 @@ class InferSessionPool(Pool):
     @property
     def model_info(self)->ModelInfo:
         return self._model_info
+    
+    @property
+    def session_options(self) -> ort.SessionOptions:
+        if self._session_options is None:
+            import onnxruntime as ort
+            self._session_options = ort.SessionOptions()
+            self._session_options.enable_cpu_mem_arena = True
+            self._session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        return self._session_options
 
     @staticmethod
     def _provider_key(provider: Tuple[str, Dict[str, Any]])->str:

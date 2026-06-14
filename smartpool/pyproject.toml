@@ -19,15 +19,9 @@ classifiers = [
 dependencies = [
     "nvidia-ml-py",
     "psutil",
-    "pyopencl"
-]
-
-[project.optional-dependencies]
-windows = [
+    "pyopencl",
     "wmi; platform_system == 'Windows'",
-    "ADLXPybind; platform_system == 'Windows'"
-]
-linux = [
+    "ADLXPybind; platform_system == 'Windows'",
     "pyamdgpuinfo; platform_system == 'Linux'"
 ]
 

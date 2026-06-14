@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
 class InferSessionWorker(Worker):
 
-    _session_options: Optional[ort.SessionOptions] = None
-
     def __init__(self, infer_session_pool:InferSessionPool, provider: Tuple[str, Dict[str, Any]], gpu_index: int):
         Worker.__init__(
             self, infer_session_pool,
@@ -77,16 +75,6 @@ class InferSessionWorker(Worker):
             if self._gpu_index >= 0:
                 self.infer_session_pool._sys_info.gpu_infos[self._gpu_index].mem_free += self._model_size
 
-    @staticmethod
-    def _get_session_options() -> ort.SessionOptions:
-        if InferSessionWorker._session_options is None:
-            import onnxruntime as ort
-            InferSessionWorker._session_options = ort.SessionOptions()
-            InferSessionWorker._session_options.enable_cpu_mem_arena = True
-            InferSessionWorker._session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-        return InferSessionWorker._session_options
-
     def add_task(self, task:Task)->None:
         self.start()
 
@@ -120,8 +108,7 @@ class InferSessionWorker(Worker):
 
         infer_session_pool: InferSessionPool = self.pool
         model_path: str = infer_session_pool._model_info.model_path
-        option: ort.SessionOptions = self._get_session_options()
-        self.executor = ort.InferenceSession(model_path, option, providers=[self.provider])
+        self.executor = ort.InferenceSession(model_path, infer_session_pool.session_options, providers=[self.provider])
         self.executor.disable_fallback()
 
     def _clear(self)->None:
