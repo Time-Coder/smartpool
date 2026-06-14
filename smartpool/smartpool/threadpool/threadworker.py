@@ -36,8 +36,8 @@ class ThreadWorker(Worker):
 
     def add_task(self, task:Task)->None:
         self.start()
-        self.task_queue.put(task)
         task.future.set_running_or_notify_cancel()
+        self.task_queue.put(task)
 
     def change_device(self, device:str)->None:
         _set_best_device(device, self.executor.ident)

@@ -11,23 +11,32 @@ app = typer.Typer(help="Use smartpool to do YOLOv8n ONNX inference on COCO val20
 
 @app.command()
 def main(
-    max_workers: int = typer.Option(
+    thread_pool_max_workers: int = typer.Option(
+        4,
+        "--thread_pool_max_workers",
+        help="max number of thread pool (for preprocess and postprocess) workers to use, 0 to use all available cores"
+    ),
+    session_pool_max_workers: int = typer.Option(
         0,
-        "--max_workers",
-        help="max number of workers to use, 0 to use all available cores"
+        "--session_pool_max_workers",
+        help="max number of infer session pool workers to use, 0 to use all available cores"
     ),
 ):
     import os
     import time
     import queue
     from functools import partial
-    from smartpool import InferSessionPool, Resource, ThreadPool, DataSize
+    from smartpool import InferSessionPool, Resource, ThreadPool, DataSize, GPUInfo
     from rich.progress import (
         BarColumn,
         Progress,
         TextColumn,
         TimeRemainingColumn,
     )
+    from rich.live import Live
+    from rich.text import Text
+    from rich.console import Group
+    
     from inference import preprocess, postprocess
     
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
@@ -49,12 +58,9 @@ def main(
     image_paths = sorted(DATASET_DIR.glob("*.jpg"))
     model_path_str = str(MODEL_PATH.resolve())
     output_dir_str = str(OUTPUT_DIR.resolve())
-    n_workers = max_workers
 
-    print(f"\nSubmit {len(image_paths)} tasks to ThreadPool({n_workers})...")
-    thread_pool = ThreadPool(max_workers=n_workers)
-    infer_session_pool = InferSessionPool(model_path_str, max_workers=n_workers)
-    infer_session_pool.print_info = True
+    thread_pool = ThreadPool(max_workers=thread_pool_max_workers)
+    infer_session_pool = InferSessionPool(model_path_str, max_workers=session_pool_max_workers)
     
     cpu_res = Resource(
         cpu_cores_in_python=1,
@@ -76,7 +82,7 @@ def main(
         BarColumn(),
         TextColumn("{task.completed}/{task.total}"),
         TimeRemainingColumn(),
-    ) as progress:
+    ) as progress, Live(refresh_per_second=4) as live:
         n_tasks = len(image_paths)
         preprocess_submit_progress_task = progress.add_task("preprocess submit", total=n_tasks)
         preprocess_done_progress_task = progress.add_task("preprocess done", total=n_tasks)
@@ -85,12 +91,20 @@ def main(
         postprocess_submit_progress_task = progress.add_task("postprocess submit", total=n_tasks)
         postprocess_done_progress_task = progress.add_task("postprocess done", total=n_tasks)
 
+        def update_task_count():
+            lines = []
+            for provider in GPUInfo.supported_onnx_providers():
+                lines.append(Text(f"task count infer with {provider}: {infer_session_pool.task_count_with_provider(provider)}"))
+            live.update(Group(*lines))
+
         def postprocess_done_callback(postprocess_future: Future):
+            update_task_count()
             postprocess_future.result()
             progress.update(postprocess_done_progress_task, advance=1)
             result_queue.put(1)
 
         def infer_done_callback(image_path, img, scale, pad, infer_future: Future):
+            update_task_count()
             outputs = infer_future.result()[0]
             progress.update(infer_done_progress_task, advance=1)
 
@@ -104,6 +118,7 @@ def main(
             postprocess_future.add_done_callback(postprocess_done_callback)
 
         def preprocess_done_callback(image_path, preprocess_future: Future):
+            update_task_count()
             progress.update(preprocess_done_progress_task, advance=1)
             img, blob, scale, pad = preprocess_future.result()
             infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
@@ -111,6 +126,7 @@ def main(
             infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
         
         for image_path in image_paths:
+            update_task_count()
             image_path = str(image_path)
             preprocess_future: Future = thread_pool.submit(
                 preprocess,

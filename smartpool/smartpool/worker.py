@@ -36,8 +36,8 @@ class Worker(ABC):
 
     def add_task(self, task: Task)->None:
         self.start()
-        self.task_queue.put(task.info())
         task.future.set_running_or_notify_cancel()
+        self.task_queue.put(task.info())
 
     @property
     def is_working(self)->bool:

@@ -1,5 +1,5 @@
 from .amd_gpuinfo import AMDGPUInfo
-from .gpuinfo import GPUInfoSnapshot, GPUVendor
+from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .gpuinfos import GPUInfos
 from .infersessionpool import InferSessionPool, ModelInfo
 from .intel_gpuinfo import IntelGPUInfo
@@ -22,6 +22,7 @@ __all__ = [
     "limit_num_single_thread",
     "best_device",
     "best_stream",
+    "GPUInfo",
     "GPUInfos",
     "GPUVendor",
     "GPUInfoSnapshot",
