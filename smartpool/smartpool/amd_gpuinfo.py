@@ -4,7 +4,7 @@ import subprocess
 import threading
 import uuid
 import warnings
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .gpuinfo import GPUInfo, GPUVendor
 
