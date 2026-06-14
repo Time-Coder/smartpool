@@ -1,10 +1,9 @@
 import contextlib
-import importlib
-import os
 import platform
 import subprocess
 import threading
 import uuid
+import warnings
 from typing import Dict, List, Optional
 
 from .gpuinfo import GPUInfo, GPUVendor
@@ -76,57 +75,18 @@ class AMDGPUInfo(GPUInfo):
     def _init_linux(cls) -> None:
         cls._device_info = []
 
-        try:
-            import pyamdgpuinfo
-            count = pyamdgpuinfo.detect_gpus()
-            if count > 0:
-                for i in range(count):
-                    gpu = pyamdgpuinfo.get_gpu(i)
-                    cls._device_info.append({
-                        'name': getattr(gpu, 'name', None) or gpu.__class__.__name__,
-                        'vram_size': getattr(gpu, 'vram_size', None),
-                    })
-                return
-        except ImportError:
-            pass
-        except Exception:
-            pass
-
-        cls._init_linux_fallback()
-
-    @classmethod
-    def _init_linux_fallback(cls) -> None:
-        try:
-            if os.path.exists('/opt/rocm/bin/rocm-smi'):
-                result = subprocess.run(
-                    ['/opt/rocm/bin/rocm-smi', '--showallinfo'],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0:
-                    lines = result.stdout.split('\n')
-                    gpu_count = sum(1 for line in lines if 'GPU' in line and ':' in line)
-                    if gpu_count > 0:
-                        cls._device_info = [{'name': f'AMD GPU {i}'} for i in range(gpu_count)]
-                        return
-
-            drm_path = '/sys/class/drm'
-            for device in os.listdir(drm_path):
-                device_path = os.path.join(drm_path, device)
-                vendor_path = os.path.join(device_path, 'device', 'vendor')
-                if os.path.exists(vendor_path):
-                    with open(vendor_path) as f:
-                        if f.read().strip() == '0x1002':
-                            name = "AMD GPU"
-                            uevent_path = os.path.join(device_path, 'device', 'uevent')
-                            if os.path.exists(uevent_path):
-                                with open(uevent_path) as f:
-                                    for line in f:
-                                        if line.startswith('PCI_SLOT_NAME'):
-                                            name = f"AMD GPU ({line.split('=')[1].strip()})"
-                                            break
-                            cls._device_info.append({'name': name})
-        except Exception:
-            cls._device_info = []
+        import pyamdgpuinfo
+        count = pyamdgpuinfo.detect_gpus()
+        if count > 0:
+            for i in range(count):
+                gpu = pyamdgpuinfo.get_gpu(i)
+                cls._device_info.append({
+                    'name': getattr(gpu, 'name', None) or gpu.__class__.__name__,
+                    'vram_size': getattr(gpu, 'vram_size', None),
+                })
+            return
+        else:
+            warnings.warn("ROCm is not installed, AMD GPU is not available now")
 
     @classmethod
     def _init_mac(cls) -> None:
@@ -190,14 +150,11 @@ class AMDGPUInfo(GPUInfo):
                 gpu = self._gpu_list.At(self._device_id)
                 return str(gpu.Name())
         elif system == "Linux":
-            try:
+            with self._lock:
                 import pyamdgpuinfo
                 gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                name = getattr(gpu, 'name', None)
-                if name:
-                    return name
-            except Exception:
-                pass
+                return gpu.name
+                
         info = self._get_device_info()
         return info.get('name', 'Unknown AMD GPU')
 
@@ -207,10 +164,7 @@ class AMDGPUInfo(GPUInfo):
             with self._lock:
                 gpu = self._gpu_list.At(self._device_id)
                 uid = gpu.UniqueId()
-                try:
-                    return uuid.UUID(int=uid)
-                except (ValueError, AttributeError):
-                    pass
+                return uuid.UUID(int=uid)
         return None
 
     def _fetch_serial(self) -> Optional[str]:
@@ -224,38 +178,36 @@ class AMDGPUInfo(GPUInfo):
                 return f"AMD {gpu.DriverPath()}"
         return None
 
-    def _fetch_memory_info(self) -> tuple[Optional[int], Optional[int]]:
+    def _fetch_memory_info(self) -> Tuple[Optional[int], Optional[int]]:
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                try:
-                    gpu = self._gpu_list.At(self._device_id)
-                    total_mb = self._vram_ranges.get(self._device_id, 0)
-                    if total_mb == 0:
-                        total_mb = gpu.TotalVRAM()
-                    metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
-                    used_mb = metrics.GPUVRAM()
-                    total = int(total_mb * 1024 * 1024)
-                    used = int(used_mb * 1024 * 1024)
-                    return (total, used)
-                except Exception:
-                    return (None, None)
+                gpu = self._gpu_list.At(self._device_id)
+                total_mb = self._vram_ranges.get(self._device_id, 0)
+                if total_mb == 0:
+                    total_mb = gpu.TotalVRAM()
+                metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
+                used_mb = metrics.GPUVRAM()
+                total = int(total_mb * 1024 * 1024)
+                used = int(used_mb * 1024 * 1024)
+                return (total, used)
         elif system == "Linux":
-            try:
+            with self._lock:
                 import pyamdgpuinfo
                 gpu = pyamdgpuinfo.get_gpu(self._device_id)
                 used = int(gpu.query_vram_usage())
                 total = int(getattr(gpu, 'vram_size', 0))
                 return (total, used)
-            except Exception:
-                pass
+
         info = self._get_device_info()
         vram_size = info.get('vram_size')
         if vram_size:
             return (int(vram_size), 0)
+        
         mem_total = info.get('mem_total')
         if mem_total:
             return (mem_total, 0)
+        
         return (None, None)
 
     def _fetch_utilization(self) -> Optional[float]:
@@ -268,42 +220,14 @@ class AMDGPUInfo(GPUInfo):
                 usage = metrics.GPUUsage()
                 return usage / 100.0
         elif system == "Linux":
-            try:
+            with self._lock:
                 import pyamdgpuinfo
                 gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                load = gpu.query_load()
-                if isinstance(load, (int, float)):
-                    return float(load)
-            except Exception:
-                pass
-            return self._fetch_utilization_linux()
+                return float(gpu.query_load())
         elif system == "Darwin":
             return self._fetch_utilization_mac()
         else:
             raise RuntimeError(f"unsupported system {system}")
-
-    def _fetch_utilization_linux(self) -> float:
-        if not os.path.exists('/opt/rocm/bin/rocm-smi'):
-            raise RuntimeError("cannot fetch load of current AMD GPU")
-
-        result = subprocess.run(
-            ['/opt/rocm/bin/rocm-smi', '-d', str(self._device_id), '--showuse'],
-            capture_output=True, text=True, timeout=5, check=True
-        )
-
-        output = result.stdout.strip()
-        for line in output.split('\n'):
-            if 'GPU use' not in line and 'GPU Utilization' not in line:
-                continue
-
-            import re
-            match = re.search(r'(\d+)%', line)
-            if not match:
-                continue
-
-            return int(match.group(1)) / 100.0
-
-        raise RuntimeError("cannot fetch load of current AMD GPU")
 
     def _fetch_utilization_mac(self) -> float:
         result = subprocess.run(
@@ -339,11 +263,10 @@ class AMDGPUInfo(GPUInfo):
                 temp = int(metrics.GPUTemperature())
                 return temp
         elif system == "Linux":
-            import pyamdgpuinfo
-            gpu = pyamdgpuinfo.get_gpu(self._device_id)
-            temp = gpu.query_temperature()
-            if isinstance(temp, (int, float)):
-                return int(temp)
+            with self._lock:
+                import pyamdgpuinfo
+                gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                return float(gpu.query_temperature())
         else:
             raise RuntimeError(f"not supported system: {system}")
 
