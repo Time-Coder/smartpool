@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Dict, List, Tuple, TYPE_CHECKING
 
 import os
+from concurrent.futures import Future
+from typing import TYPE_CHECKING, Dict, List, Tuple
+
 import cv2
 import numpy as np
 from config import COCO_CLASSES
-from concurrent.futures import Future
 
 if TYPE_CHECKING:
     from smartpool import InferSessionPool, Resource
@@ -31,7 +32,7 @@ def preprocess(image_path: str):
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"failed to read image: {image_path}")
-    
+
     blob, scale, pad = letterbox(img)
     blob = blob.astype(np.float32) / 255.0
     blob = np.ascontiguousarray(blob.transpose(2, 0, 1)[np.newaxis, ...])
@@ -77,7 +78,7 @@ def draw_detections(src_img: np.ndarray, output_path: str, detections: List[Dict
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
         cv2.rectangle(src_img, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
         cv2.putText(src_img, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    
+
     cv2.imwrite(output_path, src_img)
 
 

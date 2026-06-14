@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, Optional
 from ..worker import Worker
 
 if TYPE_CHECKING:
-    from concurrent.interpreters import Queue
     import threading
+    from concurrent.interpreters import Queue
 
     from .interpreterpool import InterpreterPool
 
@@ -31,7 +31,7 @@ class InterpreterWorker(Worker):
     @property
     def thread(self)->threading.Thread:
         return self.executor
-    
+
     @property
     def interpreter_pool(self)->InterpreterPool:
         return self.pool

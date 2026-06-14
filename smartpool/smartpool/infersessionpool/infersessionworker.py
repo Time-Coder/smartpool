@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Tuple, Dict, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 from ..worker import Worker
 
 if TYPE_CHECKING:
-    import onnxruntime as ort
     import numpy as np
+    import onnxruntime as ort
+
     from ..task import Task
     from .infersessionpool import InferSessionPool
 
@@ -36,7 +37,7 @@ class InferSessionWorker(Worker):
     @property
     def session(self)->ort.InferenceSession:
         return self.executor
-    
+
     @property
     def infer_session_pool(self)->InferSessionPool:
         return self.pool

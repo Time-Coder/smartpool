@@ -22,6 +22,8 @@ def main(
         help="max number of infer session pool workers to use, 0 to use all available cores"
     ),
 ):
+    import os
+
     print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     print()
@@ -32,28 +34,30 @@ def main(
         print("ONNX Runtime is not installed. Follow https://onnxruntime.ai/docs/install/ instructions to install ONNX Runtime.")
         exit(1)
 
-    import os
-    import time
     import queue
+    import time
     from functools import partial
-    from smartpool import InferSessionPool, Resource, ThreadPool, DataSize, GPUInfo
+
+    from rich.console import Group
+    from rich.live import Live
     from rich.progress import (
         BarColumn,
         Progress,
         TextColumn,
         TimeRemainingColumn,
     )
-    from rich.live import Live
     from rich.text import Text
-    from rich.console import Group
+
+    from smartpool import DataSize, GPUInfo, InferSessionPool, Resource, ThreadPool
 
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
-    
-    from inference import preprocess, postprocess
+
+    from concurrent.futures import Future
+
     from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
     from data_utils import download_dataset, download_model
-    from concurrent.futures import Future
+    from inference import postprocess, preprocess
 
     download_model()
     download_dataset()
@@ -65,7 +69,7 @@ def main(
 
     thread_pool = ThreadPool(max_workers=thread_pool_max_workers)
     infer_session_pool = InferSessionPool(model_path_str, max_workers=session_pool_max_workers)
-    
+
     cpu_res = Resource(
         cpu_cores_in_python=1,
         cpu_cores_out_of_python=1,
@@ -128,7 +132,7 @@ def main(
             infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
             progress.update(infer_submit_progress_task, advance=1)
             infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
-        
+
         for image_path in image_paths:
             update_task_count()
             image_path = str(image_path)
@@ -144,7 +148,7 @@ def main(
 
         for _ in range(n_tasks):
             result_queue.get()
-            
+
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")
     print(f"Output: {OUTPUT_DIR.resolve()}")

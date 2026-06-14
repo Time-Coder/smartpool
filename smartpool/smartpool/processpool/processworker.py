@@ -39,7 +39,7 @@ class ProcessWorker(Worker):
     @property
     def process(self)->mp.Process:
         return self.executor
-    
+
     @property
     def process_pool(self)->ProcessPool:
         return self.pool

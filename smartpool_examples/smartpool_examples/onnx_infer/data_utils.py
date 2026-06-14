@@ -1,3 +1,4 @@
+import contextlib
 import time
 import urllib.error
 import urllib.request
@@ -71,10 +72,9 @@ def _flatten_images():
             for f in list(p.rglob("*")):
                 if f.is_file():
                     f.unlink()
-            try:
+
+            with contextlib.suppress(OSError):
                 p.rmdir()
-            except OSError:
-                pass
 
 
 def download_dataset():

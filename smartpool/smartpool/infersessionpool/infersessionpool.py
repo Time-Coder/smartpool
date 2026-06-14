@@ -8,8 +8,10 @@ from ..pool import Pool
 from .infersessionworker import InferSessionWorker
 
 if TYPE_CHECKING:
-    import onnxruntime as ort
     from concurrent.futures import Future
+
+    import onnxruntime as ort
+
     from ..resource import Resource
     from ..task import Task
     from .model_info import ModelInfo
@@ -48,7 +50,7 @@ class InferSessionPool(Pool):
     @property
     def model_info(self)->ModelInfo:
         return self._model_info
-    
+
     @property
     def session_options(self) -> ort.SessionOptions:
         if self._session_options is None:
@@ -71,7 +73,7 @@ class InferSessionPool(Pool):
         key = self._provider_key(provider)
         self._workers_dict[key] = worker
         return worker
-    
+
     def _add_provider_running_device(self, provider: Tuple[str, Dict[str, Any]])->None:
         provider_name: str = provider[0]
         device_id: int = 0
@@ -103,25 +105,21 @@ class InferSessionPool(Pool):
                 provider_name not in self._not_thread_safe_providers or
                 device_id not in self._not_thread_safe_providers[provider_name]
             )
-        
+
     def _check_providers(self, providers:Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]])->None:
         if providers is None:
             return
-        
-        for provider in providers:
-            if isinstance(provider, str):
-                provider_name = provider
-            else:
-                provider_name = provider[0]
 
+        for provider in providers:
+            provider_name: str = (provider if isinstance(provider, str) else provider[0])
             if provider_name == "CPUExecutionProvider":
                 return
-            
+
         with self._sys_info_lock:
             for gpu_info in self._sys_info.gpu_infos:
                 if gpu_info.onnx_provider(providers):
                     return
-        
+
         raise ValueError(f"all providers are not supported: {providers}")
 
     def submit(
@@ -159,7 +157,7 @@ class InferSessionPool(Pool):
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot submit after shutdown")
-            
+
             self._tasks[task.id] = task
             if not self._try_assign_task(task):
                 self._delayed_tasks.append(task)
@@ -191,7 +189,7 @@ class InferSessionPool(Pool):
 
                 if not has_cpu_provider:
                     continue
-            
+
             devices, _ = self._choose_task_device(task, mode, kill_workers=False)
             for device in devices:
                 if isinstance(device, str):
@@ -215,7 +213,7 @@ class InferSessionPool(Pool):
 
         return False
 
-    def _choose_task_worker(self, task: Task) -> Optional[InferSessionWorker]:        
+    def _choose_task_worker(self, task: Task) -> Optional[InferSessionWorker]:
         provider: Tuple[str, Dict[str, Any]] = task.onnx_provider
         provider_key: str = self._provider_key(provider)
         if not self._can_use_provider(provider):
@@ -239,7 +237,7 @@ class InferSessionPool(Pool):
     def _postprocess_after_task_done(self) -> None:
         if self._shutdown or not self._delayed_tasks:
             return
-        
+
         remaining = []
         for delayed_task in self._delayed_tasks:
             if delayed_task.future.cancelled():

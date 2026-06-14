@@ -86,7 +86,7 @@ class AMDGPUInfo(GPUInfo):
                 })
             return
         else:
-            warnings.warn("ROCm is not installed, AMD GPU is not available now")
+            warnings.warn("ROCm is not installed, AMD GPU is not available now", stacklevel=2)
 
     @classmethod
     def _init_mac(cls) -> None:
@@ -154,7 +154,7 @@ class AMDGPUInfo(GPUInfo):
                 import pyamdgpuinfo
                 gpu = pyamdgpuinfo.get_gpu(self._device_id)
                 return gpu.name
-                
+
         info = self._get_device_info()
         return info.get('name', 'Unknown AMD GPU')
 
@@ -203,11 +203,11 @@ class AMDGPUInfo(GPUInfo):
         vram_size = info.get('vram_size')
         if vram_size:
             return (int(vram_size), 0)
-        
+
         mem_total = info.get('mem_total')
         if mem_total:
             return (mem_total, 0)
-        
+
         return (None, None)
 
     def _fetch_utilization(self) -> Optional[float]:

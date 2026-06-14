@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     import threading
     from concurrent.futures import Future
 
-    from .sysinfo import SysInfo
     from .gpuinfo import GPUInfoSnapshot
+    from .sysinfo import SysInfo
     from .task import Task
     from .utils import QueueLike
     from .worker import Worker
@@ -140,7 +140,7 @@ class Pool(ABC):
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot submit after shutdown")
-            
+
             self._tasks[task.id] = task
             if not self._try_assign_task(task):
                 self._delayed_tasks.append(task)
@@ -157,7 +157,7 @@ class Pool(ABC):
     def task_count_on_device(self, device:str)->int:
         with self._lock:
             return sum(1 for task in self._tasks.values() if task.device == device)
-        
+
     def task_count_with_provider(self, provider:Union[str, Tuple[str, Dict[str, Any]]])->int:
         with self._lock:
             count: int = 0
@@ -165,7 +165,7 @@ class Pool(ABC):
                 task_provider = task.onnx_provider
                 if task_provider is None:
                     continue
-                
+
                 task_provider_name: str = task_provider[0]
                 task_provider_device_id: int = 0
                 if "device_id" in task_provider[1]:
@@ -188,7 +188,7 @@ class Pool(ABC):
     def _check_args(self, func:Optional[Callable[..., Any]], args:Tuple[Any], kwargs:Dict[str, Any]) -> None:
         if func is None:
             return
-        
+
         import inspect
 
         signature: inspect.Signature = inspect.signature(func)
@@ -268,7 +268,7 @@ class Pool(ABC):
     @staticmethod
     def _updating_sysinfo()->None:
         from .worker import Worker
-        
+
         while True:
             Pool._sys_info.update_cpu_percent()
 
@@ -533,9 +533,8 @@ class Pool(ABC):
                 if gpu.n_cores_free < res.gpu_cores:
                     continue
 
-                if self._use_onnx:
-                    if not gpu.onnx_provider(task.user_providers):
-                        continue
+                if self._use_onnx and not gpu.onnx_provider(task.user_providers):
+                    continue
 
                 available_gpus.append(gpu)
 
@@ -605,6 +604,7 @@ class Pool(ABC):
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         pass
 
+    @abstractmethod
     def _put_task(self, task:Task)->None:
         pass
 

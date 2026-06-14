@@ -140,7 +140,7 @@ class NvidiaGPUInfo(GPUInfo):
         with self._lock:
             try:
                 return pynvml.nvmlDeviceGetNumGpuCores(self._get_handle())
-            except Exception:
+            except Exception as e:
                 import pyopencl as cl
                 platforms = cl.get_platforms()
                 for plat in platforms:
@@ -153,4 +153,4 @@ class NvidiaGPUInfo(GPUInfo):
                         device = devices[self._device_id]
                         return device.max_compute_units * device.max_work_group_size
 
-                raise RuntimeError("cannot fetch num cores of current NVIDIA GPU")
+                raise RuntimeError("cannot fetch num cores of current NVIDIA GPU") from e

@@ -29,7 +29,7 @@ class ThreadWorker(Worker):
     @property
     def thread(self)->threading.Thread:
         return self.executor
-    
+
     @property
     def thread_pool(self)->ThreadPool:
         return self.pool

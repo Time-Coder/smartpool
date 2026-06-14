@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
     import onnx
@@ -42,31 +42,31 @@ class ModelInfo:
     @property
     def model_path(self)->str:
         return self._model_path
-    
+
     @property
     def model_name(self)->str:
         return self._model_name
-    
+
     @property
     def file_size(self)->int:
         self.load()
         return self._file_size
-    
+
     @property
     def file_mtime(self)->float:
         self.load()
         return self._file_mtime
-    
+
     @property
     def inputs(self)->Dict[str, NodeInfo]:
         self.load()
         return self._inputs
-    
+
     @property
     def outputs(self)->Dict[str, NodeInfo]:
         self.load()
         return self._outputs
-    
+
     @property
     def signature(self)->inspect.Signature:
         self.load()
@@ -86,7 +86,7 @@ class ModelInfo:
 
             if self._file_mtime == mtime:
                 return
-            
+
         if not os.path.isfile(self._model_path):
             raise FileNotFoundError(self._model_path)
 
@@ -97,7 +97,7 @@ class ModelInfo:
         self._file_size = os.path.getsize(self._model_path)
         if self._file_size <= 0:
             raise ValueError("model file size is zero")
-        
+
         self._file_mtime = os.path.getmtime(self._model_path)
 
         import onnx
@@ -161,7 +161,7 @@ class ModelInfo:
     def check_outputs(self, output_names):
         if output_names is None:
             return
-        
+
         for name in output_names:
             if name not in self.outputs:
                 raise ValueError(f"model '{self.model_name}' has no output named '{name}'. valid outputs: {self.outputs.keys()}")

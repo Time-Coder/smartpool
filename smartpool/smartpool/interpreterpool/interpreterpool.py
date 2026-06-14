@@ -23,6 +23,7 @@ class InterpreterPool(Pool):
         use_torch:bool=False
     ):
         import concurrent.interpreters as interpreters
+
         from .interpreterworker import InterpreterWorker
 
         Pool.__init__(

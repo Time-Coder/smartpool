@@ -138,7 +138,7 @@ class MetaGPUInfos(type):
             count = gpu_class.get_device_count()
             if count == 0:
                 continue
-            
+
             for i in range(count):
                 gpu = gpu_class(i, index)
                 MetaGPUInfos.__gpu_infos.append(gpu)

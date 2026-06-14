@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import uuid
 from typing import (
@@ -17,6 +16,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
+
     from .gpuinfo import GPUInfoSnapshot
     from .resource import Resource
     from .worker import Worker
@@ -97,7 +97,7 @@ class Task:
         from .pool import Pool
         with Pool._sys_info_lock:
             gpuinfo_snapshot = Pool._sys_info.gpu_infos[self.gpu_index]
-            
+
         self._onnx_provider = gpuinfo_snapshot.onnx_provider(self.user_providers)
         return self._onnx_provider
 
@@ -132,7 +132,7 @@ class Task:
                 self._device_prefix = device
 
         return self._device_id
-    
+
     @property
     def device_prefix(self)->str:
         if self._device_prefix is not None:

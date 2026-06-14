@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Optional, Type, Tuple, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 
 class GPUVendor(Enum):
@@ -73,7 +73,7 @@ class GPUInfoSnapshot:
 
             if providers is None:
                 return self._onnx_provider
-            
+
             for provider in providers:
                 if isinstance(provider, str):
                     if provider == provider_name:
@@ -93,7 +93,7 @@ class GPUInfoSnapshot:
                         user_provider_options["device_id"] = options["device_id"]
 
                     return (user_provider_name, user_provider_options)
-        
+
         return None
 
 
@@ -212,7 +212,7 @@ class GPUInfo(ABC):
     def supported_onnx_providers(cls)->List[str]:
         cls._init_onnx_providers()
         return cls._supported_onnx_providers
-    
+
     def onnx_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
         if providers is None and self._onnx_provider is not None:
             return self._onnx_provider
@@ -233,7 +233,7 @@ class GPUInfo(ABC):
 
             if providers is None:
                 return self._onnx_provider
-            
+
             for provider in providers:
                 if isinstance(provider, str):
                     if provider == provider_name:
@@ -253,7 +253,7 @@ class GPUInfo(ABC):
                         user_provider_options["device_id"] = options["device_id"]
 
                     return (user_provider_name, user_provider_options)
-        
+
         return None
 
     @property

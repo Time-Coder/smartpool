@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Uni
 
 if TYPE_CHECKING:
     import multiprocessing as mp
+
     import onnxruntime as ort
 
     from .pool import Pool
