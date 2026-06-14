@@ -15,4 +15,5 @@ dataset
 *.jpg
 .ruff_cache
 .pytest_cache
+*.code-workspace
 __trtcache__
