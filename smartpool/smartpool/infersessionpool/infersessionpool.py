@@ -131,6 +131,9 @@ class InferSessionPool(Pool):
         gpu_mode_res: Optional[Resource] = None,
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
     ) -> Future:
+        if self._shutdown:
+            raise RuntimeError("cannot submit after shutdown")
+        
         from ..resource import Resource
         from ..task import Task
 
@@ -155,17 +158,11 @@ class InferSessionPool(Pool):
         self._validate_resource_feasibility(task)
 
         with self._lock:
-            if self._shutdown:
-                raise RuntimeError("cannot submit after shutdown")
-
             self._tasks[task.id] = task
-            if not self._try_assign_task(task):
-                self._delayed_tasks.append(task)
-
-        return task.future
+            return self._submit(task)
 
     def _try_assign_task(self, task: Task) -> bool:
-        if self._running_count >= self._max_workers:
+        if not task.ready_to_run or self._running_count >= self._max_workers:
             return False
 
         gpu_res = task.gpu_mode_res
@@ -208,7 +205,6 @@ class InferSessionPool(Pool):
                     continue
 
             if task.device is not None:
-                self._put_task(task)
                 return True
 
         return False
@@ -233,21 +229,6 @@ class InferSessionPool(Pool):
         worker: InferSessionWorker = task.worker
         worker.is_working = True
         worker.add_task(task)
-
-    def _postprocess_after_task_done(self) -> None:
-        if self._shutdown or not self._delayed_tasks:
-            return
-
-        remaining = []
-        for delayed_task in self._delayed_tasks:
-            if delayed_task.future.cancelled():
-                self._tasks.pop(delayed_task.id, None)
-                continue
-
-            if not self._try_assign_task(delayed_task):
-                remaining.append(delayed_task)
-
-        self._delayed_tasks = remaining
 
     def _take_resource(self, task: Task) -> None:
         with self._sys_info_lock:

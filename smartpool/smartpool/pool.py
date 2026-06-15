@@ -106,6 +106,9 @@ class Pool(ABC):
         use_torch: Optional[bool] = None,
         device_changeable: bool = False
     )->Future:
+        if self._shutdown:
+            raise RuntimeError("cannot submit after shutdown")
+        
         if args is None:
             args = []
 
@@ -138,21 +141,28 @@ class Pool(ABC):
         self._validate_resource_feasibility(task)
 
         with self._lock:
-            if self._shutdown:
-                raise RuntimeError("cannot submit after shutdown")
-
             self._tasks[task.id] = task
-            if not self._try_assign_task(task):
-                self._delayed_tasks.append(task)
-                return task.future
+            return self._submit(task, append_to_delay=True)
 
-            self._put_task(task)
-            if self._result_queue is not None and self._result_thread is None:
-                import threading
-                self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
-                self._result_thread.start()
+    def _submit(self, task: Task, append_to_delay: bool) -> Future:
+        if not self._try_assign_task(task):            
+            if append_to_delay:
+                self._delayed_tasks.append(task)
 
             return task.future
+
+        self._put_task(task)
+        try:
+            self._delayed_tasks.remove(task)
+        except ValueError:
+            pass
+
+        if self._result_queue is not None and self._result_thread is None:
+            import threading
+            self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
+            self._result_thread.start()
+
+        return task.future
 
     def task_count_on_device(self, device:str)->int:
         with self._lock:
@@ -199,6 +209,9 @@ class Pool(ABC):
             raise TypeError(formatted_msg) from None
 
     def _try_assign_task(self, task: Task) -> bool:
+        if not task.ready_to_run:
+            return False
+        
         gpu_res = task.gpu_mode_res
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             self._choose_task_worker(task, gpu_res)
@@ -410,7 +423,7 @@ class Pool(ABC):
     def _on_task_done(self, task_id:str, success:bool, result:Any)->None:
         with self._lock:
             task = self._tasks.pop(task_id)
-            worker:Worker = task.worker
+            worker: Worker = task.worker
             worker.is_working = False
             worker.n_finished_tasks += 1
             if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:

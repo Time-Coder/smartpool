@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import sys
 import uuid
+import threading
+from functools import partial
+from concurrent.futures import Future
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -15,11 +18,10 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from concurrent.futures import Future
-
     from .gpuinfo import GPUInfoSnapshot
     from .resource import Resource
     from .worker import Worker
+    from .pool import Pool
 
 
 class Task:
@@ -27,13 +29,13 @@ class Task:
     _torch_gpu_backend: Optional[str] = None
 
     def __init__(
-        self, func: Union[Callable[..., Any], str], args: Tuple[Any, ...], kwargs: Dict[str, Any],
+        self, pool: Pool, func: Union[Callable[..., Any], str], args: Tuple[Any, ...], kwargs: Dict[str, Any],
         cpu_mode_res: Resource, gpu_mode_res: Resource,
         use_torch: bool, device_changeable: bool, calculate_module_deps: bool
     ):
         self.id: str = str(uuid.uuid4())
         self.func: Union[Callable[..., Any], str] = func
-        self.args: Tuple[Any] = args
+        self.args: List[Any] = list(args)
         self.kwargs: Dict[str, Any] = kwargs
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
@@ -44,6 +46,7 @@ class Task:
         self.module_deps: Dict[str, int] = {}
         self.user_providers: Optional[List[str]] = None
         self.output_names: List[str] = []
+        self.ready_to_run: bool = True
 
         if calculate_module_deps:
             from .module_deps import module_deps
@@ -58,12 +61,49 @@ class Task:
         self.mem_before_enter: int = 0
         self._onnx_provider: Optional[Tuple[str, Dict]] = None
         self._future: Optional[Future] = None
+        self.dep_futures: Dict[Future, Union[str, int]] = {}
+        self.finished_dep_futures_count_lock: threading.Lock = threading.Lock()
+        self.finished_dep_futures_count: int = 0
+
+        for i, arg in enumerate(args):
+            if isinstance(arg, Future):
+                self.dep_futures[arg] = i
+
+        for key, arg in kwargs.items():
+            if isinstance(arg, Future):
+                self.dep_futures[arg] = key
+
+        if self.dep_futures:
+            self.ready_to_run = False
+            callback = partial(self._dep_future_done_callback, pool)
+            for dep_future in self.dep_futures:
+                dep_future.add_done_callback(callback)
+
+    def _dep_future_done_callback(self, pool: Pool, future: Future) -> None:
+        try:
+            with self.finished_dep_futures_count_lock:
+                self.finished_dep_futures_count += 1
+
+                result = future.result()
+                future_key = self.dep_futures[future]
+                if isinstance(future_key, int):
+                    self.args[future_key] = result
+                else:
+                    self.kwargs[future_key] = result
+
+                if self.finished_dep_futures_count == len(self.dep_futures):
+                    self.ready_to_run = True
+                    with pool._lock:
+                        pool._submit(self, append_to_delay=False)
+        except BaseException as e:
+            self.future.set_exception(e)
+            with pool._lock:
+                if self.id in pool._tasks:
+                    pool._tasks.pop(self.id)
 
     @property
     def future(self)->Future:
         if self._future is None:
-            from concurrent.futures import Future
-
             self._future = Future()
 
         return self._future
