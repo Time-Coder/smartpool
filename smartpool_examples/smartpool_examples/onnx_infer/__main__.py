@@ -136,11 +136,11 @@ def main(
         for image_path in image_paths:
             update_task_count()
             image_path = str(image_path)
-            preprocess_future: Future = thread_pool.submit(
+            img, blob, scale, pad = thread_pool.submit(
                 preprocess,
                 args=(image_path,),
                 cpu_mode_res=cpu_res
-            )
+            ).unpack(4)
             progress.update(preprocess_submit_progress_task, advance=1)
             preprocess_future.add_done_callback(partial(preprocess_done_callback, image_path))
 

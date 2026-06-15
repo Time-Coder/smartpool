@@ -4,7 +4,8 @@ import sys
 import uuid
 import threading
 from functools import partial
-from concurrent.futures import Future
+from concurrent.futures import Future as _BaseFuture
+from .futures import Future
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -66,11 +67,11 @@ class Task:
         self.finished_dep_futures_count: int = 0
 
         for i, arg in enumerate(args):
-            if isinstance(arg, Future):
+            if isinstance(arg, _BaseFuture):
                 self.dep_futures[arg] = i
 
         for key, arg in kwargs.items():
-            if isinstance(arg, Future):
+            if isinstance(arg, _BaseFuture):
                 self.dep_futures[arg] = key
 
         if self.dep_futures:
