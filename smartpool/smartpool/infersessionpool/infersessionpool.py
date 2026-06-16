@@ -48,29 +48,29 @@ class InferSessionPool(Pool):
         self.print_info: bool = False
 
     @classmethod
-    def instance(cls, model_path:str, config_key:str):
+    def instance(cls, model_path:str, pool:str)->InferSessionPool:
         model_path = os.path.abspath(model_path).replace("\\", "/")
 
-        if (model_path, config_key) in Pool._instance_dict[cls]:
-            return Pool._instance_dict[cls][model_path, config_key]
+        if (model_path, pool) in Pool._instance_dict[cls]:
+            return Pool._instance_dict[cls][model_path, pool]
 
-        if config_key not in Pool._instance_config[cls]:
+        if pool not in Pool._instance_config[cls]:
             args = ()
             kwargs = {}
         else:
-            args, kwargs = Pool._instance_config[cls][config_key]
+            args, kwargs = Pool._instance_config[cls][pool]
 
-        Pool._instance_dict[cls][model_path, config_key] = cls(model_path, *args, **kwargs)
-        return Pool._instance_dict[cls][model_path, config_key]
+        Pool._instance_dict[cls][model_path, pool] = cls(model_path, *args, **kwargs)
+        return Pool._instance_dict[cls][model_path, pool]
 
     @staticmethod
     def run_async(
         model_path: str,
         args: Optional[Tuple[Any, ...]]=None,
         kwargs: Optional[Dict[str, Any]]=None,
-        config_key: str="default", **submit_kwargs
+        pool: str="default", **submit_kwargs
     )->Future:
-        infer_session_pool = InferSessionPool.instance(model_path, config_key)
+        infer_session_pool = InferSessionPool.instance(model_path, pool)
         return infer_session_pool.submit(args=args, kwargs=kwargs, **submit_kwargs)
 
     @property

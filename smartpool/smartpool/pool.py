@@ -149,16 +149,19 @@ class Pool(ABC):
             return self._submit(task, append_to_delay=True)
 
     def _submit(self, task: Task, append_to_delay: bool) -> Future:
-        if not self._try_assign_task(task):            
-            if append_to_delay:
-                self._delayed_tasks.append(task)
-
-            return task.future
-
         if task.future.done():
             if task.id in self._tasks:
                 del self._tasks[task.id]
                 
+            return task.future
+        
+        if task.worker is not None:
+            return task.future
+        
+        if not self._try_assign_task(task):            
+            if append_to_delay:
+                self._delayed_tasks.append(task)
+
             return task.future
 
         self._put_task(task)
@@ -175,31 +178,32 @@ class Pool(ABC):
         return task.future
 
     @classmethod
-    def config(cls, config_key:str, *args, **kwargs):
-        Pool._instance_config[cls][config_key] = (args, kwargs)
+    def config(cls, pool:str, *args, **kwargs):
+        Pool._instance_config[cls][pool] = (args, kwargs)
 
     @classmethod
-    def instance(cls, config_key:str):
-        if config_key in Pool._instance_dict[cls]:
-            return Pool._instance_dict[cls][config_key]
+    def instance(cls, pool:str):
+        if pool in Pool._instance_dict[cls]:
+            return Pool._instance_dict[cls][pool]
 
-        if config_key not in Pool._instance_config[cls]:
+        if pool not in Pool._instance_config[cls]:
             args = ()
             kwargs = {}
         else:
             args, kwargs = Pool._instance_config[cls]
 
-        Pool._instance_dict[cls][config_key] = cls(*args, **kwargs)
-        return Pool._instance_dict[cls][config_key]
+        Pool._instance_dict[cls][pool] = cls(*args, **kwargs)
+        return Pool._instance_dict[cls][pool]
 
     @classmethod
-    def task(cls, func:Callable=None, *, config_key:str="default", **submit_kwargs):
+    def task(cls, func:Callable=None, *, pool:str="default", **submit_kwargs):
 
         def decorator(func):
             import functools
+
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                pool_instance = cls.instance(config_key)
+                pool_instance = cls.instance(pool)
                 return pool_instance.submit(func, args=args, kwargs=kwargs, **submit_kwargs)
             
             return wrapper

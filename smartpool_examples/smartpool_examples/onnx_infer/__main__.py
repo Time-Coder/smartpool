@@ -90,8 +90,8 @@ def main(
         n_tasks = len(image_paths)
         preprocess_start_progress_task: TaskID = progress.add_task("preprocess start", total=n_tasks)
         preprocess_done_progress_task: TaskID = progress.add_task("preprocess done", total=n_tasks)
-        # infer_start_progress_task = progress.add_task("infer start", total=n_tasks)
-        # infer_done_progress_task = progress.add_task("infer done", total=n_tasks)
+        infer_start_progress_task = progress.add_task("infer start", total=n_tasks)
+        infer_done_progress_task = progress.add_task("infer done", total=n_tasks)
         postprocess_start_progress_task: TaskID = progress.add_task("postprocess start", total=n_tasks)
         postprocess_done_progress_task: TaskID = progress.add_task("postprocess done", total=n_tasks)
 
@@ -107,12 +107,22 @@ def main(
         for image_path in image_paths:
             # update_task_count()
             image_path = str(image_path)
-            img, blob, scale, pad = preprocess(image_path, progress, preprocess_start_progress_task, preprocess_done_progress_task).unpack(4)
+            preprocess_future = preprocess(image_path)
+            preprocess_future.add_start_callback(lambda: progress.update(preprocess_start_progress_task, advance=1))
+            preprocess_future.add_done_callback(lambda future: progress.update(preprocess_done_progress_task, advance=1))
+
+            img, blob, scale, pad = preprocess_future.unpack(4)
             infer_future = InferSessionPool.run_async(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+            infer_future.add_start_callback(lambda: progress.update(infer_start_progress_task, advance=1))
+            infer_future.add_done_callback(lambda future: progress.update(infer_done_progress_task, advance=1))
+
             outputs = infer_future[0]
             output_path = output_dir_str + "/" + os.path.basename(image_path)
-            future = postprocess(img, outputs, output_path, scale, pad, progress, postprocess_start_progress_task, postprocess_done_progress_task)
-            futures.append(future)
+            postprocess_future = postprocess(img, outputs, output_path, scale, pad)
+            postprocess_future.add_start_callback(lambda: progress.update(postprocess_start_progress_task, advance=1))
+            postprocess_future.add_done_callback(lambda future: progress.update(postprocess_done_progress_task, advance=1))
+            
+            futures.append(postprocess_future)
 
         for future in as_completed(futures):
             future.result()

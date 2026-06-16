@@ -4,7 +4,6 @@ import os
 from typing import Dict, List, Tuple
 
 import cv2
-from rich.progress import Progress, TaskID
 import numpy as np
 from config import COCO_CLASSES
 
@@ -26,9 +25,9 @@ def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
     return img, r, (left, top)
 
+
 @ThreadPool.task
-def preprocess(image_path: str, progress: Progress, start_task_id: TaskID, done_task_id: TaskID):
-    progress.update(start_task_id, advance=1)
+def preprocess(image_path: str):
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"failed to read image: {image_path}")
@@ -36,8 +35,6 @@ def preprocess(image_path: str, progress: Progress, start_task_id: TaskID, done_
     blob, scale, pad = letterbox(img)
     blob = blob.astype(np.float32) / 255.0
     blob = np.ascontiguousarray(blob.transpose(2, 0, 1)[np.newaxis, ...])
-    progress.update(done_task_id, advance=1)
-
     return img, blob, scale, pad
 
 
@@ -86,10 +83,8 @@ def draw_detections(src_img: np.ndarray, output_path: str, detections: List[Dict
 @ThreadPool.task
 def postprocess(
     src_img:np.ndarray, output: np.ndarray, output_path:str,
-    scale: float, pad: Tuple[int, int],
-    progress: Progress, start_task_id: TaskID, done_task_id: TaskID
+    scale: float, pad: Tuple[int, int]
 ):
-    progress.update(start_task_id, advance=1)
     conf_thresh: float = 0.5
     iou_thresh: float = 0.5
     orig_shape = (src_img.shape[0], src_img.shape[1])
@@ -129,7 +124,6 @@ def postprocess(
     ]
 
     draw_detections(src_img, output_path, detections)
-    progress.update(done_task_id, advance=1)
 
 def infer_task(image_path:str, output_dir_path:str, infer_session_pool: InferSessionPool, cpu_res: Resource, gpu_res: Resource)->None:
     img, blob, scale, pad = preprocess(image_path)
