@@ -8,7 +8,7 @@ from ..pool import Pool
 from .infersessionworker import InferSessionWorker
 
 if TYPE_CHECKING:
-    from concurrent.futures import Future
+    from ..futures import Future
 
     import onnxruntime as ort
 
@@ -46,6 +46,32 @@ class InferSessionPool(Pool):
         self._running_count_lock: threading.Lock = threading.Lock()
         self._running_count: int = 0
         self.print_info: bool = False
+
+    @classmethod
+    def instance(cls, model_path:str, config_key:str):
+        model_path = os.path.abspath(model_path).replace("\\", "/")
+
+        if (model_path, config_key) in Pool._instance_dict[cls]:
+            return Pool._instance_dict[cls][model_path, config_key]
+
+        if config_key not in Pool._instance_config[cls]:
+            args = ()
+            kwargs = {}
+        else:
+            args, kwargs = Pool._instance_config[cls][config_key]
+
+        Pool._instance_dict[cls][model_path, config_key] = cls(model_path, *args, **kwargs)
+        return Pool._instance_dict[cls][model_path, config_key]
+
+    @staticmethod
+    def run_async(
+        model_path: str,
+        args: Optional[Tuple[Any, ...]]=None,
+        kwargs: Optional[Dict[str, Any]]=None,
+        config_key: str="default", **submit_kwargs
+    )->Future:
+        infer_session_pool = InferSessionPool.instance(model_path, config_key)
+        return infer_session_pool.submit(args=args, kwargs=kwargs, **submit_kwargs)
 
     @property
     def model_info(self)->ModelInfo:
@@ -148,7 +174,7 @@ class InferSessionPool(Pool):
             gpu_mode_res = cpu_mode_res
 
         task = Task(
-            func=None, args=(), kwargs=validated_kwargs,
+            pool=self, func=None, args=(), kwargs=validated_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res,
             use_torch=False, device_changeable=False,
             calculate_module_deps=False,
@@ -159,7 +185,7 @@ class InferSessionPool(Pool):
 
         with self._lock:
             self._tasks[task.id] = task
-            return self._submit(task)
+            return self._submit(task, append_to_delay=True)
 
     def _try_assign_task(self, task: Task) -> bool:
         if not task.ready_to_run or self._running_count >= self._max_workers:

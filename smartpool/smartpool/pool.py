@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import weakref
+from collections import defaultdict
 from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
@@ -19,8 +20,8 @@ from .resource import Resource
 
 if TYPE_CHECKING:
     import threading
-    from concurrent.futures import Future
-
+    
+    from .futures import Future
     from .gpuinfo import GPUInfoSnapshot
     from .sysinfo import SysInfo
     from .task import Task
@@ -30,10 +31,12 @@ if TYPE_CHECKING:
 
 class Pool(ABC):
 
-    _sys_info_lock:Optional[threading.Lock] = None
-    _sys_info:Optional[SysInfo] = None
-    _updating_sysinfo_thread:Optional[threading.Thread] = None
-    _instances:weakref.WeakSet[Pool] = weakref.WeakSet()
+    _sys_info_lock: Optional[threading.Lock] = None
+    _sys_info: Optional[SysInfo] = None
+    _updating_sysinfo_thread: Optional[threading.Thread] = None
+    _instances: weakref.WeakSet[Pool] = weakref.WeakSet()
+    _instance_config: Dict[Type[Pool], Dict[str, Tuple[Tuple[Any, ...], Dict[str, Any]]]] = defaultdict(dict)
+    _instance_dict: Dict[Type[Pool], Dict[str, Pool]] = defaultdict(dict)
 
     def __init__(
         self, max_workers: int,
@@ -129,6 +132,7 @@ class Pool(ABC):
         from .task import Task
 
         task = Task(
+            pool=self,
             func=func,
             args=args,
             kwargs=kwargs,
@@ -151,6 +155,12 @@ class Pool(ABC):
 
             return task.future
 
+        if task.future.done():
+            if task.id in self._tasks:
+                del self._tasks[task.id]
+                
+            return task.future
+
         self._put_task(task)
         try:
             self._delayed_tasks.remove(task)
@@ -163,6 +173,41 @@ class Pool(ABC):
             self._result_thread.start()
 
         return task.future
+
+    @classmethod
+    def config(cls, config_key:str, *args, **kwargs):
+        Pool._instance_config[cls][config_key] = (args, kwargs)
+
+    @classmethod
+    def instance(cls, config_key:str):
+        if config_key in Pool._instance_dict[cls]:
+            return Pool._instance_dict[cls][config_key]
+
+        if config_key not in Pool._instance_config[cls]:
+            args = ()
+            kwargs = {}
+        else:
+            args, kwargs = Pool._instance_config[cls]
+
+        Pool._instance_dict[cls][config_key] = cls(*args, **kwargs)
+        return Pool._instance_dict[cls][config_key]
+
+    @classmethod
+    def task(cls, func:Callable=None, *, config_key:str="default", **submit_kwargs):
+
+        def decorator(func):
+            import functools
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                pool_instance = cls.instance(config_key)
+                return pool_instance.submit(func, args=args, kwargs=kwargs, **submit_kwargs)
+            
+            return wrapper
+        
+        if func is not None:
+            return decorator(func)
+        
+        return decorator
 
     def task_count_on_device(self, device:str)->int:
         with self._lock:

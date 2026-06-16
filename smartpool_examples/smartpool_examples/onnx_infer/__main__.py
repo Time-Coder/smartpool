@@ -40,6 +40,7 @@ def main(
 
     from rich.console import Group
     from rich.live import Live
+    from rich.progress import TaskID
     from rich.progress import (
         BarColumn,
         Progress,
@@ -53,7 +54,7 @@ def main(
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
 
-    from concurrent.futures import Future
+    from concurrent.futures import as_completed
 
     from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
     from data_utils import download_dataset, download_model
@@ -66,9 +67,6 @@ def main(
     image_paths = sorted(DATASET_DIR.glob("*.jpg"))
     model_path_str = str(MODEL_PATH.resolve())
     output_dir_str = str(OUTPUT_DIR.resolve())
-
-    thread_pool = ThreadPool(max_workers=thread_pool_max_workers)
-    infer_session_pool = InferSessionPool(model_path_str, max_workers=session_pool_max_workers)
 
     cpu_res = Resource(
         cpu_cores_in_python=1,
@@ -83,8 +81,6 @@ def main(
         gpu_mem=200*DataSize.MB
     )
 
-    result_queue = queue.Queue()
-
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -92,62 +88,34 @@ def main(
         TimeRemainingColumn(),
     ) as progress, Live(refresh_per_second=4) as live:
         n_tasks = len(image_paths)
-        preprocess_submit_progress_task = progress.add_task("preprocess submit", total=n_tasks)
-        preprocess_done_progress_task = progress.add_task("preprocess done", total=n_tasks)
-        infer_submit_progress_task = progress.add_task("infer submit", total=n_tasks)
-        infer_done_progress_task = progress.add_task("infer done", total=n_tasks)
-        postprocess_submit_progress_task = progress.add_task("postprocess submit", total=n_tasks)
-        postprocess_done_progress_task = progress.add_task("postprocess done", total=n_tasks)
+        preprocess_start_progress_task: TaskID = progress.add_task("preprocess start", total=n_tasks)
+        preprocess_done_progress_task: TaskID = progress.add_task("preprocess done", total=n_tasks)
+        # infer_start_progress_task = progress.add_task("infer start", total=n_tasks)
+        # infer_done_progress_task = progress.add_task("infer done", total=n_tasks)
+        postprocess_start_progress_task: TaskID = progress.add_task("postprocess start", total=n_tasks)
+        postprocess_done_progress_task: TaskID = progress.add_task("postprocess done", total=n_tasks)
 
-        def update_task_count():
-            lines = []
-            for provider in GPUInfo.supported_onnx_providers():
-                lines.append(Text(f"task count infer with {provider}: {infer_session_pool.task_count_with_provider(provider)}"))
-            live.update(Group(*lines))
-
-        def postprocess_done_callback(postprocess_future: Future):
-            update_task_count()
-            postprocess_future.result()
-            progress.update(postprocess_done_progress_task, advance=1)
-            result_queue.put(1)
-
-        def infer_done_callback(image_path, img, scale, pad, infer_future: Future):
-            update_task_count()
-            outputs = infer_future.result()[0]
-            progress.update(infer_done_progress_task, advance=1)
-
-            output_path = output_dir_str + "/" + os.path.basename(image_path)
-            postprocess_future: Future = thread_pool.submit(
-                postprocess,
-                args=(img, outputs, output_path, scale, pad),
-                cpu_mode_res=cpu_res
-            )
-            progress.update(postprocess_submit_progress_task, advance=1)
-            postprocess_future.add_done_callback(postprocess_done_callback)
-
-        def preprocess_done_callback(image_path, preprocess_future: Future):
-            update_task_count()
-            progress.update(preprocess_done_progress_task, advance=1)
-            img, blob, scale, pad = preprocess_future.result()
-            infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
-            progress.update(infer_submit_progress_task, advance=1)
-            infer_future.add_done_callback(partial(infer_done_callback, image_path, img, scale, pad))
-
-        for image_path in image_paths:
-            update_task_count()
-            image_path = str(image_path)
-            img, blob, scale, pad = thread_pool.submit(
-                preprocess,
-                args=(image_path,),
-                cpu_mode_res=cpu_res
-            ).unpack(4)
-            progress.update(preprocess_submit_progress_task, advance=1)
-            preprocess_future.add_done_callback(partial(preprocess_done_callback, image_path))
+        # def update_task_count():
+        #     lines = []
+        #     for provider in GPUInfo.supported_onnx_providers():
+        #         lines.append(Text(f"task count infer with {provider}: {infer_session_pool.task_count_with_provider(provider)}"))
+        #     live.update(Group(*lines))
 
         start_time = time.perf_counter()
 
-        for _ in range(n_tasks):
-            result_queue.get()
+        futures = []
+        for image_path in image_paths:
+            # update_task_count()
+            image_path = str(image_path)
+            img, blob, scale, pad = preprocess(image_path, progress, preprocess_start_progress_task, preprocess_done_progress_task).unpack(4)
+            infer_future = InferSessionPool.run_async(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
+            outputs = infer_future[0]
+            output_path = output_dir_str + "/" + os.path.basename(image_path)
+            future = postprocess(img, outputs, output_path, scale, pad, progress, postprocess_start_progress_task, postprocess_done_progress_task)
+            futures.append(future)
+
+        for future in as_completed(futures):
+            future.result()
 
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")

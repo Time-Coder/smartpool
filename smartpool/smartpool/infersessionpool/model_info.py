@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import os
+from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -134,6 +135,9 @@ class ModelInfo:
         if self.inputs:
             import numpy as np
             for name, value in kwargs.items():
+                if isinstance(value, Future):
+                    continue
+
                 if not isinstance(value, np.ndarray):
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
 
