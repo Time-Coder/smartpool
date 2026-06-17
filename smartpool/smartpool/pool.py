@@ -200,11 +200,9 @@ class Pool(ABC):
 
         def decorator(func):
             import functools
+            from .task_wrapper import TaskWrapper
 
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                pool_instance = cls.instance(pool)
-                return pool_instance.submit(func, args=args, kwargs=kwargs, **submit_kwargs)
+            wrapper = functools.wraps(func)(TaskWrapper(func, pool, submit_kwargs))
             
             return wrapper
         

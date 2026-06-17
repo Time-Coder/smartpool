@@ -1,26 +1,33 @@
 from __future__ import annotations
 
 import inspect
+import traceback
 from concurrent.futures import Future as _BaseFuture
-from concurrent.futures._base import PENDING, RUNNING, CANCELLED, CANCELLED_AND_NOTIFIED, FINISHED
-from typing import Any, List
+from concurrent.futures._base import PENDING, CANCELLED, CANCELLED_AND_NOTIFIED, FINISHED
+from typing import Any, List, Callable
 
 
 class Future(_BaseFuture):
     
     def __init__(self):
         _BaseFuture.__init__(self)
-        self._start_callbacks = []
+        self._start_callbacks: List[Callable[[], None]] = []
 
     def _invoke_callbacks(self):
         for callback in self._done_callbacks:
-            callback(self)
+            try:
+                callback(self)
+            except Exception as e:
+                traceback.print_stack()
 
     def _invoke_start_callbackes(self):
         for callback in self._start_callbacks:
-            callback()
+            try:
+                callback()
+            except Exception as e:
+                traceback.print_stack()
 
-    def add_start_callback(self, fn):
+    def add_start_callback(self, fn: Callable[[], None]):
         signature: inspect.Signature = inspect.signature(fn)
         try:
             signature.bind()
@@ -35,7 +42,7 @@ class Future(_BaseFuture):
         
         fn()
 
-    def add_done_callback(self, fn):
+    def add_done_callback(self, fn: Callable[[_BaseFuture], None]):
         signature: inspect.Signature = inspect.signature(fn)
         try:
             signature.bind(self)
