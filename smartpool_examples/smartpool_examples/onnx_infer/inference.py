@@ -7,8 +7,6 @@ import cv2
 import numpy as np
 from config import COCO_CLASSES
 
-from smartpool import Future, ThreadPool, InferSessionPool, Resource
-
 
 def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
     shape = img.shape[:2]
@@ -26,7 +24,6 @@ def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):
     return img, r, (left, top)
 
 
-@ThreadPool.task
 def preprocess(image_path: str):
     img = cv2.imread(image_path)
     if img is None:
@@ -80,7 +77,7 @@ def draw_detections(src_img: np.ndarray, output_path: str, detections: List[Dict
 
     cv2.imwrite(output_path, src_img)
 
-@ThreadPool.task
+
 def postprocess(
     src_img:np.ndarray, output: np.ndarray, output_path:str,
     scale: float, pad: Tuple[int, int]
@@ -95,7 +92,8 @@ def postprocess(
     class_ids = class_scores.argmax(axis=1)
     mask = scores > conf_thresh
     if not mask.any():
-        return []
+        return
+    
     boxes = box_data[mask]
     scores = scores[mask]
     class_ids = class_ids[mask]
@@ -108,7 +106,7 @@ def postprocess(
 
     keep = nms(boxes_xyxy, scores, iou_thresh)
     if not keep:
-        return []
+        return
 
     boxes_xyxy = boxes_xyxy[keep]
     scores = scores[keep]
@@ -124,10 +122,3 @@ def postprocess(
     ]
 
     draw_detections(src_img, output_path, detections)
-
-def infer_task(image_path:str, output_dir_path:str, infer_session_pool: InferSessionPool, cpu_res: Resource, gpu_res: Resource)->None:
-    img, blob, scale, pad = preprocess(image_path)
-    infer_future: Future = infer_session_pool.submit(args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
-    outputs = infer_future.result()[0]
-    output_path = output_dir_path + "/" + os.path.basename(image_path)
-    postprocess(img, outputs, output_path, scale, pad)

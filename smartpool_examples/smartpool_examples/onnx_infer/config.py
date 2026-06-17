@@ -1,12 +1,14 @@
-from pathlib import Path
+import os
 
-PACKAGE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = PACKAGE_DIR / "data" / "models"
-DATASET_DIR = PACKAGE_DIR / "data" / "dataset"
-OUTPUT_DIR = PACKAGE_DIR / "data" / "output"
+
+self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
+DATA_FOLDER = self_folder + "/data"
+MODEL_FOLDER = DATA_FOLDER + "/models"
+DATASET_FOLDER = DATA_FOLDER + "/dataset"
+OUTPUT_FOLDER = DATA_FOLDER + "/output"
 
 MODEL_URL = "https://hf-mirror.com/Kalray/yolov8/resolve/main/yolov8n.onnx"
-MODEL_PATH = MODEL_DIR / "yolov8n.onnx"
+MODEL_PATH = MODEL_FOLDER + "/yolov8n.onnx"
 
 COCO_ZIP_URLS = [
     "http://images.cocodataset.org/zips/val2017.zip",

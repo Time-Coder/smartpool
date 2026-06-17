@@ -6,26 +6,27 @@ if __name__ == "__main__":
     sys.path.append(target_folder)
 
 import typer
+from enum import Enum
 
-app = typer.Typer(help="Use smartpool to do YOLOv8n ONNX inference on COCO val2017 with real-time progress.")
+app = typer.Typer(help="Use different methods to do YOLOv8n ONNX inference on COCO val2017 with real-time progress.")
+
+class Method(Enum):
+    SmartPool = "smartpool"
+    Sequentially = "sequentially"
 
 @app.command()
 def main(
-    thread_pool_max_workers: int = typer.Option(
-        4,
-        "--thread_pool_max_workers",
-        help="max number of thread pool (for preprocess and postprocess) workers to use, 0 to use all available cores"
-    ),
-    session_pool_max_workers: int = typer.Option(
-        0,
-        "--session_pool_max_workers",
-        help="max number of infer session pool workers to use, 0 to use all available cores"
-    ),
+    method: Method = typer.Option(
+        Method.SmartPool,
+        "--method"
+    )
 ):
     import os
 
+    self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
+
     print("Use `python -m smartpool_examples.onnx_infer --help` to see all options.")
-    print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
+    print(f"See source code at folder {self_folder}")
     print()
 
     try:
@@ -34,102 +35,35 @@ def main(
         print("ONNX Runtime is not installed. Follow https://onnxruntime.ai/docs/install/ instructions to install ONNX Runtime.")
         exit(1)
 
-    import queue
     import time
-    from functools import partial
+    import glob
 
-    from rich.console import Group
-    from rich.live import Live
-    from rich.progress import TaskID
-    from rich.progress import (
-        BarColumn,
-        Progress,
-        TextColumn,
-        TimeRemainingColumn,
-    )
-    from rich.text import Text
-
-    from smartpool import DataSize, GPUInfo, InferSessionPool, Resource, ThreadPool
-
-    self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
 
-    from concurrent.futures import as_completed
-
-    from config import DATASET_DIR, MODEL_PATH, OUTPUT_DIR
+    from config import DATASET_FOLDER, MODEL_PATH, OUTPUT_FOLDER
     from data_utils import download_dataset, download_model
-    from inference import postprocess, preprocess
+    from progress_info import ProgressInfo
 
     download_model()
     download_dataset()
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    image_paths = sorted(DATASET_DIR.glob("*.jpg"))
-    model_path_str = str(MODEL_PATH.resolve())
-    output_dir_str = str(OUTPUT_DIR.resolve())
+    image_paths = glob.glob(DATASET_FOLDER + "/*.jpg")
+    n_tasks = len(image_paths)
 
-    cpu_res = Resource(
-        cpu_cores_in_python=1,
-        cpu_cores_out_of_python=1,
-        cpu_mem=81*DataSize.MB
-    )
-    gpu_res = Resource(
-        cpu_cores_in_python=1,
-        cpu_cores_out_of_python=1,
-        cpu_mem=200*DataSize.MB,
-        gpu_cores=100,
-        gpu_mem=200*DataSize.MB
-    )
+    progress_info = ProgressInfo(n_tasks)
 
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        TimeRemainingColumn(),
-    ) as progress, Live(refresh_per_second=4) as live:
-        n_tasks = len(image_paths)
-        preprocess_start_progress_task: TaskID = progress.add_task("preprocess start", total=n_tasks)
-        preprocess_done_progress_task: TaskID = progress.add_task("preprocess done", total=n_tasks)
-        infer_start_progress_task = progress.add_task("infer start", total=n_tasks)
-        infer_done_progress_task = progress.add_task("infer done", total=n_tasks)
-        postprocess_start_progress_task: TaskID = progress.add_task("postprocess start", total=n_tasks)
-        postprocess_done_progress_task: TaskID = progress.add_task("postprocess done", total=n_tasks)
-
-        # def update_task_count():
-        #     lines = []
-        #     for provider in GPUInfo.supported_onnx_providers():
-        #         lines.append(Text(f"task count infer with {provider}: {infer_session_pool.task_count_with_provider(provider)}"))
-        #     live.update(Group(*lines))
-
+    with progress_info:
         start_time = time.perf_counter()
-
-        futures = []
-        for image_path in image_paths:
-            # update_task_count()
-            image_path = str(image_path)
-            preprocess_future = preprocess(image_path)
-            preprocess_future.add_start_callback(lambda: progress.update(preprocess_start_progress_task, advance=1))
-            preprocess_future.add_done_callback(lambda future: progress.update(preprocess_done_progress_task, advance=1))
-
-            img, blob, scale, pad = preprocess_future.unpack(4)
-            infer_future = InferSessionPool.run_async(model_path_str, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res)
-            infer_future.add_start_callback(lambda: progress.update(infer_start_progress_task, advance=1))
-            infer_future.add_done_callback(lambda future: progress.update(infer_done_progress_task, advance=1))
-
-            outputs = infer_future[0]
-            output_path = output_dir_str + "/" + os.path.basename(image_path)
-            postprocess_future = postprocess(img, outputs, output_path, scale, pad)
-            postprocess_future.add_start_callback(lambda: progress.update(postprocess_start_progress_task, advance=1))
-            postprocess_future.add_done_callback(lambda future: progress.update(postprocess_done_progress_task, advance=1))
-            
-            futures.append(postprocess_future)
-
-        for future in as_completed(futures):
-            future.result()
+        if method == Method.SmartPool:
+            from infer_with_smartpool import infer_with_smartpool
+            infer_with_smartpool(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
+        elif method == Method.Sequentially:
+            from infer_sequentially import infer_sequentially
+            infer_sequentially(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
 
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")
-    print(f"Output: {OUTPUT_DIR.resolve()}")
+    print(f"Output: {OUTPUT_FOLDER}")
 
 
 if __name__ == "__main__":

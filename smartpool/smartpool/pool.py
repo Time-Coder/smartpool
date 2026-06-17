@@ -202,7 +202,7 @@ class Pool(ABC):
             import functools
             from .task_wrapper import TaskWrapper
 
-            wrapper = functools.wraps(func)(TaskWrapper(func, pool, submit_kwargs))
+            wrapper = functools.wraps(func)(TaskWrapper(cls, func, pool, submit_kwargs))
             
             return wrapper
         

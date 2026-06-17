@@ -3,9 +3,11 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from pathlib import Path
+import os
+import glob
+import shutil
 
-from config import COCO_ZIP_URLS, DATASET_DIR, MODEL_PATH, MODEL_URL
+from config import COCO_ZIP_URLS, DATASET_FOLDER, MODEL_PATH, MODEL_URL
 from rich.progress import (
     BarColumn,
     DownloadColumn,
@@ -16,9 +18,12 @@ from rich.progress import (
 )
 
 
-def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".tmp")
+def download_file(url: str, dest_zip_filename: str, desc: str = "", max_retries: int = 3):
+    dest_folder: str = os.path.dirname(dest_zip_filename)
+    if not os.path.isdir(dest_folder):
+        os.makedirs(dest_folder)
+
+    tmp_filename = dest_zip_filename + ".tmp"
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -35,14 +40,15 @@ def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
                 transient=False,
             ) as pbar:
                 task = pbar.add_task("", total=total)
-                with open(tmp, "wb") as f:
+                with open(tmp_filename, "wb") as f:
                     while True:
                         chunk = resp.read(chunk_size)
                         if not chunk:
                             break
                         f.write(chunk)
                         pbar.update(task, advance=len(chunk))
-            tmp.rename(dest)
+
+            os.rename(tmp_filename, dest_zip_filename)
             return
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -56,29 +62,25 @@ def download_file(url: str, dest: Path, desc: str = "", max_retries: int = 3):
             if attempt < max_retries:
                 delay = 2 ** attempt
                 time.sleep(delay)
+
     raise last_err
 
 
 def _count_images():
-    return len(list(DATASET_DIR.rglob("*.jpg")))
+    return len(glob.glob(DATASET_FOLDER + "/*.jpg"))
 
 
 def _flatten_images():
-    for p in list(DATASET_DIR.rglob("*.jpg")):
-        if p.parent is not DATASET_DIR:
-            p.replace(DATASET_DIR / p.name)
-    for p in list(DATASET_DIR.iterdir()):
-        if p.is_dir() and p.name != "val2017":
-            for f in list(p.rglob("*")):
-                if f.is_file():
-                    f.unlink()
-
-            with contextlib.suppress(OSError):
-                p.rmdir()
+    for image_filename in list(glob.glob(DATASET_FOLDER + "/**/*.jpg", recursive=True)):
+        image_folder = os.path.dirname(os.path.abspath(image_filename)).replace("\\", "/")
+        image_basename = os.path.basename(image_filename)
+        if image_folder != DATASET_FOLDER:
+            shutil.move(image_filename, DATASET_FOLDER + "/" + image_basename)
 
 
 def download_dataset():
-    DATASET_DIR.mkdir(parents=True, exist_ok=True)
+    if not os.path.isdir(DATASET_FOLDER):
+        os.makedirs(DATASET_FOLDER)
 
     _flatten_images()
     if _count_images() > 4000:
@@ -86,7 +88,7 @@ def download_dataset():
         return
 
     print("[DOWNLOAD] val2017.zip (~1GB) ...")
-    zip_path = DATASET_DIR / "val2017.zip"
+    zip_path = DATASET_FOLDER + "/val2017.zip"
 
     for url in COCO_ZIP_URLS:
         try:
@@ -98,19 +100,19 @@ def download_dataset():
     else:
         raise RuntimeError("all mirrors failed")
 
-    print(f"[EXTRACT] val2017.zip -> {DATASET_DIR} ...")
+    print(f"[EXTRACT] val2017.zip -> {DATASET_FOLDER} ...")
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(DATASET_DIR)
+        zf.extractall(DATASET_FOLDER)
 
-    zip_path.unlink()
     _flatten_images()
     n = _count_images()
     print(f"[DONE] {n} images ready")
 
 
 def download_model():
-    if MODEL_PATH.exists():
-        print(f"[SKIP DOWNLOAD] Model {MODEL_PATH.name} exists")
+    if os.path.isfile(MODEL_PATH):
+        print(f"[SKIP DOWNLOAD] Model {os.path.basename(MODEL_PATH)} exists")
         return
+    
     print("[DOWNLOAD] YOLOv8n ONNX...")
     download_file(MODEL_URL, MODEL_PATH, "YOLOv8n")

@@ -12,6 +12,10 @@ from .processpool import ProcessPool
 from .resource import DataSize, Resource
 from .threadpool import ThreadPool
 from .utils import best_device, best_stream, limit_num_single_thread, move_optimizer_to
+import os
+
+TRT_CACHE_PATH: str = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
+
 
 __all__ = [
     "Future",
@@ -33,4 +37,5 @@ __all__ = [
     "NvidiaGPUInfo",
     "IntelGPUInfo",
     "AMDGPUInfo",
+    "TRT_CACHE_FOLDER"
 ]
