@@ -24,7 +24,7 @@ dependencies = [
     "rich",
     "typer",
     "joblib",
-    "opencv-python",
+    "opencv-python"
 ]
 
 [project.urls]

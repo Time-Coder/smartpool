@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
-from config import COCO_CLASSES
+from smartpool_examples.onnx_infer.config import COCO_CLASSES
 
 
 def letterbox(img: np.ndarray, new_shape=(640, 640), color=(114, 114, 114)):

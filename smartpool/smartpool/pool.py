@@ -85,7 +85,7 @@ class Pool(ABC):
         self._workers: List[Worker] = []
         self._tasks: Dict[str, Task] = {}
         self._delayed_tasks: List[Task] = []
-        self._lock: threading.RLock = threading.RLock()
+        self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
         self._use_onnx: bool = use_onnx
