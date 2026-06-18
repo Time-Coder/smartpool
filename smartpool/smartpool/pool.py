@@ -178,31 +178,31 @@ class Pool(ABC):
         return task.future
 
     @classmethod
-    def config(cls, pool:str, *args, **kwargs):
-        Pool._instance_config[cls][pool] = (args, kwargs)
+    def config(cls, pool_name:str, *args, **kwargs):
+        Pool._instance_config[cls][pool_name] = (args, kwargs)
 
     @classmethod
-    def instance(cls, pool:str):
-        if pool in Pool._instance_dict[cls]:
-            return Pool._instance_dict[cls][pool]
+    def instance(cls, pool_name: str):
+        if pool_name in Pool._instance_dict[cls]:
+            return Pool._instance_dict[cls][pool_name]
 
-        if pool not in Pool._instance_config[cls]:
+        if pool_name not in Pool._instance_config[cls]:
             args = ()
             kwargs = {}
         else:
-            args, kwargs = Pool._instance_config[cls]
+            args, kwargs = Pool._instance_config[cls][pool_name]
 
-        Pool._instance_dict[cls][pool] = cls(*args, **kwargs)
-        return Pool._instance_dict[cls][pool]
+        Pool._instance_dict[cls][pool_name] = cls(*args, **kwargs)
+        return Pool._instance_dict[cls][pool_name]
 
     @classmethod
-    def task(cls, func:Callable=None, *, pool:str="default", **submit_kwargs):
+    def task(cls, func:Callable=None, *, pool_name:str="default", **submit_kwargs):
 
         def decorator(func):
             import functools
             from .task_wrapper import TaskWrapper
 
-            wrapper = functools.wraps(func)(TaskWrapper(cls, func, pool, submit_kwargs))
+            wrapper = functools.wraps(func)(TaskWrapper(cls, func, pool_name, submit_kwargs))
             
             return wrapper
         

@@ -7,8 +7,23 @@ from inference import preprocess, postprocess
 
 from smartpool import InferSessionPool, ThreadPool, Resource, DataSize
 
-preprocess = ThreadPool.task(preprocess)
-postprocess = ThreadPool.task(postprocess)
+preprocess = ThreadPool.task(
+    pool_name="pre_post",
+    cpu_mode_res=Resource(
+        cpu_cores_in_python=1,
+        cpu_cores_out_of_python=1,
+        cpu_mem=81*DataSize.MB
+    )
+)(preprocess)
+
+postprocess = ThreadPool.task(
+    pool_name="pre_post",
+    cpu_mode_res=Resource(
+        cpu_cores_in_python=1,
+        cpu_cores_out_of_python=1,
+        cpu_mem=81*DataSize.MB
+    )
+)(postprocess)
 
 
 def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: str, progress_info: ProgressInfo):
@@ -24,6 +39,8 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         gpu_cores=100,
         gpu_mem=200*DataSize.MB
     )
+
+    # ThreadPool.config(pool_name="pre_post", max_workers=4)
 
     futures = []
     for image_path in image_paths:

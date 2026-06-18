@@ -17,7 +17,7 @@ class Method(Enum):
 @app.command()
 def main(
     method: Method = typer.Option(
-        Method.SmartPool,
+        Method.Sequentially,
         "--method"
     )
 ):
