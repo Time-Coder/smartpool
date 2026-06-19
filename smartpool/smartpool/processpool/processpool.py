@@ -117,5 +117,5 @@ class ProcessPool(Pool):
 
             try:
                 task.worker.add_task(task)
-            except BaseException as e:
+            except Exception as e:
                 task.future.set_exception(e)

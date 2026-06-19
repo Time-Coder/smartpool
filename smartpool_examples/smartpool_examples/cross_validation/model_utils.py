@@ -37,7 +37,7 @@ class ErrorInfo:
 def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device=None):
     try:
         return _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device)
-    except BaseException as e:
+    except Exception as e:
         error_info = ErrorInfo(e, traceback.format_exc())
         progress_queue.put(error_info)
         raise e

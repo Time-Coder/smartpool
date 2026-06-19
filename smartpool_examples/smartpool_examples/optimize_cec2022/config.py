@@ -1,0 +1,6 @@
+DIM = 10
+POP_SIZE = 50
+MAX_ITER = 500
+N_RUNS = 5
+
+ALGORITHMS = ["DE", "PSO"]

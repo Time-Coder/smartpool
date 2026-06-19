@@ -142,7 +142,7 @@ class Worker(ABC):
             try:
                 result = func(*args, **kwargs)
                 success = True
-            except BaseException as e:
+            except Exception as e:
                 result = e
                 success = False
 

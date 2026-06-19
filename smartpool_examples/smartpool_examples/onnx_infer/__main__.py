@@ -13,12 +13,11 @@ app = typer.Typer(help="Use different methods to do YOLOv8n ONNX inference on CO
 class Method(Enum):
     SmartPool = "smartpool"
     Sequentially = "sequentially"
-    Ray = "ray"
 
 @app.command()
 def main(
     method: Method = typer.Option(
-        Method.Ray,
+        Method.SmartPool,
         "--method"
     )
 ):
@@ -61,9 +60,6 @@ def main(
         elif method == Method.Sequentially:
             from infer_sequentially import infer_sequentially
             infer_sequentially(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
-        elif method == Method.Ray:
-            from infer_with_ray import infer_with_ray
-            infer_with_ray(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
 
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")

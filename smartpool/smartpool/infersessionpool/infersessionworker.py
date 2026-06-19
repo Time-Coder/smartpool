@@ -109,8 +109,7 @@ class InferSessionWorker(Worker):
 
         infer_session_pool: InferSessionPool = self.pool
         model_path: str = infer_session_pool._model_info.model_path
-        self.executor = ort.InferenceSession(model_path, infer_session_pool.session_options, providers=[self.provider])
-        self.executor.disable_fallback()
+        self.executor = ort.InferenceSession(model_path, infer_session_pool.session_options, providers=[self.provider], enable_fallback=False)
 
     def _clear(self)->None:
         if self.executor is not None:

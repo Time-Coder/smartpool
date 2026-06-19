@@ -96,7 +96,7 @@ class Task:
                     self.ready_to_run = True
                     with pool._lock:
                         pool._submit(self, append_to_delay=False)
-        except BaseException as e:
+        except Exception as e:
             self.future.set_exception(e)
             with pool._lock:
                 if self.id in pool._tasks:
@@ -200,7 +200,7 @@ class Task:
         try:
             result = self.func(*self.args, **self.kwargs)
             success = True
-        except BaseException as e:
+        except Exception as e:
             result = e
             success = False
 
