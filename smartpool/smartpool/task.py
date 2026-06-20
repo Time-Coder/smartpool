@@ -45,7 +45,6 @@ class Task:
         self.estimated_need_cpu_mem: float = 0.0
         self.modules_overlap_ratio: float = 0.0
         self.module_deps: Dict[str, int] = {}
-        self.user_providers: Optional[List[str]] = None
         self.output_names: List[str] = []
         self.ready_to_run: bool = True
 
@@ -58,9 +57,8 @@ class Task:
         self._device_id: Optional[int] = None
         self.gpu_index: int = -1
         self.dml_id: int = -1
-        self.worker: Worker = None
+        self.worker: Optional[Worker] = None
         self.mem_before_enter: int = 0
-        self._onnx_provider: Optional[Tuple[str, Dict]] = None
         self._future: Optional[Future] = None
         self.dep_futures: Dict[Future, Union[str, int]] = {}
         self.finished_dep_futures_count_lock: threading.Lock = threading.Lock()
@@ -79,6 +77,9 @@ class Task:
             callback = partial(self._dep_future_done_callback, pool)
             for dep_future in self.dep_futures:
                 dep_future.add_done_callback(callback)
+
+    def can_use(self)->bool:
+        return True
 
     def _dep_future_done_callback(self, pool: Pool, future: Future) -> None:
         try:
@@ -121,26 +122,6 @@ class Task:
         self._device = device
         self._device_prefix = None
         self._device_id = None
-        self._onnx_provider = None
-
-    @property
-    def onnx_provider(self)->Optional[Tuple[str, Dict]]:
-        if self.device is None:
-            return None
-
-        if self._onnx_provider is not None:
-            return self._onnx_provider
-
-        if self.device == "cpu":
-            self._onnx_provider = ("CPUExecutionProvider", {})
-            return self._onnx_provider
-
-        from .pool import Pool
-        with Pool._sys_info_lock:
-            gpuinfo_snapshot = Pool._sys_info.gpu_infos[self.gpu_index]
-
-        self._onnx_provider = gpuinfo_snapshot.onnx_provider(self.user_providers)
-        return self._onnx_provider
 
     @property
     def effective_res(self) -> Resource:

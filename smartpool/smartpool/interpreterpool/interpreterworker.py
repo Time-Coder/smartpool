@@ -65,6 +65,10 @@ class InterpreterWorker(Worker):
         )
 
     def join(self)->None:
-        self.executor.join()
-        self.interp.close()
+        if self.executor is not None:
+            self.executor.join()
+
+        if self.interp is not None:
+            self.interp.close()
+
         self._clear()

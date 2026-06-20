@@ -13,8 +13,9 @@ if TYPE_CHECKING:
     import onnxruntime as ort
 
     from ..resource import Resource
-    from ..task import Task
+    from .infersessiontask import InfersessionTask
     from .model_info import ModelInfo
+    from .session_info import SessionInfo
 
 
 class InferSessionPool(Pool):
@@ -26,7 +27,11 @@ class InferSessionPool(Pool):
 
     _model_infos: Dict[str, ModelInfo] = {}
 
-    def __init__(self, model_path: str, max_workers: int = 0, session_options: Optional[ort.SessionOptions] = None):
+    def __init__(
+        self, model_path: str, max_workers: int = 0,
+        thread_name_prefix: str = "InferSessionPool.worker:",
+        session_options: Optional[ort.SessionOptions] = None
+    ):
         from .model_info import ModelInfo
 
         model_path = os.path.abspath(model_path).replace("\\", "/")
@@ -37,14 +42,12 @@ class InferSessionPool(Pool):
             self, max_workers=max_workers,
             initializer=None, initargs=(), initkwargs=None,
             result_queue_cls=None,
-            worker_cls=None,
-            use_onnx=True,
+            worker_cls=InferSessionWorker
         )
+        self._thread_name_prefix: str = thread_name_prefix
         self._session_options: Optional[ort.SessionOptions] = session_options
         self._model_info: ModelInfo = InferSessionPool._model_infos[model_path]
-        self._workers_dict: Dict[str, InferSessionWorker] = {}
-        self._running_count_lock: threading.Lock = threading.Lock()
-        self._running_count: int = 0
+        self._sessions: Dict[str, SessionInfo] = {}
         self.print_info: bool = False
 
     @classmethod
@@ -93,12 +96,14 @@ class InferSessionPool(Pool):
 
         return "(" + provider[0] + ", " + json.dumps(provider[1], sort_keys=True, separators=(', ', ':')) + ")"
 
-    def _add_worker(self, provider: Tuple[str, Dict[str, Any]], gpu_index: int)->Optional[InferSessionWorker]:
-        worker = InferSessionWorker(self, provider, gpu_index)
-        self._workers.append(worker)
+    def _session_info(self, provider: Tuple[str, Dict[str, Any]])->SessionInfo:
+        model_path: str = self._model_info.model_path
         key = self._provider_key(provider)
-        self._workers_dict[key] = worker
-        return worker
+        if key not in self._sessions:
+            from .session_info import SessionInfo
+            self._sessions[key] = SessionInfo(model_path, self.session_options, providers=[provider], enable_fallback=False)
+
+        return self._sessions[key]
 
     def _add_provider_running_device(self, provider: Tuple[str, Dict[str, Any]])->None:
         provider_name: str = provider[0]
@@ -143,7 +148,7 @@ class InferSessionPool(Pool):
 
         with self._sys_info_lock:
             for gpu_info in self._sys_info.gpu_infos:
-                if gpu_info.onnx_provider(providers):
+                if gpu_info.ort_provider(providers):
                     return
 
         raise ValueError(f"all providers are not supported: {providers}")
@@ -156,14 +161,16 @@ class InferSessionPool(Pool):
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
+        use_io_binding: bool = False,
+        output_ort_values: bool = False
     ) -> Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
         
         from ..resource import Resource
-        from ..task import Task
+        from .infersessiontask import InfersessionTask
 
-        validated_kwargs = self._model_info.check_args(args, kwargs)
+        validated_kwargs, has_ort_value = self._model_info.check_args(args, kwargs)
         self._model_info.check_outputs(output_names)
         self._check_providers(providers)
 
@@ -173,22 +180,24 @@ class InferSessionPool(Pool):
         if gpu_mode_res is None:
             gpu_mode_res = cpu_mode_res
 
-        task = Task(
-            pool=self, func=None, args=(), kwargs=validated_kwargs,
+        if not use_io_binding:
+            if output_ort_values or has_ort_value:
+                use_io_binding = True
+
+        task = InfersessionTask(
+            infer_session_pool=self, args=(), kwargs=validated_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res,
-            use_torch=False, device_changeable=False,
-            calculate_module_deps=False,
+            output_names=output_names, user_providers=providers,
+            use_io_binding=use_io_binding, output_ort_values=output_ort_values
         )
-        task.output_names = output_names
-        task.user_providers = providers
         self._validate_resource_feasibility(task)
 
         with self._lock:
             self._tasks[task.id] = task
             return self._submit(task, append_to_delay=True)
 
-    def _try_assign_task(self, task: Task) -> bool:
-        if not task.ready_to_run or self._running_count >= self._max_workers:
+    def _try_assign_task(self, task: InfersessionTask) -> bool:
+        if not task.ready_to_run or self._workers_working_count >= self._max_workers:
             return False
 
         gpu_res = task.gpu_mode_res
@@ -224,39 +233,33 @@ class InferSessionPool(Pool):
                     task.gpu_index = device.index
                     task.dml_id = device.dml_id
 
-                if not self._choose_task_worker(task):
+                if not self._choose_task_session(task) or not self._choose_task_worker(task, task.effective_res):
                     task.device = None
                     task.gpu_index = -1
                     task.dml_id = -1
                     continue
 
-            if task.device is not None:
+            if task.device is not None and task.session_info is not None and task.worker is not None:
                 return True
 
         return False
 
-    def _choose_task_worker(self, task: Task) -> Optional[InferSessionWorker]:
-        provider: Tuple[str, Dict[str, Any]] = task.onnx_provider
-        provider_key: str = self._provider_key(provider)
+    def _choose_task_session(self, task: InfersessionTask) -> Optional[ort.InferenceSession]:
+        provider: Tuple[str, Dict[str, Any]] = task.provider
         if not self._can_use_provider(provider):
-            task.worker = None
+            task.session_info = None
             return None
 
-        if provider_key in self._workers_dict:
-            worker = self._workers_dict[provider_key]
-        else:
-            worker = self._add_worker(provider, task.gpu_index)
+        task.session_info = self._session_info(provider)
+        return task.session_info
 
-        task.worker = worker
-        return worker
-
-    def _put_task(self, task: Task) -> None:
+    def _put_task(self, task: InfersessionTask) -> None:
         self._take_resource(task)
         worker: InferSessionWorker = task.worker
         worker.is_working = True
         worker.add_task(task)
 
-    def _take_resource(self, task: Task) -> None:
+    def _take_resource(self, task: InfersessionTask) -> None:
         with self._sys_info_lock:
             res = task.effective_res
             task.estimated_need_cpu_mem = res.cpu_mem
@@ -266,7 +269,7 @@ class InferSessionPool(Pool):
                 self._sys_info.gpu_infos[task.gpu_index].n_cores_free -= res.gpu_cores
                 self._sys_info.gpu_infos[task.gpu_index].mem_free -= res.gpu_mem
 
-    def _release_resource(self, task: Task) -> None:
+    def _release_resource(self, task: InfersessionTask) -> None:
         with self._sys_info_lock:
             res = task.effective_res
             self._sys_info.cpu_cores_free += res.cpu_cores

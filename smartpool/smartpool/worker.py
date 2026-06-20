@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import threading
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Union, Type
 
 if TYPE_CHECKING:
     import multiprocessing as mp
-
-    import onnxruntime as ort
 
     from .pool import Pool
     from .task import Task
@@ -21,22 +19,41 @@ class Worker(ABC):
 
     def __init__(
         self, pool:Pool,
-        task_queue_cls:type,
-        task_queue_args:Tuple[Any, ...],
-        task_queue_kwargs:Dict[str, Any]
+        task_queue_cls:Type[QueueLike]=None,
+        task_queue_args:Optional[Tuple[Any, ...]]=None,
+        task_queue_kwargs:Optional[Dict[str, Any]]=None
     ):
         self.index: int = len(pool._workers)
         self.pool: Pool = pool
         self._is_working: bool = False
         self.imported_modules: Set[str] = set()
         self.n_finished_tasks: int = 0
-        if task_queue_cls is not None:
-            self.task_queue: QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]] = task_queue_cls(*task_queue_args, **task_queue_kwargs)
+        self.task_queue_cls: Type[QueueLike] = task_queue_cls
+        self.task_queue_args: Optional[Tuple[Any, ...]] = task_queue_args
+        self.task_queue_kwargs: Optional[Dict[str, Any]] = task_queue_kwargs
+        self._task_queue: Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]] = None
+        self.executor: Optional[Union[mp.Process, threading.Thread]] = None
+        self.active_task: Optional[Task] = None
 
-        self.executor: Optional[Union[mp.Process, threading.Thread, ort.InferenceSession]] = None
+    @property
+    def task_queue(self)->Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]]:
+        if self._task_queue is not None:
+            return self._task_queue
+
+        if self.task_queue_cls is not None:
+            if self.task_queue_args is None:
+                self.task_queue_args = ()
+
+            if self.task_queue_kwargs is None:
+                self.task_queue_kwargs = {}
+                
+            self._task_queue: Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]] = self.task_queue_cls(*self.task_queue_args, **self.task_queue_kwargs)
+
+        return self._task_queue
 
     def add_task(self, task: Task)->None:
         self.start()
+        self.active_task = task
         task.future.set_running_or_notify_cancel()
         self.task_queue.put(task.info())
 

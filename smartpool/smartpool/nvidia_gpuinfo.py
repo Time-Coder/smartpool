@@ -12,7 +12,7 @@ class NvidiaGPUInfo(GPUInfo):
     _lock = threading.Lock()
     _initialized = False
 
-    _supported_onnx_providers: List[str] = [
+    _supported_ort_providers: List[str] = [
         "TensorrtExecutionProvider",
         "CUDAExecutionProvider",
         "DmlExecutionProvider"

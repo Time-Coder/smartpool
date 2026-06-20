@@ -56,11 +56,11 @@ def main(
         import torch.nn as nn
     except ImportError:
         print("PyTorch is not installed. Follow https://pytorch.org/ instructions to install PyTorch.")
-        exit(1)
+        return
 
     if importlib.util.find_spec("torchvision") is None:
         print("torchvision is not installed. Use `pip install torchvision` to install torchvision.")
-        exit(1)
+        return
 
     import os
     import sys

@@ -20,7 +20,7 @@ class AMDGPUInfo(GPUInfo):
     _vram_ranges: Dict[int, int] = {}
     _device_info: List[Dict] = []
 
-    _supported_onnx_providers: List[str] = [
+    _supported_ort_providers: List[str] = [
         "ROCMExecutionProvider",
         "MIGraphXExecutionProvider",
         "DmlExecutionProvider"

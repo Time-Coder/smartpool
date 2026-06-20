@@ -104,5 +104,7 @@ class ProcessWorker(Worker):
         self.process_info = psutil.Process(self.executor.pid)
 
     def join(self)->None:
-        self.executor.join()
+        if self.executor is not None:
+            self.executor.join()
+            
         self._clear()

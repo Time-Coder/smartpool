@@ -54,7 +54,6 @@ class Pool(ABC):
         max_tasks_per_child: Optional[int]=None,
         worker_cls: Type[Worker],
         use_torch: bool = False,
-        use_onnx: bool = False,
         need_module_deps: bool = False
     ):
         self._init_sys_info()
@@ -88,7 +87,6 @@ class Pool(ABC):
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
-        self._use_onnx: bool = use_onnx
 
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -211,37 +209,6 @@ class Pool(ABC):
         
         return decorator
 
-    def task_count_on_device(self, device:str)->int:
-        with self._lock:
-            return sum(1 for task in self._tasks.values() if task.device == device)
-
-    def task_count_with_provider(self, provider:Union[str, Tuple[str, Dict[str, Any]]])->int:
-        with self._lock:
-            count: int = 0
-            for task in self._tasks.values():
-                task_provider = task.onnx_provider
-                if task_provider is None:
-                    continue
-
-                task_provider_name: str = task_provider[0]
-                task_provider_device_id: int = 0
-                if "device_id" in task_provider[1]:
-                    task_provider_device_id: int = task_provider[1]["device_id"]
-
-                if isinstance(provider, str):
-                    if provider == task_provider_name:
-                        count += 1
-                else:
-                    user_provider_name: str = provider[0]
-                    user_device_id: int = 0
-                    if "device_id" in provider[1]:
-                        user_device_id: int = provider[1]["device_id"]
-
-                    if user_provider_name == task_provider_name and user_device_id == task_provider_device_id:
-                        count += 1
-
-            return count
-
     def _check_args(self, func:Optional[Callable[..., Any]], args:Tuple[Any], kwargs:Dict[str, Any]) -> None:
         if func is None:
             return
@@ -256,7 +223,7 @@ class Pool(ABC):
             raise TypeError(formatted_msg) from None
 
     def _try_assign_task(self, task: Task) -> bool:
-        if not task.ready_to_run:
+        if not task.ready_to_run or self._workers_working_count >= self._max_workers:
             return False
         
         gpu_res = task.gpu_mode_res
@@ -525,9 +492,8 @@ class Pool(ABC):
             for task_id in cancelled_task_ids:
                 del self._tasks[task_id]
 
-        if not self._use_onnx:
-            for task in self._tasks.values():
-                self._try_move_to_gpu(task)
+        for task in self._tasks.values():
+            self._try_move_to_gpu(task)
 
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
@@ -593,7 +559,7 @@ class Pool(ABC):
                 if gpu.n_cores_free < res.gpu_cores:
                     continue
 
-                if self._use_onnx and not gpu.onnx_provider(task.user_providers):
+                if not task.can_use(gpu):
                     continue
 
                 available_gpus.append(gpu)

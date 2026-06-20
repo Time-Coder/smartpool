@@ -20,7 +20,7 @@ class GPUInfoSnapshot:
         self.device_id: Optional[int] = None
         self.dml_id: Optional[int] = None
         self.parent_class: Optional[Type[GPUInfo]] = None
-        self._onnx_provider: Optional[Tuple[str, Dict[str, Any]]] = None
+        self._ort_provider: Optional[Tuple[str, Dict[str, Any]]] = None
 
         self.name: Optional[str] = None
         self.uuid: Optional[uuid.UUID] = None
@@ -53,13 +53,13 @@ class GPUInfoSnapshot:
     def n_cores_free(self, value: int) -> None:
         self.n_cores_used = self.n_cores - value
 
-    def onnx_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
-        if providers is None and self._onnx_provider is not None:
-            return self._onnx_provider
+    def ort_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
+        if providers is None and self._ort_provider is not None:
+            return self._ort_provider
 
         import os
 
-        for provider_name in self.parent_class.supported_onnx_providers():
+        for provider_name in self.parent_class.supported_ort_providers():
             options = {"device_id": self.device_id}
             if provider_name == "DmlExecutionProvider":
                 options["device_id"] = self.dml_id
@@ -68,11 +68,11 @@ class GPUInfoSnapshot:
                 options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
             current_provider = (provider_name, options)
 
-            if self._onnx_provider is None:
-                self._onnx_provider = current_provider
+            if self._ort_provider is None:
+                self._ort_provider = current_provider
 
             if providers is None:
-                return self._onnx_provider
+                return self._ort_provider
 
             for provider in providers:
                 if isinstance(provider, str):
@@ -99,13 +99,13 @@ class GPUInfoSnapshot:
 
 class GPUInfo(ABC):
 
-    _supported_onnx_providers:Optional[List[str]] = None
+    _supported_ort_providers:Optional[List[str]] = None
 
     def __init__(self, device_id: int, index: int):
         self._device_id: int = device_id
         self._index: int = index
         self._dml_id: int = -1
-        self._onnx_provider: Optional[Tuple[str, Dict[str, Any]]] = None
+        self._ort_provider: Optional[Tuple[str, Dict[str, Any]]] = None
 
         self._name: Optional[str] = None
         self._uuid: Optional[uuid.UUID] = None
@@ -184,15 +184,15 @@ class GPUInfo(ABC):
             raise ValueError(f"Unknown device prefix: {device_prefix}")
 
     @staticmethod
-    def _init_onnx_providers()->None:
-        if GPUInfo._supported_onnx_providers is not None:
+    def _init_ort_providers()->None:
+        if GPUInfo._supported_ort_providers is not None:
             return
 
         try:
             import onnxruntime
-            GPUInfo._supported_onnx_providers = onnxruntime.get_available_providers()
+            GPUInfo._supported_ort_providers = onnxruntime.get_available_providers()
         except ImportError:
-            GPUInfo._supported_onnx_providers = []
+            GPUInfo._supported_ort_providers = []
 
         from .amd_gpuinfo import AMDGPUInfo
         from .intel_gpuinfo import IntelGPUInfo
@@ -203,23 +203,23 @@ class GPUInfo(ABC):
             NvidiaGPUInfo
         ]
         for child in children:
-            for i in range(len(child._supported_onnx_providers)-1, -1, -1):
-                provider = child._supported_onnx_providers[i]
-                if provider not in GPUInfo._supported_onnx_providers:
-                    del child._supported_onnx_providers[i]
+            for i in range(len(child._supported_ort_providers)-1, -1, -1):
+                provider = child._supported_ort_providers[i]
+                if provider not in GPUInfo._supported_ort_providers:
+                    del child._supported_ort_providers[i]
 
     @classmethod
-    def supported_onnx_providers(cls)->List[str]:
-        cls._init_onnx_providers()
-        return cls._supported_onnx_providers
+    def supported_ort_providers(cls)->List[str]:
+        cls._init_ort_providers()
+        return cls._supported_ort_providers
 
-    def onnx_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
-        if providers is None and self._onnx_provider is not None:
-            return self._onnx_provider
+    def ort_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
+        if providers is None and self._ort_provider is not None:
+            return self._ort_provider
 
         import os
 
-        for provider_name in self.supported_onnx_providers():
+        for provider_name in self.supported_ort_providers():
             options = {"device_id": self.device_id}
             if provider_name == "DmlExecutionProvider":
                 options["device_id"] = self.dml_id
@@ -228,11 +228,11 @@ class GPUInfo(ABC):
                 options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
             current_provider = (provider_name, options)
 
-            if self._onnx_provider is None:
-                self._onnx_provider = current_provider
+            if self._ort_provider is None:
+                self._ort_provider = current_provider
 
             if providers is None:
-                return self._onnx_provider
+                return self._ort_provider
 
             for provider in providers:
                 if isinstance(provider, str):

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
     import onnx
+    import numpy as np
 
 
 class NodeInfo:
@@ -120,7 +121,33 @@ class ModelInfo:
         self._outputs = outputs
         self._signature = inspect.Signature(params)
 
-    def check_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    @staticmethod
+    def get_dtype(value: Any) -> np.dtype:
+        cls_name = value.__class__.__name__
+
+        if cls_name == "Tensor":
+            import torch
+            return torch.empty(0, dtype=value.dtype).numpy().dtype
+
+        if cls_name == "OrtValue":
+            import onnx
+            return onnx.helper.tensor_dtype_to_np_dtype(value.dtype())
+
+        return value.dtype
+
+    @staticmethod
+    def get_shape(value: Any) -> Tuple[int, ...]:
+        cls_name = value.__class__.__name__
+
+        if cls_name == "OrtValue":
+            return tuple(value.shape())
+        
+        if cls_name == "Tensor":
+            return tuple(value.shape)
+
+        return value.shape
+
+    def check_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], bool]:
         if kwargs is None:
             kwargs = {}
 
@@ -132,35 +159,38 @@ class ModelInfo:
             formatted_msg = f"model '{self.model_name}' arguments error: {str(e)}"
             raise TypeError(formatted_msg) from None
 
-        if self.inputs:
-            import numpy as np
-            for name, value in kwargs.items():
-                if isinstance(value, Future):
+        has_ort_value: bool = False
+        for name, value in kwargs.items():
+            if isinstance(value, Future):
+                continue
+
+            cls_name = value.__class__.__name__
+            if cls_name not in ("ndarray", "OrtValue", "Tensor"):
+                raise TypeError(f"model '{self.model_name}' input node '{name}' need type (numpy.ndarray, onnxruntime.OrtValue, torch.Tensor), {type(value)} were given")
+
+            if cls_name == "OrtValue":
+                has_ort_value: bool = True
+
+            node = self.inputs[name]
+
+            expected_type = node.dtype
+            actual_type = self.get_dtype(value)
+            if actual_type != expected_type:
+                raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
+
+            expected_shape = node.shape
+            actual_shape = self.get_shape(value)
+            if len(expected_shape) != len(actual_shape):
+                raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
+
+            for i, dim in enumerate(expected_shape):
+                if isinstance(dim, str) or dim is None or dim == -1:
                     continue
 
-                if not isinstance(value, np.ndarray):
-                    raise TypeError(f"model '{self.model_name}' input node '{name}' need type np.ndarray, {type(value)} were given")
-
-                node = self.inputs[name]
-
-                expected_type = node.dtype
-                actual_type = value.dtype
-                if actual_type != expected_type:
-                    raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
-
-                expected_shape = node.shape
-                actual_shape = value.shape
-                if len(expected_shape) != len(actual_shape):
+                if actual_shape[i] != dim:
                     raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
 
-                for i, dim in enumerate(expected_shape):
-                    if isinstance(dim, str) or dim is None or dim == -1:
-                        continue
-
-                    if actual_shape[i] != dim:
-                        raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
-
-        return kwargs
+        return kwargs, has_ort_value
 
     def check_outputs(self, output_names):
         if output_names is None:

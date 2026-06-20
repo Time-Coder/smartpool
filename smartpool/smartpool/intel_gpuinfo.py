@@ -14,7 +14,7 @@ class IntelGPUInfo(GPUInfo):
     _initialized = False
     _device_info: List[Dict] = []
 
-    _supported_onnx_providers: List[str] = [
+    _supported_ort_providers: List[str] = [
         "OpenVINOExecutionProvider",
         "DnnlExecutionProvider",
         "DmlExecutionProvider"

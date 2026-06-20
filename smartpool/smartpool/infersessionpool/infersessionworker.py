@@ -1,132 +1,79 @@
 from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any, Dict, Tuple
-
+from typing import TYPE_CHECKING, Tuple
 from ..worker import Worker
 
 if TYPE_CHECKING:
     import numpy as np
-    import onnxruntime as ort
-
-    from ..task import Task
+    import threading
+    from .infersessiontask import InfersessionTask
     from .infersessionpool import InferSessionPool
 
 
 class InferSessionWorker(Worker):
 
-    def __init__(self, infer_session_pool:InferSessionPool, provider: Tuple[str, Dict[str, Any]], gpu_index: int):
+    def __init__(self, infer_session_pool:InferSessionPool):
+        from queue import SimpleQueue
+
         Worker.__init__(
             self, infer_session_pool,
-            task_queue_cls=None,
+            task_queue_cls=SimpleQueue,
             task_queue_args=(),
             task_queue_kwargs={},
         )
 
-        self.provider: Tuple[str, Dict[str, Any]] = provider
-        self.running_count: int = 0
-        self._size_scale: int = 1
-        self._gpu_index: int = gpu_index
-        if gpu_index < 0:
-            self._size_scale = 2
-        else:
-            self._size_scale = 20
-        self._model_size: int = self._size_scale * infer_session_pool._model_info.file_size
-
-        self._take_resource()
-
     @property
-    def session(self)->ort.InferenceSession:
+    def thread(self)->threading.Thread:
         return self.executor
 
     @property
     def infer_session_pool(self)->InferSessionPool:
         return self.pool
 
-    @property
-    def is_working(self)->bool:
-        return self._is_working
+    def add_task(self, task: InfersessionTask)->None:
+        if task.use_io_binding:
+            self.start()
 
-    @is_working.setter
-    def is_working(self, is_working:bool)->None:
-        after = is_working or self.running_count > 0
+        self.active_task = task
+        infer_session_pool: InferSessionPool = self.infer_session_pool
 
-        if self._is_working == after:
-            return
+        if infer_session_pool.print_info:
+            print("infer with provider", task.provider, "in session", id(task.session_info.session))
 
-        self._is_working = after
-
-        if after:
-            with Worker._total_working_count_lock:
-                Worker._total_working_count += 1
-                self.pool._workers_working_count += 1
-        else:
-            with Worker._total_working_count_lock:
-                Worker._total_working_count -= 1
-                self.pool._workers_working_count -= 1
-
-    def _take_resource(self)->None:
-        with self.infer_session_pool._sys_info_lock:
-            self.infer_session_pool._sys_info.cpu_mem_free -= self._model_size
-            if self._gpu_index >= 0:
-                self.infer_session_pool._sys_info.gpu_infos[self._gpu_index].mem_free -= self._model_size
-
-    def _release_resource(self)->None:
-        with self.infer_session_pool._sys_info_lock:
-            self.infer_session_pool._sys_info.cpu_mem_free += self._model_size
-            if self._gpu_index >= 0:
-                self.infer_session_pool._sys_info.gpu_infos[self._gpu_index].mem_free += self._model_size
-
-    def add_task(self, task:Task)->None:
-        self.start()
-
-        if self.infer_session_pool.print_info:
-            print("infer with provider", self.provider, "in session", id(self.session))
-
-        with self.infer_session_pool._running_count_lock:
-            self.running_count += 1
-            self.infer_session_pool._running_count += 1
-
-        provider = task.onnx_provider
-        self.infer_session_pool._add_provider_running_device(provider)
+        provider = task.provider
+        infer_session_pool._add_provider_running_device(provider)
 
         task.future.set_running_or_notify_cancel()
 
-        try:
-            self.session.run_async(task.output_names, input_feed=task.kwargs, callback=InferSessionWorker.callback, user_data=(self, task.id))
-        except Exception as e:
-            with self.infer_session_pool._running_count_lock:
-                self.running_count -= 1
-                self.infer_session_pool._running_count -= 1
-
-            self.infer_session_pool._remove_provider_running_device(provider)
-            self.infer_session_pool._on_task_done(task.id, False, e)
+        if not task.use_io_binding:
+            try:
+                task.session_info.session.run_async(task.output_names, input_feed=task.kwargs, callback=self.callback, user_data=task.id)
+            except Exception as e:
+                self.is_working = False
+                infer_session_pool._remove_provider_running_device(provider)
+                infer_session_pool._on_task_done(task.id, False, e)
+        else:
+            self.task_queue.put(task)
 
     def start(self)->None:
         if self.executor is not None:
             return
 
-        import onnxruntime as ort
-
-        infer_session_pool: InferSessionPool = self.pool
-        model_path: str = infer_session_pool._model_info.model_path
-        self.executor = ort.InferenceSession(model_path, infer_session_pool.session_options, providers=[self.provider], enable_fallback=False)
-
-    def _clear(self)->None:
-        if self.executor is not None:
-            self._release_resource()
-
-        Worker._clear(self)
-        self.provider = None
-        self._gpu_index = -1
-        self.running_count = 0
-        self._model_size = 0
-        self._size_scale = 1
+        import threading
+        self.executor = threading.Thread(
+            target=self.run,
+            name=f"{self.infer_session_pool._thread_name_prefix}{self.index}",
+            daemon=True
+        )
+        self.executor.start()
 
     def join(self)->None:
+        if self.executor is not None:
+            self.executor.join()
+
         self._clear()
 
-    def callback(results:np.ndarray, user_data: Tuple[InferSessionWorker, str], error_str: str) -> None:
-        self, task_id = user_data
+    def callback(self, results:np.ndarray, user_data: Tuple[InferSessionWorker, str], error_str: str) -> None:
+        task_id = user_data
         if error_str:
             success = False
             result = RuntimeError(error_str)
@@ -134,11 +81,19 @@ class InferSessionWorker(Worker):
             success = True
             result = results
 
-        with self.infer_session_pool._running_count_lock:
-            self.running_count -= 1
-            self.infer_session_pool._running_count -= 1
+        infer_session_pool: InferSessionPool = self.infer_session_pool
+        task: InfersessionTask = infer_session_pool._tasks[task_id]
+        infer_session_pool._remove_provider_running_device(task.provider)
+        infer_session_pool._on_task_done(task_id, success, result)
 
-        task = self.infer_session_pool._tasks[task_id]
-        self.infer_session_pool._remove_provider_running_device(task.onnx_provider)
+    def run(self):
+        infer_session_pool: InferSessionPool = self.infer_session_pool
+        while True:
+            task: InfersessionTask = self.task_queue.get()
+            if task is None:
+                break
 
-        self.infer_session_pool._on_task_done(task_id, success, result)
+            success, result = task.exec()
+            infer_session_pool._remove_provider_running_device(task.provider)
+            infer_session_pool._on_task_done(task.id, success, result)
+    

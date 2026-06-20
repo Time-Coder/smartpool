@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import threading
-from queue import SimpleQueue
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict
 
 from ..utils import _set_best_device, _set_best_stream
 from ..worker import Worker
@@ -17,13 +16,14 @@ if TYPE_CHECKING:
 class ThreadWorker(Worker):
 
     def __init__(self, thread_pool:ThreadPool):
+        from queue import SimpleQueue
+        
         Worker.__init__(
             self, thread_pool,
             task_queue_cls=SimpleQueue,
             task_queue_args=(),
             task_queue_kwargs={},
         )
-        self._active_task:Optional[Task] = None
         self._streams:Dict[str, Stream] = {}
 
     @property
@@ -36,6 +36,7 @@ class ThreadWorker(Worker):
 
     def add_task(self, task:Task)->None:
         self.start()
+        self.active_task = task
         task.future.set_running_or_notify_cancel()
         self.task_queue.put(task)
 
@@ -44,7 +45,7 @@ class ThreadWorker(Worker):
         self._set_stream(device)
 
     def _set_stream(self, device:str):
-        if not self._active_task.use_torch:
+        if not self.active_task.use_torch:
             return
 
         if device not in self._streams:
@@ -80,7 +81,6 @@ class ThreadWorker(Worker):
 
         while True:
             task:Task = self.task_queue.get()
-            self._active_task = task
             if task is None:
                 break
 

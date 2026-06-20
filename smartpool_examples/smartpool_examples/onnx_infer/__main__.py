@@ -33,7 +33,7 @@ def main(
         import onnxruntime
     except ImportError:
         print("ONNX Runtime is not installed. Follow https://onnxruntime.ai/docs/install/ instructions to install ONNX Runtime.")
-        exit(1)
+        return
 
     import time
     import glob
@@ -48,6 +48,7 @@ def main(
     download_dataset()
 
     image_paths = glob.glob(DATASET_FOLDER + "/*.jpg")
+    image_paths = image_paths[:1]
     n_tasks = len(image_paths)
 
     progress_info = ProgressInfo(n_tasks)
