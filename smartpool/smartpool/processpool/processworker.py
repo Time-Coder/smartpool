@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
+import psutil
 
 from ..worker import Worker
 
 if TYPE_CHECKING:
     import multiprocessing as mp
-
-    import psutil
-
     from .processpool import ProcessPool
 
 
@@ -93,8 +91,6 @@ class ProcessWorker(Worker):
     def start(self)->None:
         if self.executor is not None:
             return
-
-        import psutil
 
         process_pool:ProcessPool = self.process_pool
         self.executor:mp.Process = process_pool._ctx.Process(

@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import psutil
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
@@ -9,8 +9,6 @@ if TYPE_CHECKING:
 class SysInfo:
 
     def __init__(self):
-        import psutil
-
         self._cpu_cores_total:int = psutil.cpu_count()
         self._cpu_mem_total:int = psutil.virtual_memory().total
         self._last_cpu_percent:float = 0.0
@@ -30,7 +28,6 @@ class SysInfo:
     @property
     def cpu_mem_used(self)->int:
         if self._cpu_mem_used is None:
-            import psutil
             self._cpu_mem_used:float = min(self._cpu_mem_total, psutil.virtual_memory().used)
 
         return self._cpu_mem_used
@@ -64,9 +61,7 @@ class SysInfo:
             if self._last_cpu_percent > 0:
                 used_cpu_percent = self._last_cpu_percent
             else:
-                import psutil
-
-                used_cpu_percent:float = psutil.cpu_percent(interval=0.1)
+                used_cpu_percent:float = psutil.cpu_percent()
 
             self._cpu_cores_used:float = used_cpu_percent / 100 * self._cpu_cores_total
 
@@ -90,6 +85,4 @@ class SysInfo:
         self._gpu_infos = None
 
     def update_cpu_percent(self)->None:
-        import psutil
-
         self._last_cpu_percent = psutil.cpu_percent(interval=1)

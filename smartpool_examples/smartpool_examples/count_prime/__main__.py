@@ -23,13 +23,13 @@ POOL_MAP = {
 
 
 @app.command()
-def main(pool: str = typer.Option("ProcessPool", "--pool", help="Pool type to use")):
-    pool_cls = POOL_MAP.get(pool)
+def main(pool_type_name: str = typer.Option("ProcessPool", "--pool", help="Pool type to use")):
+    pool_cls = POOL_MAP.get(pool_type_name)
     if pool_cls is None:
-        print(f"Unknown pool: {pool}. Choose from {list(POOL_MAP.keys())}")
+        print(f"Unknown pool: {pool_type_name}. Choose from {list(POOL_MAP.keys())}")
         raise typer.Exit(code=1)
 
-    print(f"Use {pool} to count prime numbers lower than 10000.")
+    print(f"Use {pool_type_name} to count prime numbers lower than 10000.")
     print(f"See source code at folder {self_folder}")
 
     tasks = []

@@ -1,3 +1,5 @@
+import psutil # must import for first fetch cpu percent
+
 __version__ = "0.1.7"
 
 from .futures import Future
