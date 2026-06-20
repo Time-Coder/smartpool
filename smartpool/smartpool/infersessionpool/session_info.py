@@ -36,13 +36,11 @@ class SessionInfo:
         return self._device_type
 
     @property
-    def device_id(self)->str:
+    def device_id(self)->int:
         if self._device_id is None:
-            provider_options = self.session.get_provider_options()
-            if "device_id" in provider_options:
-                self._device_id = provider_options["device_id"]
-            else:
-                self._device_id = 0
+            provider_name = self.session.get_providers()[0]
+            provider_options = self.session.get_provider_options().get(provider_name, {})
+            self._device_id = int(provider_options.get("device_id", 0))
 
         return self._device_id
 
@@ -66,7 +64,7 @@ class SessionInfo:
 
             for node in self.session.get_outputs():
                 self._io_bindings[key].bind_output(
-                    node.name, self.device_type, self.device_id, node.type
+                    node.name, self.device_type, self.device_id
                 )
     
         return self._io_bindings[key]

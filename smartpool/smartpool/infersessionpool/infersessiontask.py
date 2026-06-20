@@ -95,10 +95,10 @@ class InfersessionTask(Task):
             result = []
             for output_name in self.output_names:
                 output_value = output_dict[output_name]
-                if self.output_ortvalues:
+                if not self.output_ortvalues:
                     output_value = output_value.numpy()
                 result.append(output_value)
-                
+
             return result
 
     def exec(self) -> Tuple[bool, Any]:
