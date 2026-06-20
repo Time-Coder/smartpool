@@ -15,21 +15,24 @@ class InfersessionTask(Task):
 
     def __init__(
         self, infer_session_pool: InferSessionPool,
-        args: Tuple[Any, ...], kwargs: Dict[str, Any],
+        model_path: str, kwargs: Dict[str, Any],
         cpu_mode_res: Resource, gpu_mode_res: Resource,
         output_names: Optional[List[str]],
         user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]],
-        use_io_binding: bool, output_ort_values: bool
+        run_options: Optional[ort.RunOptions],
+        use_io_binding: bool, output_ortvalues: bool
     ):
+        self.model_path: str = model_path
         self.user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = user_providers
+        self.run_options: Optional[ort.RunOptions] = run_options
         self.output_names: Optional[List[str]] = output_names
         self.session_info: Optional[SessionInfo] = None
         self.use_io_binding: bool = use_io_binding
-        self.output_ort_values: bool = output_ort_values
+        self.output_ortvalues: bool = output_ortvalues
         self._provider: Optional[Tuple[str, Dict]] = None
         Task.__init__(
             self, pool=infer_session_pool,
-            func=None, args=args, kwargs=kwargs,
+            func=None, args=None, kwargs=kwargs,
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
             use_torch=False,
@@ -72,76 +75,31 @@ class InfersessionTask(Task):
 
         self._provider = gpuinfo_snapshot.ort_provider(self.user_providers)
         return self._provider
-    
-    @staticmethod
-    def _provider_device_type(provider_name: str) -> str:
-        suffix = "ExecutionProvider"
-        if provider_name.endswith(suffix):
-            return provider_name[:-len(suffix)].lower()
-        return provider_name.lower()
-
-    def _bind_input(self, io_binding: ort.IOBinding, name: str, value: Any) -> None:
-        import numpy as np
-
-        if isinstance(value, np.ndarray):
-            io_binding.bind_cpu_input(name, value)
-            return
-
-        import onnxruntime as ort
-
-        if isinstance(value, ort.OrtValue):
-            io_binding.bind_ortvalue_input(name, value)
-            return
-
-        if hasattr(value, "data_ptr") and getattr(value, "is_cuda", False):
-            provider = self.provider
-            device_type = self._provider_device_type(provider[0])
-            device_id = provider[1].get("device_id", 0)
-
-            from .model_info import ModelInfo
-            io_binding.bind_input(
-                name,
-                device_type=device_type,
-                device_id=device_id,
-                element_type=ModelInfo.get_dtype(value),
-                shape=ModelInfo.get_shape(value),
-                buffer_ptr=value.data_ptr(),
-            )
-            return
-
-        raise TypeError(f"IO binding does not support input type: {type(value)}")
 
     def _exec(self) -> Any:
         session = self.session_info.session
-        io_binding = self.session_info.io_binding
-
-        io_binding.clear_binding_inputs()
-        io_binding.clear_binding_outputs()
-
-        for name, value in self.kwargs.items():
-            self._bind_input(io_binding, name, value)
-
-        output_names = self.output_names
-        if output_names is None:
-            output_names = [o.name for o in session.get_outputs()]
-
-        provider = self.provider
-        if provider and provider[0] != "CPUExecutionProvider":
-            device_type = self._provider_device_type(provider[0])
-            device_id = provider[1].get("device_id", 0)
-            for name in output_names:
-                io_binding.bind_output(name, device_type=device_type, device_id=device_id)
-        else:
-            for name in output_names:
-                io_binding.bind_output(name)
-
-        session.run_with_iobinding(io_binding, output_names)
+        io_binding = self.session_info.io_binding(self.kwargs)
+        session.run_with_iobinding(io_binding, self.run_options)
 
         outputs = io_binding.get_outputs()
-        if self.output_ort_values:
-            return outputs
+        if self.output_names is None:
+            if self.output_ortvalues:
+                return outputs
+            else:
+                return [o.numpy() for o in outputs]
         else:
-            return [o.numpy() for o in outputs]
+            output_dict: Dict[str, ort.OrtValue] = {}
+            for i, node in enumerate(session.get_outputs()):
+                output_dict[node.name] = outputs[i]
+
+            result = []
+            for output_name in self.output_names:
+                output_value = output_dict[output_name]
+                if self.output_ortvalues:
+                    output_value = output_value.numpy()
+                result.append(output_value)
+                
+            return result
 
     def exec(self) -> Tuple[bool, Any]:
         try:

@@ -48,7 +48,6 @@ def main(
     download_dataset()
 
     image_paths = glob.glob(DATASET_FOLDER + "/*.jpg")
-    image_paths = image_paths[:1]
     n_tasks = len(image_paths)
 
     progress_info = ProgressInfo(n_tasks)

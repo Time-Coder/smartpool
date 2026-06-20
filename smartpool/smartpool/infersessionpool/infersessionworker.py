@@ -46,7 +46,7 @@ class InferSessionWorker(Worker):
 
         if not task.use_io_binding:
             try:
-                task.session_info.session.run_async(task.output_names, input_feed=task.kwargs, callback=self.callback, user_data=task.id)
+                task.session_info.session.run_async(task.output_names, input_feed=task.kwargs, callback=self.callback, user_data=None, run_options=task.run_options)
             except Exception as e:
                 self.is_working = False
                 infer_session_pool._remove_provider_running_device(provider)
@@ -72,8 +72,8 @@ class InferSessionWorker(Worker):
 
         self._clear()
 
-    def callback(self, results:np.ndarray, user_data: Tuple[InferSessionWorker, str], error_str: str) -> None:
-        task_id = user_data
+    def callback(self, results:np.ndarray, user_data: None, error_str: str) -> None:
+        task_id = self.active_task.id
         if error_str:
             success = False
             result = RuntimeError(error_str)

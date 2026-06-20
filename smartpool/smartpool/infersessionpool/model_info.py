@@ -159,7 +159,7 @@ class ModelInfo:
             formatted_msg = f"model '{self.model_name}' arguments error: {str(e)}"
             raise TypeError(formatted_msg) from None
 
-        has_ort_value: bool = False
+        has_ortvalue: bool = False
         for name, value in kwargs.items():
             if isinstance(value, Future):
                 continue
@@ -169,7 +169,7 @@ class ModelInfo:
                 raise TypeError(f"model '{self.model_name}' input node '{name}' need type (numpy.ndarray, onnxruntime.OrtValue, torch.Tensor), {type(value)} were given")
 
             if cls_name == "OrtValue":
-                has_ort_value: bool = True
+                has_ortvalue: bool = True
 
             node = self.inputs[name]
 
@@ -190,7 +190,7 @@ class ModelInfo:
                 if actual_shape[i] != dim:
                     raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
 
-        return kwargs, has_ort_value
+        return kwargs, has_ortvalue
 
     def check_outputs(self, output_names):
         if output_names is None:

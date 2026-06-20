@@ -28,16 +28,10 @@ class InferSessionPool(Pool):
     _model_infos: Dict[str, ModelInfo] = {}
 
     def __init__(
-        self, model_path: str, max_workers: int = 0,
+        self, max_workers: int = 0,
         thread_name_prefix: str = "InferSessionPool.worker:",
         session_options: Optional[ort.SessionOptions] = None
     ):
-        from .model_info import ModelInfo
-
-        model_path = os.path.abspath(model_path).replace("\\", "/")
-        if model_path not in InferSessionPool._model_infos:
-            InferSessionPool._model_infos[model_path] = ModelInfo(model_path)
-
         Pool.__init__(
             self, max_workers=max_workers,
             initializer=None, initargs=(), initkwargs=None,
@@ -46,39 +40,17 @@ class InferSessionPool(Pool):
         )
         self._thread_name_prefix: str = thread_name_prefix
         self._session_options: Optional[ort.SessionOptions] = session_options
-        self._model_info: ModelInfo = InferSessionPool._model_infos[model_path]
-        self._sessions: Dict[str, SessionInfo] = {}
+        self._sessions: Dict[Tuple[str, str, str], SessionInfo] = {}
         self.print_info: bool = False
 
-    @classmethod
-    def instance(cls, model_path: str, pool_name: str) -> InferSessionPool:
-        model_path = os.path.abspath(model_path).replace("\\", "/")
-
-        if (model_path, pool_name) in Pool._instance_dict[cls]:
-            return Pool._instance_dict[cls][model_path, pool_name]
-
-        if pool_name not in Pool._instance_config[cls]:
-            args = ()
-            kwargs = {}
-        else:
-            args, kwargs = Pool._instance_config[cls][pool_name]
-
-        Pool._instance_dict[cls][model_path, pool_name] = cls(model_path, *args, **kwargs)
-        return Pool._instance_dict[cls][model_path, pool_name]
-
     @staticmethod
-    def run_async(
-        model_path: str,
-        args: Optional[Tuple[Any, ...]]=None,
-        kwargs: Optional[Dict[str, Any]]=None,
-        pool_name: str="default", **submit_kwargs
-    )->Future:
-        infer_session_pool = InferSessionPool.instance(model_path, pool_name)
-        return infer_session_pool.submit(args=args, kwargs=kwargs, **submit_kwargs)
+    def model_info(model_path:str)->ModelInfo:
+        model_path = os.path.abspath(model_path).replace("\\", "/")
+        if model_path not in InferSessionPool._model_infos:
+            from .model_info import ModelInfo
+            InferSessionPool._model_infos[model_path] = ModelInfo(model_path)
 
-    @property
-    def model_info(self)->ModelInfo:
-        return self._model_info
+        return InferSessionPool._model_infos[model_path]
 
     @property
     def session_options(self) -> ort.SessionOptions:
@@ -91,14 +63,18 @@ class InferSessionPool(Pool):
         return self._session_options
 
     @staticmethod
-    def _provider_key(provider: Tuple[str, Dict[str, Any]])->str:
+    def _provider_key(model_path:str, provider: Tuple[str, Dict[str, Any]])->Tuple[str, str, str]:
         import json
 
-        return "(" + provider[0] + ", " + json.dumps(provider[1], sort_keys=True, separators=(', ', ':')) + ")"
+        model_path = os.path.abspath(model_path).replace("\\", "/")
+        return (
+            model_path,
+            provider[0],
+            json.dumps(provider[1], sort_keys=True, separators=(', ', ':'))
+        )
 
-    def _session_info(self, provider: Tuple[str, Dict[str, Any]])->SessionInfo:
-        model_path: str = self._model_info.model_path
-        key = self._provider_key(provider)
+    def _session_info(self, model_path:str, provider: Tuple[str, Dict[str, Any]])->SessionInfo:
+        key = self._provider_key(model_path, provider)
         if key not in self._sessions:
             from .session_info import SessionInfo
             self._sessions[key] = SessionInfo(model_path, self.session_options, providers=[provider], enable_fallback=False)
@@ -154,15 +130,16 @@ class InferSessionPool(Pool):
         raise ValueError(f"all providers are not supported: {providers}")
 
     def submit(
-        self,
+        self, model_path: str,
         args: Optional[Tuple[Any]] = None,
         kwargs: Optional[Dict[str, Any]] = None,
         output_names: Optional[Union[List[str], None]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
+        run_options: Optional[ort.RunOptions] = None,
         use_io_binding: bool = False,
-        output_ort_values: bool = False
+        output_ortvalues: bool = False
     ) -> Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
@@ -170,8 +147,9 @@ class InferSessionPool(Pool):
         from ..resource import Resource
         from .infersessiontask import InfersessionTask
 
-        validated_kwargs, has_ort_value = self._model_info.check_args(args, kwargs)
-        self._model_info.check_outputs(output_names)
+        model_info: ModelInfo = self.model_info(model_path)
+        validated_kwargs, has_ortvalue = model_info.check_args(args, kwargs)
+        model_info.check_outputs(output_names)
         self._check_providers(providers)
 
         if cpu_mode_res is None:
@@ -181,14 +159,14 @@ class InferSessionPool(Pool):
             gpu_mode_res = cpu_mode_res
 
         if not use_io_binding:
-            if output_ort_values or has_ort_value:
+            if output_ortvalues or has_ortvalue:
                 use_io_binding = True
 
         task = InfersessionTask(
-            infer_session_pool=self, args=(), kwargs=validated_kwargs,
+            infer_session_pool=self, model_path=model_info.model_path, kwargs=validated_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res,
-            output_names=output_names, user_providers=providers,
-            use_io_binding=use_io_binding, output_ort_values=output_ort_values
+            output_names=output_names, user_providers=providers, run_options=run_options,
+            use_io_binding=use_io_binding, output_ortvalues=output_ortvalues
         )
         self._validate_resource_feasibility(task)
 
@@ -250,7 +228,7 @@ class InferSessionPool(Pool):
             task.session_info = None
             return None
 
-        task.session_info = self._session_info(provider)
+        task.session_info = self._session_info(task.model_path, provider)
         return task.session_info
 
     def _put_task(self, task: InfersessionTask) -> None:

@@ -36,6 +36,13 @@ class Task:
     ):
         self.id: str = str(uuid.uuid4())
         self.func: Union[Callable[..., Any], str] = func
+
+        if args is None:
+            args = ()
+
+        if kwargs is None:
+            kwargs = {}
+
         self.args: List[Any] = list(args)
         self.kwargs: Dict[str, Any] = kwargs
         self.cpu_mode_res: Resource = cpu_mode_res
@@ -45,7 +52,6 @@ class Task:
         self.estimated_need_cpu_mem: float = 0.0
         self.modules_overlap_ratio: float = 0.0
         self.module_deps: Dict[str, int] = {}
-        self.output_names: List[str] = []
         self.ready_to_run: bool = True
 
         if calculate_module_deps:
