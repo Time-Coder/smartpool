@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, List, Union
 from collections import defaultdict
+import threading
+import time
 
 if TYPE_CHECKING:
     import onnxruntime as ort
@@ -10,16 +12,83 @@ if TYPE_CHECKING:
 class SessionInfo:
 
     def __init__(self, *args, **kwargs)->None:
-        import onnxruntime as ort
-        self.session = ort.InferenceSession(*args, **kwargs)
-        self._device_type: Optional[str] = None
-        self._device_id: Optional[int] = None
-        self._io_bindings: Dict[Tuple[int, str], ort.IOBinding] = defaultdict(self.session.io_binding)
+        self._session_args = args
+        self._session_kwargs = kwargs
+        self._session: Optional[ort.InferenceSession] = None
+        self.provider_name: str = ""
+        self.provider_options: Dict[str, Any] = {}
+        self.device_type: str = ""
+        self.device_id: int = 0
+        self._gpu_index: int = -1
+        self._io_bindings: Dict[Tuple[int, str], ort.IOBinding] = {}
         self._input_ortvalues: Dict[Tuple[int, str], Dict[str, ort.OrtValue]] = defaultdict(dict)
         self._output_ortvalues: Dict[Tuple[int, str], Dict[str, ort.OrtValue]] = defaultdict(dict)
+        self.estimated_cpu_mem: int = 0
+        self.estimated_gpu_mem: int = 0
+        self._lock: threading.Lock = threading.Lock()
+        self._last_use_time: float = 0
+        self._running_count: int = 0
+        self._running_count_lock: threading.Lock = threading.Lock()
+
+    def start(self) -> None:
+        with self._lock:
+            if self._session is not None:
+                return
+
+            import onnxruntime as ort
+            from .infersessionpool import InferSessionPool
+
+            model_path = self._session_args[0]
+            self._session = ort.InferenceSession(*self._session_args, **self._session_kwargs)
+            self.provider_name: str = self._session.get_providers()[0]
+            self.provider_options: Dict[str, Any] = self._session.get_provider_options().get(self.provider_name, {})
+            self.device_id = self.provider_options.get("device_id", 0)
+            self.device_type = self._provider_device_type(self.provider_name)
+            self._io_bindings = defaultdict(self._session.io_binding)
+
+            file_size = InferSessionPool.model_info(model_path).file_size
+            cpu_mul, gpu_mul = InferSessionPool.PROVIDER_MEMORY_MULTIPLIERS.get(
+                self.provider_name, (3, 0)
+            )
+            self.estimated_cpu_mem = file_size * cpu_mul
+            self.estimated_gpu_mem = file_size * gpu_mul
+            self._last_use_time = time.time()
+            self._take_session_resource()
+        
+    def stop(self) -> None:
+        with self._lock:
+            if self._session is None:
+                return
+
+            self._release_session_resource()
+            self._session = None
+            self.device_type = ""
+            self.device_id = 0
+            self.provider_name = ""
+            self.provider_options = {}
+            self._gpu_index = -1
+            self._io_bindings = {}
+            self._input_ortvalues = defaultdict(dict)
+            self._output_ortvalues = defaultdict(dict)
+            self.estimated_cpu_mem = 0
+            self.estimated_gpu_mem = 0
+
+    def _increase_running_count(self):
+        with self._running_count_lock:
+            self._last_use_time = time.time()
+            self._running_count += 1
+
+    def _decrease_running_count(self):
+        with self._running_count_lock:
+            self._running_count -= 1
+
+    @property
+    def session(self)->ort.InferenceSession:
+        self.start()
+        return self._session
 
     @staticmethod
-    def provider_device_type(provider_name: str) -> str:
+    def _provider_device_type(provider_name: str) -> str:
         suffix = "ExecutionProvider"
         result = provider_name.lower()
         if provider_name.endswith(suffix):
@@ -30,21 +99,27 @@ class SessionInfo:
         
         return result
 
-    @property
-    def device_type(self)->str:
-        if self._device_type is None:
-            self._device_type = self.provider_device_type(self.session.get_providers()[0])
+    def _take_session_resource(self)->None:
+        from ..pool import Pool
 
-        return self._device_type
+        with Pool._sys_info_lock:
+            Pool._sys_info.cpu_mem_free -= self.estimated_cpu_mem
+            if self.provider_name != "CPUExecutionProvider":
+                device_id_key: str = ("device_id" if self.provider_name != "DmlExecutionProvider" else "dml_id")
+                for index, gpu in enumerate(Pool._sys_info.gpu_infos):
+                    gpu_device_id: int = getattr(gpu, device_id_key)
+                    if gpu_device_id == self.device_id:
+                        gpu.mem_free -= self.estimated_gpu_mem
+                        self._gpu_index = index
+                        break
 
-    @property
-    def device_id(self)->int:
-        if self._device_id is None:
-            provider_name = self.session.get_providers()[0]
-            provider_options = self.session.get_provider_options().get(provider_name, {})
-            self._device_id = int(provider_options.get("device_id", 0))
+    def _release_session_resource(self)->None:
+        from ..pool import Pool
 
-        return self._device_id
+        with Pool._sys_info_lock:
+            Pool._sys_info.cpu_mem_free += self.estimated_cpu_mem
+            if self._gpu_index >= 0:
+                Pool._sys_info.gpu_infos[self._gpu_index].mem_free += self.estimated_gpu_mem
 
     def _inputs_key(self, input_feed: Dict[str, Any])->Tuple[int, str]:
         import threading
@@ -57,41 +132,60 @@ class SessionInfo:
         return tid, json.dumps(shape_dict, separators=(', ', ':'))
 
     def run_with_iobinding(self, output_names: Optional[List[str]], input_feed: Dict[str, Any], run_options: ort.RunOptions, copy_outputs_to_cpu: bool) -> Union[List[ort.OrtValue], List[np.ndarray]]:
-        key: Tuple[int, str] = self._update_input_ortvalues(input_feed)
-        if key not in self._io_bindings:
-            for name, ortvalue in self._input_ortvalues[key].items():
-                self._io_bindings[key].bind_ortvalue_input(
-                    name, ortvalue
-                )
+        try:
+            self._increase_running_count()
+            key: Tuple[int, str] = self._update_input_ortvalues(input_feed)
+            if key not in self._io_bindings:
+                for name, ortvalue in self._input_ortvalues[key].items():
+                    self._io_bindings[key].bind_ortvalue_input(
+                        name, ortvalue
+                    )
 
-            for node in self.session.get_outputs():
-                self._io_bindings[key].bind_output(
-                    node.name, self.device_type, self.device_id
-                )
+                for node in self.session.get_outputs():
+                    self._io_bindings[key].bind_output(
+                        node.name, self.device_type, self.device_id
+                    )
 
-        io_binding = self._io_bindings[key]
-        self.session.run_with_iobinding(io_binding, run_options)
-        ort_outputs = io_binding.get_outputs()
-        self._update_output_ortvalues(key, ort_outputs)
+            io_binding = self._io_bindings[key]
+            self.session.run_with_iobinding(io_binding, run_options)
+            ort_outputs = io_binding.get_outputs()
+            self._update_output_ortvalues(key, ort_outputs)
 
-        if copy_outputs_to_cpu:
-            outputs = io_binding.copy_outputs_to_cpu()
-        else:
-            outputs = ort_outputs
+            if copy_outputs_to_cpu:
+                outputs = io_binding.copy_outputs_to_cpu()
+            else:
+                outputs = ort_outputs
 
-        if output_names is None:
-            return outputs
-        else:
-            output_dict: Dict[str, Any] = {}
-            for i, node in enumerate(self.session.get_outputs()):
-                output_dict[node.name] = outputs[i]
+            if output_names is None:
+                return outputs
+            else:
+                output_dict: Dict[str, Any] = {}
+                for i, node in enumerate(self.session.get_outputs()):
+                    output_dict[node.name] = outputs[i]
 
-            result = []
-            for output_name in output_names:
-                result.append(output_dict[output_name])
+                result = []
+                for output_name in output_names:
+                    result.append(output_dict[output_name])
 
-            return result
-    
+                return result
+        finally:
+            self._decrease_running_count()
+
+    def run_async(self, output_names: Optional[List[str]], input_feed: Dict[str, Any], callback, user_data, run_options: ort.RunOptions):
+        self._increase_running_count()
+
+        def _wrapped_callback(*args, **kwargs):
+            try:
+                callback(*args, **kwargs)
+            finally:
+                self._decrease_running_count()
+
+        try:
+            self.session.run_async(output_names, input_feed, _wrapped_callback, user_data, run_options)
+        except Exception as e:
+            self._decrease_running_count()
+            raise
+
     def _update_input_ortvalues(self, input_feed: Dict[str, Any]) -> Tuple[int, str]:
         import onnxruntime as ort
 

@@ -46,7 +46,7 @@ class InferSessionWorker(Worker):
 
         if not task.use_io_binding:
             try:
-                task.session_info.session.run_async(task.output_names, input_feed=task.kwargs, callback=self.callback, user_data=None, run_options=task.run_options)
+                task.session_info.run_async(task.output_names, input_feed=task.kwargs, callback=self.callback, user_data=None, run_options=task.run_options)
             except Exception as e:
                 self.is_working = False
                 infer_session_pool._remove_provider_running_device(provider)

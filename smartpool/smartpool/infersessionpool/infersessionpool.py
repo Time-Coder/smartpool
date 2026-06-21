@@ -28,6 +28,21 @@ class InferSessionPool(Pool):
 
     _model_infos: Dict[str, ModelInfo] = {}
 
+    PROVIDER_MEMORY_MULTIPLIERS: Dict[str, Tuple[int, int]] = {
+        "CPUExecutionProvider": (3, 0),
+        "CUDAExecutionProvider": (1, 2),
+        "TensorrtExecutionProvider": (256, 256),
+        "DmlExecutionProvider": (1, 2),
+        "OpenVINOExecutionProvider": (2, 0),
+        "CoreMLExecutionProvider": (2, 1),
+        "ROCMExecutionProvider": (1, 2),
+        "MIGraphXExecutionProvider": (1, 2),
+        "ArmNNExecutionProvider": (3, 0),
+        "XnnpackExecutionProvider": (3, 0),
+        "NnapiExecutionProvider": (2, 0),
+        "AclExecutionProvider": (2, 1),
+    }
+
     def __init__(
         self, max_workers: int = 0,
         thread_name_prefix: str = "InferSessionPool.worker:",
@@ -78,7 +93,8 @@ class InferSessionPool(Pool):
         key = self._provider_key(model_path, provider)
         if key not in self._sessions:
             from .session_info import SessionInfo
-            self._sessions[key] = SessionInfo(model_path, self.session_options, providers=[provider], enable_fallback=False)
+            session_info = SessionInfo(model_path, self.session_options, providers=[provider], enable_fallback=False)
+            self._sessions[key] = session_info
 
         return self._sessions[key]
 
@@ -313,3 +329,9 @@ class InferSessionPool(Pool):
 
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        for session in self._sessions.values():
+            session.stop()
+        self._sessions.clear()
+        super().shutdown(wait=wait, cancel_futures=cancel_futures)
