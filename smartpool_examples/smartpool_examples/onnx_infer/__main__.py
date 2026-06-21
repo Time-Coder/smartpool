@@ -52,6 +52,9 @@ def main(
 
     progress_info = ProgressInfo(n_tasks)
 
+    if not os.path.isdir(OUTPUT_FOLDER):
+        os.makedirs(OUTPUT_FOLDER)
+
     with progress_info:
         start_time = time.perf_counter()
         if method == Method.SmartPool:

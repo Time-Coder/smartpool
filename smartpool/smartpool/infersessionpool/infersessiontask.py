@@ -20,7 +20,7 @@ class InfersessionTask(Task):
         output_names: Optional[List[str]],
         user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]],
         run_options: Optional[ort.RunOptions],
-        use_io_binding: bool, output_ortvalues: bool
+        use_io_binding: bool, copy_outputs_to_cpu: bool
     ):
         self.model_path: str = model_path
         self.user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = user_providers
@@ -28,7 +28,7 @@ class InfersessionTask(Task):
         self.output_names: Optional[List[str]] = output_names
         self.session_info: Optional[SessionInfo] = None
         self.use_io_binding: bool = use_io_binding
-        self.output_ortvalues: bool = output_ortvalues
+        self.copy_outputs_to_cpu: bool = copy_outputs_to_cpu
         self._provider: Optional[Tuple[str, Dict]] = None
         Task.__init__(
             self, pool=infer_session_pool,
@@ -76,34 +76,9 @@ class InfersessionTask(Task):
         self._provider = gpuinfo_snapshot.ort_provider(self.user_providers)
         return self._provider
 
-    def _exec(self) -> Any:
-        session = self.session_info.session
-        io_binding = self.session_info.io_binding(self.kwargs)
-        session.run_with_iobinding(io_binding, self.run_options)
-
-        outputs = io_binding.get_outputs()
-        if self.output_names is None:
-            if self.output_ortvalues:
-                return outputs
-            else:
-                return [o.numpy() for o in outputs]
-        else:
-            output_dict: Dict[str, ort.OrtValue] = {}
-            for i, node in enumerate(session.get_outputs()):
-                output_dict[node.name] = outputs[i]
-
-            result = []
-            for output_name in self.output_names:
-                output_value = output_dict[output_name]
-                if not self.output_ortvalues:
-                    output_value = output_value.numpy()
-                result.append(output_value)
-
-            return result
-
     def exec(self) -> Tuple[bool, Any]:
         try:
-            result = self._exec()
+            result = self.session_info.run_with_iobinding(self.output_names, self.kwargs, self.run_options, self.copy_outputs_to_cpu)
             success = True
         except Exception as e:
             result = e

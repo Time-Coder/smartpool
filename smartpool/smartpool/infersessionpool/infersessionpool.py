@@ -139,7 +139,7 @@ class InferSessionPool(Pool):
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
         run_options: Optional[ort.RunOptions] = None,
         use_io_binding: bool = False,
-        output_ortvalues: bool = False
+        copy_outputs_to_cpu: bool = True
     ) -> Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
@@ -159,14 +159,14 @@ class InferSessionPool(Pool):
             gpu_mode_res = cpu_mode_res
 
         if not use_io_binding:
-            if output_ortvalues or has_ortvalue:
+            if not copy_outputs_to_cpu or has_ortvalue:
                 use_io_binding = True
 
         task = InfersessionTask(
             infer_session_pool=self, model_path=model_info.model_path, kwargs=validated_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res,
             output_names=output_names, user_providers=providers, run_options=run_options,
-            use_io_binding=use_io_binding, output_ortvalues=output_ortvalues
+            use_io_binding=use_io_binding, copy_outputs_to_cpu=copy_outputs_to_cpu
         )
         self._validate_resource_feasibility(task)
 
