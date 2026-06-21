@@ -63,6 +63,7 @@ class InterpreterWorker(Worker):
             initargs=interpreter_pool._initargs,
             initkwargs=interpreter_pool._initkwargs
         )
+        self._take_worker_memory()
 
     def join(self)->None:
         if self.executor is not None:

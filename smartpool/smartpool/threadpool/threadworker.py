@@ -67,6 +67,7 @@ class ThreadWorker(Worker):
             daemon=True
         )
         self.executor.start()
+        self._take_worker_memory()
 
     def join(self)->None:
         if self.executor is not None:

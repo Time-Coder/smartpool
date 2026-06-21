@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import onnxruntime as ort
 
     from ..resource import Resource
+    from ..worker import Worker
     from .infersessiontask import InfersessionTask
     from .model_info import ModelInfo
     from .session_info import SessionInfo
@@ -200,10 +201,7 @@ class InferSessionPool(Pool):
                 if not has_cpu_provider:
                     continue
 
-            devices, _ = self._choose_task_device(task, mode, kill_workers=False)
-            if devices and not isinstance(devices[0], str):
-                devices.sort(key=lambda d: self._device_ortvalue_score(task, d), reverse=True)
-            
+            devices, _ = self._choose_task_device(task, mode, kill_workers=False)            
             for device in devices:
                 if isinstance(device, str):
                     task.device = device
@@ -218,16 +216,22 @@ class InferSessionPool(Pool):
                     task.device = None
                     task.gpu_index = -1
                     task.dml_id = -1
-                    continue
-
-                break
+                else:
+                    break
 
             if task.device is not None and task.session_info is not None and task.worker is not None:
                 return True
 
         return False
 
-    def _choose_task_session(self, task: InfersessionTask) -> Optional[ort.InferenceSession]:
+    def _choose_task_device(self, task: InfersessionTask, mode: str, kill_workers: bool):
+        devices, should_kill_workers = Pool._choose_task_device(self, task, mode, kill_workers)
+        if len(devices) > 1 and not isinstance(devices[0], str) and task.use_io_binding:
+            devices.sort(key=lambda d: self._device_ortvalue_score(task, d), reverse=True)
+
+        return devices, should_kill_workers
+
+    def _choose_task_session(self, task: InfersessionTask) -> Optional[SessionInfo]:
         provider: Tuple[str, Dict[str, Any]] = task.provider
         if not self._can_use_provider(provider):
             task.session_info = None
@@ -258,6 +262,29 @@ class InferSessionPool(Pool):
                     score += 1
                     break
         return score
+
+    def _choose_task_worker(self, task: InfersessionTask, res: Resource) -> Optional[Worker]:
+        for worker in self._workers:
+            if worker.is_working:
+                continue
+
+            if (worker.executor is not None) == task.use_io_binding:
+                task.worker = worker
+                return worker
+
+        for worker in self._workers:
+            if worker.is_working:
+                continue
+
+            task.worker = worker
+            return worker
+
+        if len(self._workers) < self._max_workers:
+            task.worker = self._add_worker()
+        else:
+            task.worker = None
+
+        return task.worker
 
     def _put_task(self, task: InfersessionTask) -> None:
         self._take_resource(task)

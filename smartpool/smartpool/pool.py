@@ -233,7 +233,6 @@ class Pool(ABC):
                 devices, should_kill_workers = self._choose_task_device(task, "gpu", kill_workers=False)
                 if devices:
                     for idle_worker in should_kill_workers:
-                        self._sys_info.cpu_mem_free += idle_worker.cached_rss
                         idle_worker.stop(wait=False, clear=True)
 
                     return True
@@ -527,7 +526,6 @@ class Pool(ABC):
 
                     if kill_workers:
                         for idle_worker in idle_workers:
-                            self._sys_info.cpu_mem_free += idle_worker.cached_rss
                             idle_worker.stop(wait=False, clear=True)
                             if cpu_mem_needed <= self._sys_info.cpu_mem_free:
                                 break

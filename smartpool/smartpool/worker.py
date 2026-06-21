@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from .utils import QueueLike
 
 
+WORKER_DEFAULT_MEMORY: int = 52428800
+
+
 class Worker(ABC):
 
     _total_working_count_lock:threading.Lock = threading.Lock()
@@ -34,6 +37,7 @@ class Worker(ABC):
         self._task_queue: Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]] = None
         self.executor: Optional[Union[mp.Process, threading.Thread]] = None
         self.active_task: Optional[Task] = None
+        self._memory_taken: bool = False
 
     @property
     def task_queue(self)->Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]]:
@@ -89,6 +93,24 @@ class Worker(ABC):
     def change_device(self, device:str)->None:
         pass
 
+    @property
+    def memory(self) -> int:
+        return WORKER_DEFAULT_MEMORY
+
+    def _take_worker_memory(self) -> None:
+        if self._memory_taken:
+            return
+        self._memory_taken = True
+        with self.pool._sys_info_lock:
+            self.pool._sys_info.cpu_mem_free -= self.memory
+
+    def _release_worker_memory(self) -> None:
+        if not self._memory_taken:
+            return
+        self._memory_taken = False
+        with self.pool._sys_info_lock:
+            self.pool._sys_info.cpu_mem_free += self.memory
+
     @abstractmethod
     def start(self):
         pass
@@ -97,6 +119,7 @@ class Worker(ABC):
         if self.executor is None:
             return
 
+        self._release_worker_memory()
         self.task_queue.put(None)
         if wait:
             self.join()

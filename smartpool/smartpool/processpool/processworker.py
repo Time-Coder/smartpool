@@ -88,6 +88,10 @@ class ProcessWorker(Worker):
         self._is_rss_dirty = True
         self._cached_rss = 0
 
+    @property
+    def memory(self) -> int:
+        return self.cached_rss
+
     def start(self)->None:
         if self.executor is not None:
             return
@@ -102,6 +106,7 @@ class ProcessWorker(Worker):
         )
         self.executor.start()
         self.process_info = psutil.Process(self.executor.pid)
+        self._take_worker_memory()
 
     def join(self)->None:
         if self.executor is not None:

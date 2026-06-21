@@ -43,6 +43,31 @@ class InfersessionTask(Task):
     def can_use(self, gpu:GPUInfoSnapshot)->bool:
         return bool(gpu.ort_provider(self.user_providers))
 
+    def _dep_future_done_callback(self, pool, future):
+        try:
+            with self.finished_dep_futures_count_lock:
+                self.finished_dep_futures_count += 1
+
+                result = future.result()
+                future_key = self.dep_futures[future]
+                if isinstance(future_key, int):
+                    self.args[future_key] = result
+                else:
+                    self.kwargs[future_key] = result
+
+                if result.__class__.__name__ == "OrtValue":
+                    self.use_io_binding = True
+
+                if self.finished_dep_futures_count == len(self.dep_futures):
+                    self.ready_to_run = True
+                    with pool._lock:
+                        pool._submit(self, append_to_delay=False)
+        except Exception as e:
+            self.future.set_exception(e)
+            with pool._lock:
+                if self.id in pool._tasks:
+                    pool._tasks.pop(self.id)
+
     @property
     def device(self)->str:
         return self._device
