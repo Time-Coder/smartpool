@@ -201,6 +201,9 @@ class InferSessionPool(Pool):
                     continue
 
             devices, _ = self._choose_task_device(task, mode, kill_workers=False)
+            if devices and not isinstance(devices[0], str):
+                devices.sort(key=lambda d: self._device_ortvalue_score(task, d), reverse=True)
+            
             for device in devices:
                 if isinstance(device, str):
                     task.device = device
@@ -217,6 +220,8 @@ class InferSessionPool(Pool):
                     task.dml_id = -1
                     continue
 
+                break
+
             if task.device is not None and task.session_info is not None and task.worker is not None:
                 return True
 
@@ -230,6 +235,29 @@ class InferSessionPool(Pool):
 
         task.session_info = self._session_info(task.model_path, provider)
         return task.session_info
+
+    def _device_ortvalue_score(self, task: InfersessionTask, device: Any) -> int:
+        if isinstance(device, str):
+            return 0
+
+        provider = device.ort_provider(task.user_providers)
+        if provider is None:
+            return 0
+
+        key = self._provider_key(task.model_path, provider)
+        session_info = self._sessions.get(key)
+        if session_info is None:
+            return 0
+
+        score = 0
+        for kv in task.kwargs.values():
+            if kv.__class__.__name__ != "OrtValue":
+                continue
+            for ortvalue_dict in session_info._input_ortvalues.values():
+                if any(kv is cached_ov for cached_ov in ortvalue_dict.values()):
+                    score += 1
+                    break
+        return score
 
     def _put_task(self, task: InfersessionTask) -> None:
         self._take_resource(task)
