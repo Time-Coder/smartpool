@@ -11,6 +11,10 @@ SmartPool is a Python library that provides intelligent resource-aware pooling m
 - **PyTorch Integration**: Support for PyTorch multiprocessing with tensor sharing to avoid serialization
 - **Training Hot Migration**: Automatically moves CPU training tasks to GPU when `best_device()` changes
 - **InferSessionPool**: Thread-safe ONNX Runtime session pool for concurrent inference
+- **Future Dependency Resolution**: Submit tasks with `Future` objects as arguments; automatically waits for dependencies to complete before execution
+- **`@pool.task` Decorator**: Write concurrent code like synchronous code using the task decorator pattern
+- **Enhanced Future API**: Tuple unpacking (`future.unpack(n)`) and index/key access (`future[key]`) for easy pipeline composition
+- **InferSessionPool IO Binding**: Zero-copy ONNX inference with `IOBinding` support for GPU-resident data
 
 ## Installation
 
@@ -103,10 +107,68 @@ def training_task():
 
 if __name__ == "__main__":
     with ProcessPool(use_torch=True) as pool:
-        future = pool.submit(training_task, args=(model, optimizer, data))
+        future = pool.submit(
+            training_task,
+            args=(model, optimizer, data),
+            device_changeable=True # <-- turn on device hot migration
+        )
 ```
 
-See more examples in the [smartpool-examples](./smartpool_examples/) package.
+### Task Decorator (`@pool.task`)
+
+The `@pool.task` decorator lets you write concurrent code in the same style as synchronous code. Decorate any function, call it normally, and it returns a `Future` automatically.
+
+```python
+from smartpool import ThreadPool, InferSessionPool, Resource, DataSize
+
+
+# --- Decorate preprocessing / postprocessing functions ---
+# First, configure the pool(s) the decorator will use
+ThreadPool.config(pool_name="pre_post", max_workers=4)
+
+@ThreadPool.task(pool_name="pre_post", cpu_mode_res=Resource(cpu_cores=1, cpu_mem=15*DataSize.MB))
+def preprocess(image_path: str):
+    # ... read & transform image ...
+    return img, blob, scale, pad
+
+@ThreadPool.task(pool_name="pre_post", cpu_mode_res=Resource(cpu_cores=1, cpu_mem=81*DataSize.MB))
+def postprocess(img, outputs, output_path, scale, pad):
+    # ... decode results & save ...
+    pass
+
+
+# --- Pipeline ---
+infer_session_pool = InferSessionPool()
+
+def run_pipeline(image_paths: List[str]):
+    futures = []
+    for image_path in image_paths:
+        preprocess_future = preprocess(image_path)              # returns Future, runs on ThreadPool
+        img, blob, scale, pad = preprocess_future.unpack(4)     # unpack Future into sub-Futures
+
+        infer_future = infer_session_pool.submit(model_path, args=(blob,))
+        outputs = infer_future[0]                               # future[0] → sub-Future for first output
+
+        postprocess_future = postprocess(img, outputs, output_path, scale, pad)
+        futures.append(postprocess_future)
+
+    for f in as_completed(futures):
+        f.result()
+```
+
+The decorator can also be used **without arguments**:
+
+```python
+@ThreadPool.task
+def my_task(x):
+    return x * 2
+
+future = my_task(42)
+```
+
+Use `Pool.config(pool_name, *args, **kwargs)` to pre-configure a named pool instance, and `Pool.instance(pool_name)` to retrieve it. The decorator automatically calls `Pool.instance(pool_name).submit(...)` at call time.
+
+See full examples in `smartpool_examples/onnx_infer/` and `smartpool_examples/onnx_chain_infer/`.
 
 ## API
 
@@ -164,14 +226,44 @@ class ProcessPool:
 
         Args:
             func: The callable to execute.
-            args: The arguments to pass to the callable.
-            kwargs: The keyword arguments to pass to the callable.
+            args: The arguments to pass to the callable. May contain `Future` objects — they will be automatically resolved before the task runs.
+            kwargs: The keyword arguments to pass to the callable. May contain `Future` objects.
             cpu_mode_res: Resource requirements when running on CPU.
             gpu_mode_res: Resource requirements when running on GPU.
             use_torch: Whether to enable PyTorch tensor sharing and device migration.
         
         Returns:
             A concurrent.futures.Future representing the given call.
+        """
+
+    @classmethod
+    def config(cls, pool_name: str, *args, **kwargs) -> None: ...
+        """
+        Pre-configure a named pool instance for later retrieval via `cls.instance(pool_name)`.
+        Used together with the `@pool.task` decorator.
+
+        Example:
+            ThreadPool.config(pool_name="pre_post", max_workers=4)
+        """
+
+    @classmethod
+    def instance(cls, pool_name: str) -> Pool: ...
+        """
+        Get or create a pool instance by name. If the named pool was previously
+        configured with `config()`, it is created with those arguments; otherwise
+        default arguments are used.
+        """
+
+    @classmethod
+    def task(cls, func: Callable = None, *, pool_name: str = "default", **submit_kwargs) -> Callable: ...
+        """
+        Decorator that turns a function into a task submitted to a named pool.
+        Supports two forms:
+
+        @ThreadPool.task                                 # no arguments (pool_name="default")
+        @ThreadPool.task(pool_name="x", cpu_mode_res=...) # with arguments
+
+        The decorated function returns a Future when called.
         """
 
     def map(
@@ -337,18 +429,28 @@ class InferSessionPool(ThreadPool):
         self, model_path:str,
         args:Optional[Tuple[Any]]=None,
         kwargs:Optional[Dict[str, Any]]=None,
+        output_names:Optional[Union[List[str], None]]=None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
+        providers:Optional[List[Union[str, Tuple[str, Dict]]]]=None,
+        run_options:Optional[ort.RunOptions]=None,
+        use_io_binding:bool=False,
+        copy_outputs_to_cpu:bool=True,
     )->Future: ...
         """
         Submits an ONNX model for inference with the given input tensors.
 
         Args:
             model_path: Path to the .onnx model file.
-            args: Input tensors to pass to the model.
-            kwargs: Additional keyword arguments.
+            args: Input tensors to pass to the model. May contain `Future` objects for dependency resolution.
+            kwargs: Additional keyword arguments (keyword → input name mapping). May contain `Future` objects.
+            output_names: Optional subset of output names to return.
             cpu_mode_res: Resource requirements when running on CPU.
             gpu_mode_res: Resource requirements when running on GPU.
+            providers: Optional ONNX Runtime provider list (e.g., `[("CUDAExecutionProvider", {...})]`).
+            run_options: Optional ONNX Runtime RunOptions.
+            use_io_binding: Enable zero-copy IO binding. Auto-enabled when any input is an `OrtValue` or when `copy_outputs_to_cpu=False`.
+            copy_outputs_to_cpu: If True, results are copied to CPU as numpy arrays. If False, results remain as `OrtValue` objects on the device.
 
         Returns:
             A concurrent.futures.Future representing the inference result.
@@ -362,6 +464,58 @@ class InferSessionPool(ThreadPool):
         """
         All same as ThreadPool
         """
+```
+
+### Future Enhancements
+
+SmartPool extends `concurrent.futures.Future` with additional utilities for building non-blocking pipelines.
+
+```python
+from smartpool.futures import Future
+
+class Future(concurrent.futures.Future):
+
+    def __getitem__(self, key: Any) -> Future: ...
+        """
+        Create a child Future that resolves to `self.result()[key]`.
+        Supports both integer indices and string/slice keys.
+        Non-blocking — returns immediately.
+
+        Example:
+            first_output = infer_future[0]          # → Future resolving to first output
+            named_output = infer_future["labels"]   # → Future resolving to named output
+        """
+
+    def unpack(self, n: int) -> List[Future]: ...
+        """
+        Create *n* child Futures that resolve to `self.result()[0]` ... `self.result()[n-1]`.
+        Enables tuple unpacking of Future results.
+        Non-blocking — returns immediately.
+
+        Example:
+            img, blob, scale, pad = preprocess_future.unpack(4)
+            # Each variable is a Future; pass them directly to the next pipeline step
+        """
+
+    def add_start_callback(self, fn: Callable[[], None]) -> None: ...
+        """
+        Register a callback that fires *before* the task starts running (when
+        the Future transitions from PENDING to RUNNING). Useful for progress tracking.
+        """
+```
+
+Together with the **Future dependency resolution** in `submit()`, you can compose complex pipelines without blocking:
+
+```python
+preprocess_future = pool.submit(preprocess, args=(image_path,))
+img, blob, scale, pad = preprocess_future.unpack(4)
+
+# infer_future won't execute until blob is ready
+infer_future = infer_session_pool.submit(model_path, args=(blob,))
+outputs = infer_future[0]
+
+# postprocess_future won't execute until all deps are ready
+postprocess_future = pool.submit(postprocess, args=(img, outputs, scale, pad))
 ```
 
 ### Resource & DataSize
