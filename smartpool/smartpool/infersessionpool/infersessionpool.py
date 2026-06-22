@@ -48,6 +48,10 @@ class InferSessionPool(Pool):
         thread_name_prefix: str = "InferSessionPool.worker:",
         session_options: Optional[ort.SessionOptions] = None
     ):
+        if max_workers <= 0:
+            import os
+            max_workers = os.process_cpu_count()
+            
         Pool.__init__(
             self, max_workers=max_workers,
             initializer=None, initargs=(), initkwargs=None,

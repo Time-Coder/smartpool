@@ -69,9 +69,6 @@ class Pool(ABC):
         else:
             self._torch_gpu_available = False
 
-        if not max_workers:
-            max_workers = os.cpu_count()
-
         self._max_tasks_per_child: int = max_tasks_per_child
         self._need_module_deps: bool = need_module_deps
         self._use_torch: bool = use_torch

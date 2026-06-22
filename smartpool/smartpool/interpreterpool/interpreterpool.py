@@ -23,8 +23,12 @@ class InterpreterPool(Pool):
         use_torch:bool=False
     ):
         import concurrent.interpreters as interpreters
-
+        
         from .interpreterworker import InterpreterWorker
+
+        if max_workers <= 0:
+            import os
+            max_workers = min(32, (os.process_cpu_count() or 1) + 4)
 
         Pool.__init__(
             self, max_workers=max_workers,
