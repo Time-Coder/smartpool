@@ -221,7 +221,7 @@ class InferSessionPool(Pool):
                 if not has_cpu_provider:
                     continue
 
-            devices, _ = self._choose_task_device(task, mode, kill_workers=False)            
+            devices, reclaim_items = self._choose_task_device(task, mode)
             for device in devices:
                 if isinstance(device, str):
                     task.device = device
@@ -240,16 +240,67 @@ class InferSessionPool(Pool):
                     break
 
             if task.device is not None and task.session_info is not None and task.worker is not None:
+                self._reclaim_session_items(reclaim_items)
                 return True
 
         return False
 
-    def _choose_task_device(self, task: InfersessionTask, mode: str, kill_workers: bool):
-        devices, should_kill_workers = Pool._choose_task_device(self, task, mode, kill_workers)
+    def _choose_task_device(self, task: InfersessionTask, mode: str):
+        devices, reclaim_items = Pool._choose_task_device(self, task, mode)
         if len(devices) > 1 and not isinstance(devices[0], str) and task.use_io_binding:
             devices.sort(key=lambda d: self._device_ortvalue_score(task, d), reverse=True)
 
-        return devices, should_kill_workers
+        return devices, reclaim_items
+
+    def _reclaim_cpu_memory(self, task: InfersessionTask, res: Resource, mode: str, reclaim_items: List) -> bool:
+        idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
+        if not idle:
+            return False
+        idle.sort(key=lambda x: x[1]._last_use_time)
+        freed = 0
+        for key, sess in idle:
+            reclaim_items.append((key, sess))
+            freed += sess.estimated_cpu_mem
+            if res.cpu_mem <= self._sys_info.cpu_mem_free + freed:
+                break
+        if res.cpu_mem > self._sys_info.cpu_mem_free + freed:
+            return False
+        return True
+
+    def _reclaim_gpu_memory(self, task: InfersessionTask, res: Resource, mode: str) -> bool:
+        idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
+        if not idle:
+            return False
+        idle.sort(key=lambda x: x[1]._last_use_time)
+
+        to_evict = []
+        with self._sys_info_lock:
+            freed_by_gpu = {}
+            for _, s in idle:
+                if s._gpu_index >= 0:
+                    freed_by_gpu[s._gpu_index] = freed_by_gpu.get(s._gpu_index, 0) + s.estimated_gpu_mem
+            gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
+            for gpu in gpus:
+                extra = freed_by_gpu.get(gpu.index, 0)
+                if gpu.mem_free + extra >= res.gpu_mem and gpu.n_cores_free >= res.gpu_cores:
+                    to_evict = idle[:]
+                    break
+
+        if to_evict:
+            for key, sess in to_evict:
+                if key in self._sessions:
+                    del self._sessions[key]
+                    sess.stop()
+            return True
+        return False
+
+    def _reclaim_session_items(self, items: List) -> None:
+        for item in items:
+            if isinstance(item, tuple):
+                key, sess = item
+                if key in self._sessions:
+                    del self._sessions[key]
+                    sess.stop()
 
     def _choose_task_session(self, task: InfersessionTask) -> Optional[SessionInfo]:
         provider: Tuple[str, Dict[str, Any]] = task.provider

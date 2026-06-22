@@ -29,6 +29,16 @@ if TYPE_CHECKING:
     from .worker import Worker
 
 
+def _process_batch(items):
+    results = []
+    for func, args, kwargs in items:
+        try:
+            results.append((True, func(*args, **kwargs)))
+        except Exception as e:
+            results.append((False, e))
+    return results
+
+
 class Pool(ABC):
 
     _sys_info_lock: Optional[threading.Lock] = None
@@ -84,6 +94,11 @@ class Pool(ABC):
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
+        self._chunksize: int = 1
+        self._submit_buffer = []
+        self._buffer_futures = []
+        self._last_submit_time: float = 0.0
+        self._flush_daemon_started: bool = False
 
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -124,24 +139,150 @@ class Pool(ABC):
         if use_torch is None:
             use_torch = self._use_torch
 
+        if self._chunksize <= 1:
+            from .task import Task
+
+            task = Task(
+                pool=self,
+                func=func,
+                args=args,
+                kwargs=kwargs,
+                cpu_mode_res=cpu_mode_res,
+                gpu_mode_res=gpu_mode_res,
+                use_torch=use_torch,
+                device_changeable=device_changeable,
+                calculate_module_deps=self._need_module_deps
+            )
+            self._validate_resource_feasibility(task)
+
+            with self._lock:
+                self._tasks[task.id] = task
+                return self._submit(task, append_to_delay=True)
+
+        from .futures import Future
+        import time
+
+        future = Future()
+        with self._lock:
+            self._submit_buffer.append((
+                func, args, kwargs, cpu_mode_res, gpu_mode_res,
+                use_torch, device_changeable, future,
+            ))
+            self._buffer_futures.append(future)
+            self._last_submit_time = time.monotonic()
+            future.add_done_callback(self._try_remove_from_buffer)
+            if len(self._submit_buffer) >= self._chunksize:
+                self._flush()
+
+        return future
+
+    def set_chunksize(self, chunksize: int) -> None:
+        if chunksize < 1:
+            raise ValueError("chunksize must be >= 1")
+        self._chunksize = chunksize
+        if chunksize > 1 and not self._flush_daemon_started:
+            import threading
+            self._flush_daemon_started = True
+            thread = threading.Thread(target=self._flush_daemon, daemon=True, name="flush_daemon")
+            thread.start()
+
+    def flush(self) -> None:
+        with self._lock:
+            self._flush()
+
+    def _try_remove_from_buffer(self, future: Future) -> None:
+        with self._lock:
+            try:
+                idx = self._buffer_futures.index(future)
+                del self._submit_buffer[idx]
+                del self._buffer_futures[idx]
+            except ValueError:
+                pass
+
+    def _flush(self) -> None:
+        if not self._submit_buffer:
+            return
+
+        items_data = []
+        ind_futures = []
+        for entry in self._submit_buffer:
+            func, args, kwargs, cpu_mode_res, gpu_mode_res, use_torch, device_changeable, future = entry
+            items_data.append((func, args, kwargs, cpu_mode_res, gpu_mode_res, use_torch, device_changeable))
+            ind_futures.append(future)
+        self._submit_buffer.clear()
+        self._buffer_futures.clear()
+
+        from functools import partial
         from .task import Task
 
-        task = Task(
-            pool=self,
-            func=func,
-            args=args,
-            kwargs=kwargs,
-            cpu_mode_res=cpu_mode_res,
-            gpu_mode_res=gpu_mode_res,
-            use_torch=use_torch,
-            device_changeable=device_changeable,
-            calculate_module_deps=self._need_module_deps
-        )
-        self._validate_resource_feasibility(task)
+        cpu_res_list = [item[3] for item in items_data]
+        gpu_res_list = [item[4] for item in items_data]
 
-        with self._lock:
-            self._tasks[task.id] = task
-            return self._submit(task, append_to_delay=True)
+        batch_func = partial(_process_batch, [(f, a, k) for (f, a, k, _, _, _, _) in items_data])
+        batch_cpu = self._batch_resource(cpu_res_list)
+        batch_gpu = self._batch_resource(gpu_res_list)
+        batch_use_torch = any(item[5] for item in items_data)
+
+        batch_task = Task(
+            pool=self, func=batch_func, args=(), kwargs={},
+            cpu_mode_res=batch_cpu, gpu_mode_res=batch_gpu,
+            use_torch=batch_use_torch, device_changeable=False,
+            calculate_module_deps=False,
+        )
+
+        try:
+            self._validate_resource_feasibility(batch_task)
+        except Exception as e:
+            for f in ind_futures:
+                try:
+                    f.set_exception(e)
+                except Exception:
+                    pass
+            return
+
+        batch_task.future.add_done_callback(
+            partial(Pool._fan_out_batch_results, ind_futures=ind_futures)
+        )
+
+        self._tasks[batch_task.id] = batch_task
+        self._submit(batch_task, append_to_delay=True)
+
+    @staticmethod
+    def _fan_out_batch_results(batch_future: Future, ind_futures: List[Future]) -> None:
+        if batch_future.cancelled():
+            for f in ind_futures:
+                try:
+                    f.cancel()
+                except Exception:
+                    pass
+            return
+
+        try:
+            results = batch_future.result()
+        except Exception as exc:
+            for f in ind_futures:
+                try:
+                    f.set_exception(exc)
+                except Exception:
+                    pass
+            return
+
+        for (success, val), f in zip(results, ind_futures):
+            try:
+                if success:
+                    f.set_result(val)
+                else:
+                    f.set_exception(val)
+            except Exception:
+                pass
+
+    def _flush_daemon(self) -> None:
+        import time
+        while not self._shutdown:
+            time.sleep(0.1)
+            with self._lock:
+                if self._submit_buffer and time.monotonic() - self._last_submit_time >= 0.1:
+                    self._flush()
 
     def _submit(self, task: Task, append_to_delay: bool) -> Future:
         if task.future.done():
@@ -227,9 +368,9 @@ class Pool(ABC):
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             self._choose_task_worker(task, gpu_res)
             if task.worker is not None:
-                devices, should_kill_workers = self._choose_task_device(task, "gpu", kill_workers=False)
+                devices, reclaim_items = self._choose_task_device(task, "gpu")
                 if devices:
-                    for idle_worker in should_kill_workers:
+                    for idle_worker in reclaim_items:
                         idle_worker.stop(wait=False, clear=True)
 
                     return True
@@ -240,8 +381,10 @@ class Pool(ABC):
         cpu_res = task.cpu_mode_res
         self._choose_task_worker(task, cpu_res)
         if task.worker is not None:
-            devices, _ = self._choose_task_device(task, "cpu", kill_workers=True)
+            devices, reclaim_items = self._choose_task_device(task, "cpu")
             if devices:
+                for idle_worker in reclaim_items:
+                    idle_worker.stop(wait=False, clear=True)
                 return True
 
         task.worker = None
@@ -405,6 +548,7 @@ class Pool(ABC):
             if self._shutdown:
                 return
 
+            self._flush()
             self._shutdown = True
 
             for worker in self._workers:
@@ -417,12 +561,12 @@ class Pool(ABC):
                 for task in self._tasks.values():
                     task.future.cancel()
 
-            if wait:
-                for worker in self._workers:
-                    worker.join()
+        if wait:
+            for worker in self._workers:
+                worker.join()
 
-                if self._result_thread is not None and self._result_thread.is_alive():
-                    self._result_thread.join()
+            if self._result_thread is not None and self._result_thread.is_alive():
+                self._result_thread.join()
 
     def __enter__(self)->Pool:
         return self
@@ -494,7 +638,7 @@ class Pool(ABC):
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
 
-    def _choose_task_device(self, task:Task, mode:str, kill_workers: bool) -> Tuple[List[Union[GPUInfoSnapshot], str], List[Worker]]:
+    def _choose_task_device(self, task: Task, mode: str) -> Tuple[List[Union[GPUInfoSnapshot, str]], List]:
         from .worker import Worker
 
         res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
@@ -510,30 +654,10 @@ class Pool(ABC):
                 task.dml_id = -1
                 return [], []
 
-            should_kill_workers = []
+            reclaim_items = []
             cpu_mem_needed = res.cpu_mem
             if cpu_mem_needed > max(0, self._sys_info.cpu_mem_free):
-                if hasattr(task.worker, "cached_rss"):
-                    idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
-                    if cpu_mem_needed > self._sys_info.cpu_mem_free + total_hold_mem:
-                        task.device = None
-                        task.gpu_index = -1
-                        task.dml_id = -1
-                        return [], []
-
-                    if kill_workers:
-                        for idle_worker in idle_workers:
-                            idle_worker.stop(wait=False, clear=True)
-                            if cpu_mem_needed <= self._sys_info.cpu_mem_free:
-                                break
-                    else:
-                        temp_cpu_mem_free = self._sys_info.cpu_mem_free
-                        for idle_worker in idle_workers:
-                            temp_cpu_mem_free += idle_worker.cached_rss
-                            should_kill_workers.append(idle_worker)
-                            if cpu_mem_needed <= temp_cpu_mem_free:
-                                break
-                else:
+                if not self._reclaim_cpu_memory(task, res, mode, reclaim_items):
                     task.device = None
                     task.gpu_index = -1
                     task.dml_id = -1
@@ -543,23 +667,40 @@ class Pool(ABC):
                 task.device = "cpu"
                 task.gpu_index = -1
                 task.dml_id = -1
-                return ["cpu"], should_kill_workers
+                return ["cpu"], reclaim_items
 
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             available_gpus = []
             for gpu in gpus:
                 if gpu.mem_free < res.gpu_mem:
                     continue
-
                 if gpu.n_cores_free < res.gpu_cores:
                     continue
-
                 if not task.can_use(gpu):
                     continue
-
                 available_gpus.append(gpu)
 
         if not available_gpus:
+            if self._reclaim_gpu_memory(task, res, mode):
+                with self._sys_info_lock:
+                    gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
+                    available_gpus = []
+                    for gpu in gpus:
+                        if gpu.mem_free < res.gpu_mem:
+                            continue
+                        if gpu.n_cores_free < res.gpu_cores:
+                            continue
+                        if not task.can_use(gpu):
+                            continue
+                        available_gpus.append(gpu)
+                    if available_gpus:
+                        available_gpus.sort(key=lambda gpu: gpu.n_cores_free, reverse=True)
+                        best_gpu = available_gpus[0]
+                        task.device = best_gpu.device
+                        task.gpu_index = best_gpu.index
+                        task.dml_id = best_gpu.dml_id
+                        return available_gpus, reclaim_items
+
             task.device = None
             task.gpu_index = -1
             task.dml_id = -1
@@ -570,7 +711,19 @@ class Pool(ABC):
         task.device = best_gpu.device
         task.gpu_index = best_gpu.index
         task.dml_id = best_gpu.dml_id
-        return available_gpus, should_kill_workers
+        return available_gpus, reclaim_items
+
+    def _reclaim_cpu_memory(self, task: Task, res: Resource, mode: str, reclaim_items: List) -> bool:
+        if not hasattr(task.worker, "cached_rss"):
+            return False
+        idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
+        if res.cpu_mem > self._sys_info.cpu_mem_free + total_hold_mem:
+            return False
+        reclaim_items.extend(idle_workers)
+        return True
+
+    def _reclaim_gpu_memory(self, task: Task, res: Resource, mode: str) -> bool:
+        return False
 
     def _choose_task_worker(self, task: Task, res: Resource) -> Optional[Worker]:
         best_worker:Optional[Worker] = None
