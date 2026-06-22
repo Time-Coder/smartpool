@@ -217,7 +217,7 @@ class InferSessionPool(Pool):
                 if not has_cpu_provider:
                     continue
 
-            devices, reclaim_items = self._choose_task_device(task, mode, apply_reclaim=False)
+            devices, reclaim_items = self._choose_task_device(task, mode)
             for device in devices:
                 if isinstance(device, str):
                     task.device = device
@@ -241,8 +241,8 @@ class InferSessionPool(Pool):
 
         return False
 
-    def _choose_task_device(self, task: InfersessionTask, mode: str, apply_reclaim: bool):
-        devices, reclaim_items = Pool._choose_task_device(self, task, mode, apply_reclaim)
+    def _choose_task_device(self, task: InfersessionTask, mode: str):
+        devices, reclaim_items = Pool._choose_task_device(self, task, mode)
         if len(devices) > 1 and not isinstance(devices[0], str) and task.use_io_binding:
             devices.sort(key=lambda d: self._device_ortvalue_score(task, d), reverse=True)
 
@@ -289,17 +289,6 @@ class InferSessionPool(Pool):
                     sess.stop()
             return True
         return False
-
-    def _reclaim_cpu_stop_items(self, items: List) -> None:
-        from ..worker import Worker
-        for item in items:
-            if isinstance(item, Worker):
-                item.stop(wait=False, clear=True)
-            else:
-                key, sess = item
-                if key in self._sessions:
-                    del self._sessions[key]
-                    sess.stop()
 
     def _reclaim_session_items(self, items: List) -> None:
         for item in items:

@@ -230,7 +230,7 @@ class Pool(ABC):
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             self._choose_task_worker(task, gpu_res)
             if task.worker is not None:
-                devices, reclaim_items = self._choose_task_device(task, "gpu", apply_reclaim=False)
+                devices, reclaim_items = self._choose_task_device(task, "gpu")
                 if devices:
                     for idle_worker in reclaim_items:
                         idle_worker.stop(wait=False, clear=True)
@@ -243,8 +243,10 @@ class Pool(ABC):
         cpu_res = task.cpu_mode_res
         self._choose_task_worker(task, cpu_res)
         if task.worker is not None:
-            devices, _ = self._choose_task_device(task, "cpu", apply_reclaim=True)
+            devices, reclaim_items = self._choose_task_device(task, "cpu")
             if devices:
+                for idle_worker in reclaim_items:
+                    idle_worker.stop(wait=False, clear=True)
                 return True
 
         task.worker = None
@@ -497,7 +499,7 @@ class Pool(ABC):
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
 
-    def _choose_task_device(self, task: Task, mode: str, apply_reclaim: bool) -> Tuple[List[Union[GPUInfoSnapshot, str]], List]:
+    def _choose_task_device(self, task: Task, mode: str) -> Tuple[List[Union[GPUInfoSnapshot, str]], List]:
         from .worker import Worker
 
         res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
@@ -526,9 +528,6 @@ class Pool(ABC):
                 task.device = "cpu"
                 task.gpu_index = -1
                 task.dml_id = -1
-                if apply_reclaim:
-                    self._reclaim_cpu_stop_items(reclaim_items)
-                    return ["cpu"], []
                 return ["cpu"], reclaim_items
 
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
@@ -561,9 +560,6 @@ class Pool(ABC):
                         task.device = best_gpu.device
                         task.gpu_index = best_gpu.index
                         task.dml_id = best_gpu.dml_id
-                        if apply_reclaim:
-                            self._reclaim_cpu_stop_items(reclaim_items)
-                            return available_gpus, []
                         return available_gpus, reclaim_items
 
             task.device = None
@@ -576,11 +572,6 @@ class Pool(ABC):
         task.device = best_gpu.device
         task.gpu_index = best_gpu.index
         task.dml_id = best_gpu.dml_id
-
-        if apply_reclaim:
-            self._reclaim_cpu_stop_items(reclaim_items)
-            return available_gpus, []
-
         return available_gpus, reclaim_items
 
     def _reclaim_cpu_memory(self, task: Task, res: Resource, mode: str, reclaim_items: List) -> bool:
@@ -594,10 +585,6 @@ class Pool(ABC):
 
     def _reclaim_gpu_memory(self, task: Task, res: Resource, mode: str) -> bool:
         return False
-
-    def _reclaim_cpu_stop_items(self, items: List) -> None:
-        for item in items:
-            item.stop(wait=False, clear=True)
 
     def _choose_task_worker(self, task: Task, res: Resource) -> Optional[Worker]:
         best_worker:Optional[Worker] = None
