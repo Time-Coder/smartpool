@@ -564,12 +564,12 @@ class Pool(ABC):
                 for task in self._tasks.values():
                     task.future.cancel()
 
-            if wait:
-                for worker in self._workers:
-                    worker.join()
+        if wait:
+            for worker in self._workers:
+                worker.join()
 
-                if self._result_thread is not None and self._result_thread.is_alive():
-                    self._result_thread.join()
+            if self._result_thread is not None and self._result_thread.is_alive():
+                self._result_thread.join()
 
     def __enter__(self)->Pool:
         return self
