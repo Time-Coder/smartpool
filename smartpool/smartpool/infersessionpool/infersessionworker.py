@@ -54,6 +54,11 @@ class InferSessionWorker(Worker):
         else:
             self.task_queue.put(task)
 
+    @property
+    def memory(self)->int:
+        from ..resource import DataSize
+        return (27 * DataSize.KB if self.executor is not None else 0)
+
     def start(self)->None:
         if self.executor is not None:
             return

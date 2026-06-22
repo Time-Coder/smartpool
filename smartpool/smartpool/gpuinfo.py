@@ -188,11 +188,8 @@ class GPUInfo(ABC):
         if GPUInfo._supported_ort_providers is not None:
             return
 
-        try:
-            import onnxruntime
-            GPUInfo._supported_ort_providers = onnxruntime.get_available_providers()
-        except ImportError:
-            GPUInfo._supported_ort_providers = []
+        from .utils import get_available_providers
+        GPUInfo._supported_ort_providers = get_available_providers()
 
         from .amd_gpuinfo import AMDGPUInfo
         from .intel_gpuinfo import IntelGPUInfo

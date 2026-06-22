@@ -45,6 +45,11 @@ class InterpreterWorker(Worker):
         self.interp = None
         self.imported_modules.clear()
 
+    @property
+    def memory(self)->int:
+        from ..resource import DataSize
+        return (12 * DataSize.MB if self.executor is not None else 0)
+
     def start(self)->None:
         if self.executor is not None:
             return

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Protocol, TypeVar
+from typing import TYPE_CHECKING, Optional, Protocol, TypeVar, List
+import os
 
 if TYPE_CHECKING:
     from torch.cuda import Stream
 
+TRT_CACHE_PATH: str = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
 
 T = TypeVar('T')
 class QueueLike(Protocol[T]):
@@ -136,3 +138,42 @@ def best_stream()->Optional[Stream]:
     tid = threading.get_ident()
     with _best_device_lock:
         return _best_stream.get(tid)
+
+
+_available_providers = None
+
+def get_available_providers() -> List[str]:
+    global _available_providers
+    if _available_providers is not None:
+        return _available_providers
+
+    import onnxruntime as ort
+    from onnx import helper, TensorProto
+
+    candidates = ort.get_available_providers()
+
+    input_tensor = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])
+    output_tensor = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1])
+    identity_node = helper.make_node("Identity", ["input"], ["output"])
+    graph = helper.make_graph([identity_node], "graph", [input_tensor], [output_tensor])
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 21)])
+    model_bytes = model.SerializeToString()
+
+    valid = []
+    for provider in candidates:
+        try:
+            if provider == "TensorrtExecutionProvider":
+                provider = (
+                    "TensorrtExecutionProvider",
+                    {
+                        "trt_engine_cache_enable": True,
+                        "trt_engine_cache_path": TRT_CACHE_PATH,
+                    },
+                )
+            ort.InferenceSession(model_bytes, providers=[provider], enable_fallback=False)
+            valid.append(provider[0] if isinstance(provider, tuple) else provider)
+        except Exception:
+            pass
+
+    _available_providers = valid
+    return _available_providers

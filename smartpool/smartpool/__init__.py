@@ -13,10 +13,7 @@ from .nvidia_gpuinfo import NvidiaGPUInfo
 from .processpool import ProcessPool
 from .resource import DataSize, Resource
 from .threadpool import ThreadPool
-from .utils import best_device, best_stream, limit_num_single_thread, move_optimizer_to
-import os
-
-TRT_CACHE_PATH: str = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
+from .utils import best_device, best_stream, limit_num_single_thread, move_optimizer_to, TRT_CACHE_PATH
 
 
 __all__ = [

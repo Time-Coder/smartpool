@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 class ThreadPool(Pool):
 
     def __init__(
-        self, max_workers:int=0, thread_name_prefix:str="ThreadPool.worker:",
+        self, max_workers:int=0,
+        thread_name_prefix:str="ThreadPool.worker:",
         initializer:Optional[Callable[..., Any]]=None,
         initargs:Tuple[Any, ...]=(),
         initkwargs:Optional[Dict[str, Any]]=None,

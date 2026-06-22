@@ -57,6 +57,11 @@ class ThreadWorker(Worker):
 
         _set_best_stream(self._streams[device], self.executor.ident)
 
+    @property
+    def memory(self)->int:
+        from ..resource import DataSize
+        return (27 * DataSize.KB if self.executor is not None else 0)
+
     def start(self)->None:
         if self.executor is not None:
             return

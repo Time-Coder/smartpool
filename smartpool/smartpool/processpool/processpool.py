@@ -21,6 +21,7 @@ class ProcessPool(Pool):
         initkwargs:Optional[Dict[str, Any]]=None,
         *,
         max_tasks_per_child:Optional[int]=None,
+        chuncksize:int=1,
         use_torch:bool=False
     ):
         import queue
@@ -51,6 +52,7 @@ class ProcessPool(Pool):
             result_queue_kwargs={"ctx": self._ctx},
 
             max_tasks_per_child=max_tasks_per_child,
+            chunksize=chuncksize,
             use_torch=use_torch,
             worker_cls=ProcessWorker,
             need_module_deps=True

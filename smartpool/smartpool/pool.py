@@ -62,13 +62,13 @@ class Pool(ABC):
         *,
 
         max_tasks_per_child: Optional[int]=None,
+        chunksize: int=1,
         worker_cls: Type[Worker],
         use_torch: bool = False,
         need_module_deps: bool = False
     ):
         self._init_sys_info()
 
-        import os
         import threading
 
         if use_torch:
@@ -94,11 +94,11 @@ class Pool(ABC):
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
-        self._chunksize: int = 1
         self._submit_buffer = []
         self._buffer_futures = []
         self._last_submit_time: float = 0.0
         self._flush_daemon_started: bool = False
+        self.chunksize = chunksize
 
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -176,9 +176,15 @@ class Pool(ABC):
 
         return future
 
-    def set_chunksize(self, chunksize: int) -> None:
+    @property
+    def chunksize(self)->int:
+        return self._chunksize
+
+    @chunksize.setter
+    def chunksize(self, chunksize: int) -> None:
         if chunksize < 1:
-            raise ValueError("chunksize must be >= 1")
+            chunksize = 1
+        
         self._chunksize = chunksize
         if chunksize > 1 and not self._flush_daemon_started:
             import threading

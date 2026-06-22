@@ -17,3 +17,4 @@ dataset
 .pytest_cache
 *.code-workspace
 __trtcache__
+note.txt
