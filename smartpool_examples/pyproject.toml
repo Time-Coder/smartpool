@@ -26,6 +26,7 @@ dependencies = [
     "joblib",
     "opencv-python",
     "ultralytics",
+    "ray",
     "opfunu>=1.0.0",
     "mealpy>=3.0.0"
 ]
