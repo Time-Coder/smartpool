@@ -7,12 +7,7 @@ MODEL_FOLDER = DATA_FOLDER + "/models"
 DATASET_FOLDER = DATA_FOLDER + "/dataset"
 OUTPUT_FOLDER = DATA_FOLDER + "/output"
 
-MODEL_URL = "https://hf-mirror.com/Kalray/yolov8/resolve/main/yolov8n.onnx"
 MODEL_PATH = MODEL_FOLDER + "/yolov8n.onnx"
-
-COCO_ZIP_URLS = [
-    "http://images.cocodataset.org/zips/val2017.zip",
-]
 
 COCO_CLASSES = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",

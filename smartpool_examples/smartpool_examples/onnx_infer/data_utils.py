@@ -1,69 +1,8 @@
-import contextlib
-import time
-import urllib.error
-import urllib.request
-import zipfile
 import os
 import glob
 import shutil
 
-from config import COCO_ZIP_URLS, DATASET_FOLDER, MODEL_PATH, MODEL_URL
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    Progress,
-    TextColumn,
-    TimeRemainingColumn,
-    TransferSpeedColumn,
-)
-
-
-def download_file(url: str, dest_zip_filename: str, desc: str = "", max_retries: int = 3):
-    dest_folder: str = os.path.dirname(dest_zip_filename)
-    if not os.path.isdir(dest_folder):
-        os.makedirs(dest_folder)
-
-    tmp_filename = dest_zip_filename + ".tmp"
-    last_err = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            req = urllib.request.Request(url, method="GET")
-            resp = urllib.request.urlopen(req, timeout=120)
-            total = int(resp.headers.get("Content-Length", 0))
-            chunk_size = 8192
-            with Progress(
-                TextColumn(f"[cyan]{desc}" if desc else ""),
-                BarColumn(),
-                DownloadColumn(),
-                TransferSpeedColumn(),
-                TimeRemainingColumn(),
-                transient=False,
-            ) as pbar:
-                task = pbar.add_task("", total=total)
-                with open(tmp_filename, "wb") as f:
-                    while True:
-                        chunk = resp.read(chunk_size)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        pbar.update(task, advance=len(chunk))
-
-            os.rename(tmp_filename, dest_zip_filename)
-            return
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                raise
-            last_err = e
-            if attempt < max_retries:
-                delay = 2 ** attempt
-                time.sleep(delay)
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            last_err = e
-            if attempt < max_retries:
-                delay = 2 ** attempt
-                time.sleep(delay)
-
-    raise last_err
+from config import DATASET_FOLDER, MODEL_FOLDER, MODEL_PATH
 
 
 def _count_images():
@@ -88,21 +27,13 @@ def download_dataset():
         return
 
     print("[DOWNLOAD] val2017.zip (~1GB) ...")
-    zip_path = DATASET_FOLDER + "/val2017.zip"
-
-    for url in COCO_ZIP_URLS:
-        try:
-            download_file(url, zip_path, "COCO val2017")
-            break
-        except Exception:
-            print(f"  mirror failed: {url}")
-            continue
-    else:
-        raise RuntimeError("all mirrors failed")
-
-    print(f"[EXTRACT] val2017.zip -> {DATASET_FOLDER} ...")
-    with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(DATASET_FOLDER)
+    from ultralytics.utils.downloads import safe_download
+    safe_download(
+        url="http://images.cocodataset.org/zips/val2017.zip",
+        dir=DATASET_FOLDER,
+        unzip=True,
+        delete=True,
+    )
 
     _flatten_images()
     n = _count_images()
@@ -111,8 +42,19 @@ def download_dataset():
 
 def download_model():
     if os.path.isfile(MODEL_PATH):
-        print(f"[SKIP DOWNLOAD] Model {os.path.basename(MODEL_PATH)} exists")
+        print(f"[SKIP] Model {os.path.basename(MODEL_PATH)} exists")
         return
+
+    if not os.path.isdir(MODEL_FOLDER):
+        os.makedirs(MODEL_FOLDER)
     
-    print("[DOWNLOAD] YOLOv8n ONNX...")
-    download_file(MODEL_URL, MODEL_PATH, "YOLOv8n")
+    print("[DOWNLOAD] YOLOv8n via ultralytics...")
+    from ultralytics import YOLO
+    model = YOLO("yolov8n.pt")
+    exported_path = model.export(format="onnx")
+    
+    exported_path = exported_path.replace("\\", "/")
+    if os.path.normpath(exported_path) != os.path.normpath(MODEL_PATH):
+        shutil.copy2(exported_path, MODEL_PATH)
+    
+    print(f"[DONE] Model ready at {MODEL_PATH}")

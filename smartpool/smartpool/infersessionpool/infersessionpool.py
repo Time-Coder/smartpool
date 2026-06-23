@@ -168,10 +168,11 @@ class InferSessionPool(Pool):
         
         from ..resource import Resource
         from .infersessiontask import InfersessionTask
-
+        
+        model_info: ModelInfo = self.model_info(model_path)
+        validated_kwargs, has_ortvalue = model_info.check_args(args, kwargs)
+        
         if check_args:
-            model_info: ModelInfo = self.model_info(model_path)
-            validated_kwargs, has_ortvalue = model_info.check_args(args, kwargs)
             model_info.check_outputs(output_names)
             self._check_providers(providers)
 
