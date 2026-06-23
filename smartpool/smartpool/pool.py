@@ -29,9 +29,9 @@ if TYPE_CHECKING:
     from .worker import Worker
 
 
-def _process_batch(items):
+def _process_batch(func, items_args_kwargs):
     results = []
-    for func, args, kwargs in items:
+    for args, kwargs in items_args_kwargs:
         try:
             results.append((True, func(*args, **kwargs)))
         except Exception as e:
@@ -62,7 +62,6 @@ class Pool(ABC):
         *,
 
         max_tasks_per_child: Optional[int]=None,
-        chunksize: int=1,
         worker_cls: Type[Worker],
         use_torch: bool = False,
         need_module_deps: bool = False
@@ -94,11 +93,8 @@ class Pool(ABC):
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
-        self._submit_buffer = []
-        self._buffer_futures = []
-        self._last_submit_time: float = 0.0
+        self._submit_buffers: Dict = {}
         self._flush_daemon_started: bool = False
-        self.chunksize = chunksize
 
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -118,7 +114,8 @@ class Pool(ABC):
         gpu_mode_res: Optional[Resource] = None,
         check_args: bool = True,
         use_torch: Optional[bool] = None,
-        device_changeable: bool = False
+        device_changeable: bool = False,
+        chunksize: int = 1,
     )->Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
@@ -141,7 +138,7 @@ class Pool(ABC):
         if use_torch is None:
             use_torch = self._use_torch
 
-        if self._chunksize <= 1:
+        if chunksize <= 1:
             from .task import Task
 
             task = Task(
@@ -163,64 +160,69 @@ class Pool(ABC):
                 self._tasks[task.id] = task
                 return self._submit(task, append_to_delay=True)
 
+        from functools import partial
         from .futures import Future
         import time
+        import threading
 
         future = Future(check_args)
+        key = (func, chunksize)
         with self._lock:
-            self._submit_buffer.append((
+            if not self._flush_daemon_started:
+                self._flush_daemon_started = True
+                thread = threading.Thread(target=self._flush_daemon, daemon=True, name="flush_daemon")
+                thread.start()
+            if key not in self._submit_buffers:
+                self._submit_buffers[key] = {
+                    'items': [],
+                    'last_submit_time': 0.0,
+                }
+            buf = self._submit_buffers[key]
+            buf['items'].append((
                 func, args, kwargs, cpu_mode_res, gpu_mode_res,
                 use_torch, device_changeable, future,
             ))
-            self._buffer_futures.append(future)
-            self._last_submit_time = time.monotonic()
-            future.add_done_callback(self._try_remove_from_buffer)
-            if len(self._submit_buffer) >= self._chunksize:
-                self._flush()
+            buf['last_submit_time'] = time.monotonic()
+            future.add_done_callback(partial(self._try_remove_from_buffer, key=key))
+            if len(buf['items']) >= chunksize:
+                self._flush_key(key)
 
         return future
-
-    @property
-    def chunksize(self)->int:
-        return self._chunksize
-
-    @chunksize.setter
-    def chunksize(self, chunksize: int) -> None:
-        if chunksize < 1:
-            chunksize = 1
-        
-        self._chunksize = chunksize
-        if chunksize > 1 and not self._flush_daemon_started:
-            import threading
-            self._flush_daemon_started = True
-            thread = threading.Thread(target=self._flush_daemon, daemon=True, name="flush_daemon")
-            thread.start()
 
     def flush(self) -> None:
         with self._lock:
             self._flush()
 
-    def _try_remove_from_buffer(self, future: Future) -> None:
+    def _try_remove_from_buffer(self, future: Future, key) -> None:
         with self._lock:
+            buf = self._submit_buffers.get(key)
+            if buf is None:
+                return
             try:
-                idx = self._buffer_futures.index(future)
-                del self._submit_buffer[idx]
-                del self._buffer_futures[idx]
-            except ValueError:
+                items = buf['items']
+                idx = next(i for i, item in enumerate(items) if item[-1] is future)
+                del items[idx]
+                if not items:
+                    del self._submit_buffers[key]
+            except (StopIteration, ValueError):
                 pass
 
-    def _flush(self) -> None:
-        if not self._submit_buffer:
+    def _flush_key(self, key) -> None:
+        buf = self._submit_buffers.get(key)
+        if buf is None or not buf['items']:
             return
+
+        items = buf['items']
+        func = items[0][0]
 
         items_data = []
         ind_futures = []
-        for entry in self._submit_buffer:
+        for entry in items:
             func, args, kwargs, cpu_mode_res, gpu_mode_res, use_torch, device_changeable, future = entry
             items_data.append((func, args, kwargs, cpu_mode_res, gpu_mode_res, use_torch, device_changeable))
             ind_futures.append(future)
-        self._submit_buffer.clear()
-        self._buffer_futures.clear()
+
+        del self._submit_buffers[key]
 
         from functools import partial
         from .task import Task
@@ -228,7 +230,7 @@ class Pool(ABC):
         cpu_res_list = [item[3] for item in items_data]
         gpu_res_list = [item[4] for item in items_data]
 
-        batch_func = partial(_process_batch, [(f, a, k) for (f, a, k, _, _, _, _) in items_data])
+        batch_func = partial(_process_batch, func, [(a, k) for (_, a, k, _, _, _, _) in items_data])
         batch_cpu = self._batch_resource(cpu_res_list)
         batch_gpu = self._batch_resource(gpu_res_list)
         batch_use_torch = any(item[5] for item in items_data)
@@ -236,20 +238,19 @@ class Pool(ABC):
         batch_task = Task(
             pool=self, func=batch_func, args=(), kwargs={},
             cpu_mode_res=batch_cpu, gpu_mode_res=batch_gpu,
-            use_torch=batch_use_torch, device_changeable=False,
-            calculate_module_deps=False,
+            check_args=False, use_torch=batch_use_torch,
+            device_changeable=False, calculate_module_deps=False,
         )
 
-        if self._check_args:
-            try:
-                self._validate_resource_feasibility(batch_task)
-            except Exception as e:
-                for f in ind_futures:
-                    try:
-                        f.set_exception(e)
-                    except Exception:
-                        pass
-                return
+        try:
+            self._validate_resource_feasibility(batch_task)
+        except Exception as e:
+            for f in ind_futures:
+                try:
+                    f.set_exception(e)
+                except Exception:
+                    pass
+            return
 
         batch_task.future.add_done_callback(
             partial(Pool._fan_out_batch_results, ind_futures=ind_futures)
@@ -257,6 +258,10 @@ class Pool(ABC):
 
         self._tasks[batch_task.id] = batch_task
         self._submit(batch_task, append_to_delay=True)
+
+    def _flush(self) -> None:
+        for key in list(self._submit_buffers.keys()):
+            self._flush_key(key)
 
     @staticmethod
     def _fan_out_batch_results(batch_future: Future, ind_futures: List[Future]) -> None:
@@ -292,8 +297,10 @@ class Pool(ABC):
         while not self._shutdown:
             time.sleep(0.1)
             with self._lock:
-                if self._submit_buffer and time.monotonic() - self._last_submit_time >= 0.1:
-                    self._flush()
+                now = time.monotonic()
+                for key, buf in list(self._submit_buffers.items()):
+                    if buf['items'] and now - buf['last_submit_time'] >= 0.1:
+                        self._flush_key(key)
 
     def _submit(self, task: Task, append_to_delay: bool) -> Future:
         if task.future.done():
@@ -484,9 +491,9 @@ class Pool(ABC):
             gpu_mem=max(r.gpu_mem for r in resources),
         )
 
-    def starmap(
+    def map(
         self, func:Callable[..., Any],
-        args_iterables:Iterable[Tuple[Any, ...]],
+        *iterable:Iterable[Any],
         cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
         gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
         timeout:Optional[Union[float, int]]=None,
@@ -523,7 +530,7 @@ class Pool(ABC):
 
         target_func = partial(_process_chunk, func)
         futures:List[Future] = []
-        iterator = zip(args_iterables, cpu_mode_res, gpu_mode_res)
+        iterator = zip(zip(*iterable), cpu_mode_res, gpu_mode_res)
         for batch in batched(iterator, chunksize):
             args_batch, cpu_res_batch, gpu_res_batch = zip(*batch)
             future = self.submit(
@@ -534,25 +541,6 @@ class Pool(ABC):
             futures.append(future)
 
         return _chain_from_iterable_of_lists(Pool._result_iterator(futures, end_time))
-
-    def map(
-        self, func:Callable[..., Any],
-        iterable:Iterable[Any],
-        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
-        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
-        timeout:Optional[Union[float, int]]=None,
-        chunksize:int=1
-    )->Iterable[Any]:
-        args_iterable = ((item,) for item in iterable)
-
-        return self.starmap(
-            func=func,
-            args_iterables=args_iterable,
-            cpu_mode_res=cpu_mode_res,
-            gpu_mode_res=gpu_mode_res,
-            timeout=timeout,
-            chunksize=chunksize
-        )
 
     def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None:
         with self._lock:
