@@ -138,6 +138,12 @@ class Pool(ABC):
         if use_torch is None:
             use_torch = self._use_torch
 
+        if chunksize > 1:
+            from concurrent.futures import Future as _BaseFuture
+            if any(isinstance(arg, _BaseFuture) for arg in args) \
+            or any(isinstance(v, _BaseFuture) for v in kwargs.values()):
+                chunksize = 1
+
         if chunksize <= 1:
             from .task import Task
 
