@@ -38,7 +38,7 @@ class ProcessPool(Pool):
 
         if max_workers <= 0:
             import os
-            max_workers = os.process_cpu_count()
+            max_workers = os.cpu_count()
 
         self._ctx = mp.get_context(mp_context)
         Pool.__init__(
