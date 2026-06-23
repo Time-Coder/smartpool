@@ -22,7 +22,6 @@ class SessionInfo:
         self._gpu_index: int = -1
         self._io_bindings: Dict[Tuple[int, str], ort.IOBinding] = {}
         self._input_ortvalues: Dict[Tuple[int, str], Dict[str, ort.OrtValue]] = defaultdict(dict)
-        self._output_ortvalues: Dict[Tuple[int, str], Dict[str, ort.OrtValue]] = defaultdict(dict)
         self.estimated_cpu_mem: int = 0
         self.estimated_gpu_mem: int = 0
         self._lock: threading.Lock = threading.Lock()
@@ -69,7 +68,6 @@ class SessionInfo:
             self._gpu_index = -1
             self._io_bindings = {}
             self._input_ortvalues = defaultdict(dict)
-            self._output_ortvalues = defaultdict(dict)
             self.estimated_cpu_mem = 0
             self.estimated_gpu_mem = 0
 
@@ -149,8 +147,6 @@ class SessionInfo:
             io_binding = self._io_bindings[key]
             self.session.run_with_iobinding(io_binding, run_options)
             ort_outputs = io_binding.get_outputs()
-            self._update_output_ortvalues(key, ort_outputs)
-
             if copy_outputs_to_cpu:
                 outputs = io_binding.copy_outputs_to_cpu()
             else:
@@ -193,22 +189,16 @@ class SessionInfo:
         if key not in self._input_ortvalues:
             for node in self.session.get_inputs():
                 input_value = input_feed[node.name]
-                if (
-                    input_value.__class__.__name__ == "OrtValue" and
-                    input_value.device_name() == self.device_type and
-                    input_value.device_id() == self.device_id
-                ):
-                    self._input_ortvalues[key][node.name] = input_value
-                else:
-                    if input_value.__class__.__name__ == "Tensor":
-                        input_value = input_value.detach().cpu().numpy()
+                
+                if input_value.__class__.__name__ == "Tensor":
+                    input_value = input_value.detach().cpu().numpy()
 
-                    elif input_value.__class__.__name__ == "OrtValue":
-                        input_value = input_value.numpy()
+                elif input_value.__class__.__name__ == "OrtValue":
+                    input_value = input_value.numpy()
 
-                    self._input_ortvalues[key][node.name] = ort.OrtValue.ortvalue_from_numpy(
-                        input_value, device_type=self.device_type, device_id=self.device_id
-                    )
+                self._input_ortvalues[key][node.name] = ort.OrtValue.ortvalue_from_numpy(
+                    input_value, device_type=self.device_type, device_id=self.device_id
+                )
         else:
             for name, ortvalue in self._input_ortvalues[key].items():
                 input_value = input_feed[name]
@@ -225,11 +215,3 @@ class SessionInfo:
                 np.copyto(target_np_view, input_value)
 
         return key
-
-    def _update_output_ortvalues(self, key: Tuple[int, str], outputs: List[ort.OrtValue])->None:
-        if key not in self._output_ortvalues:
-            for i, node in enumerate(self.session.get_outputs()):
-                self._output_ortvalues[key][node.name] = outputs[i]
-                self._io_bindings[key].bind_ortvalue_output(
-                    node.name, outputs[i]
-                )
