@@ -157,6 +157,7 @@ class InferSessionPool(Pool):
         output_names: Optional[Union[List[str], None]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
+        check_args: bool = True,
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
         run_options: Optional[ort.RunOptions] = None,
         use_io_binding: bool = False,
@@ -168,10 +169,11 @@ class InferSessionPool(Pool):
         from ..resource import Resource
         from .infersessiontask import InfersessionTask
 
-        model_info: ModelInfo = self.model_info(model_path)
-        validated_kwargs, has_ortvalue = model_info.check_args(args, kwargs)
-        model_info.check_outputs(output_names)
-        self._check_providers(providers)
+        if check_args:
+            model_info: ModelInfo = self.model_info(model_path)
+            validated_kwargs, has_ortvalue = model_info.check_args(args, kwargs)
+            model_info.check_outputs(output_names)
+            self._check_providers(providers)
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource(cpu_cores_in_python=1)
@@ -183,13 +185,15 @@ class InferSessionPool(Pool):
             if not copy_outputs_to_cpu or has_ortvalue:
                 use_io_binding = True
 
+        model_path = os.path.abspath(model_path).replace("\\", "/")
         task = InfersessionTask(
-            infer_session_pool=self, model_path=model_info.model_path, kwargs=validated_kwargs,
-            cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res,
+            infer_session_pool=self, model_path=model_path, kwargs=validated_kwargs,
+            cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res, check_args=check_args,
             output_names=output_names, user_providers=providers, run_options=run_options,
             use_io_binding=use_io_binding, copy_outputs_to_cpu=copy_outputs_to_cpu
         )
-        self._validate_resource_feasibility(task)
+        if check_args:
+            self._validate_resource_feasibility(task)
 
         with self._lock:
             self._tasks[task.id] = task
@@ -244,13 +248,6 @@ class InferSessionPool(Pool):
                 return True
 
         return False
-
-    def _choose_task_device(self, task: InfersessionTask, mode: str):
-        devices, reclaim_items = Pool._choose_task_device(self, task, mode)
-        if len(devices) > 1 and not isinstance(devices[0], str) and task.use_io_binding:
-            devices.sort(key=lambda d: self._device_ortvalue_score(task, d), reverse=True)
-
-        return devices, reclaim_items
 
     def _reclaim_cpu_memory(self, task: InfersessionTask, res: Resource, mode: str, reclaim_items: List) -> bool:
         idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
@@ -310,29 +307,6 @@ class InferSessionPool(Pool):
 
         task.session_info = self._session_info(task.model_path, provider)
         return task.session_info
-
-    def _device_ortvalue_score(self, task: InfersessionTask, device: Any) -> int:
-        if isinstance(device, str):
-            return 0
-
-        provider = device.ort_provider(task.user_providers)
-        if provider is None:
-            return 0
-
-        key = self._provider_key(task.model_path, provider)
-        session_info = self._sessions.get(key)
-        if session_info is None:
-            return 0
-
-        score = 0
-        for kv in task.kwargs.values():
-            if kv.__class__.__name__ != "OrtValue":
-                continue
-            for ortvalue_dict in session_info._input_ortvalues.values():
-                if any(kv is cached_ov for cached_ov in ortvalue_dict.values()):
-                    score += 1
-                    break
-        return score
 
     def _choose_task_worker(self, task: InfersessionTask, res: Resource) -> Optional[Worker]:
         for worker in self._workers:

@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, List, Union
 from collections import defaultdict
 import threading
 import time
+import os
 
 if TYPE_CHECKING:
     import onnxruntime as ort
@@ -45,7 +46,7 @@ class SessionInfo:
             self.device_type = self._provider_device_type(self.provider_name)
             self._io_bindings = defaultdict(self._session.io_binding)
 
-            file_size = InferSessionPool.model_info(model_path).file_size
+            file_size = os.path.getsize(model_path)
             cpu_mul, gpu_mul = InferSessionPool.PROVIDER_MEMORY_MULTIPLIERS.get(
                 self.provider_name, (3, 0)
             )

@@ -17,6 +17,7 @@ class InfersessionTask(Task):
         self, infer_session_pool: InferSessionPool,
         model_path: str, kwargs: Dict[str, Any],
         cpu_mode_res: Resource, gpu_mode_res: Resource,
+        check_args: bool,
         output_names: Optional[List[str]],
         user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]],
         run_options: Optional[ort.RunOptions],
@@ -35,6 +36,7 @@ class InfersessionTask(Task):
             func=None, args=None, kwargs=kwargs,
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
+            check_args=check_args,
             use_torch=False,
             device_changeable=False,
             calculate_module_deps=False

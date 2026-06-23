@@ -116,6 +116,7 @@ class Pool(ABC):
         kwargs: Optional[Dict[str, Any]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
+        check_args: bool = True,
         use_torch: Optional[bool] = None,
         device_changeable: bool = False
     )->Future:
@@ -128,7 +129,8 @@ class Pool(ABC):
         if kwargs is None:
             kwargs = {}
 
-        self._check_args(func, args, kwargs)
+        if check_args:
+            self._check_args(func, args, kwargs)
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource(cpu_cores_in_python=1)
@@ -149,11 +151,13 @@ class Pool(ABC):
                 kwargs=kwargs,
                 cpu_mode_res=cpu_mode_res,
                 gpu_mode_res=gpu_mode_res,
+                check_args=check_args,
                 use_torch=use_torch,
                 device_changeable=device_changeable,
                 calculate_module_deps=self._need_module_deps
             )
-            self._validate_resource_feasibility(task)
+            if check_args:
+                self._validate_resource_feasibility(task)
 
             with self._lock:
                 self._tasks[task.id] = task
@@ -162,7 +166,7 @@ class Pool(ABC):
         from .futures import Future
         import time
 
-        future = Future()
+        future = Future(check_args)
         with self._lock:
             self._submit_buffer.append((
                 func, args, kwargs, cpu_mode_res, gpu_mode_res,
@@ -236,15 +240,16 @@ class Pool(ABC):
             calculate_module_deps=False,
         )
 
-        try:
-            self._validate_resource_feasibility(batch_task)
-        except Exception as e:
-            for f in ind_futures:
-                try:
-                    f.set_exception(e)
-                except Exception:
-                    pass
-            return
+        if self._check_args:
+            try:
+                self._validate_resource_feasibility(batch_task)
+            except Exception as e:
+                for f in ind_futures:
+                    try:
+                        f.set_exception(e)
+                    except Exception:
+                        pass
+                return
 
         batch_task.future.add_done_callback(
             partial(Pool._fan_out_batch_results, ind_futures=ind_futures)

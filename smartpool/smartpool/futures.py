@@ -9,9 +9,10 @@ from typing import Any, List, Callable
 
 class Future(_BaseFuture):
     
-    def __init__(self):
+    def __init__(self, check_args: bool = True):
         _BaseFuture.__init__(self)
         self._start_callbacks: List[Callable[[], None]] = []
+        self._check_args: bool = check_args
 
     def _invoke_callbacks(self):
         for callback in self._done_callbacks:
@@ -28,12 +29,13 @@ class Future(_BaseFuture):
                 traceback.print_stack()
 
     def add_start_callback(self, fn: Callable[[], None]):
-        signature: inspect.Signature = inspect.signature(fn)
-        try:
-            signature.bind()
-        except TypeError as e:
-            formatted_msg = f"{fn.__name__}() {str(e)}"
-            raise TypeError(formatted_msg) from None
+        if self._check_args:
+            signature: inspect.Signature = inspect.signature(fn)
+            try:
+                signature.bind()
+            except TypeError as e:
+                formatted_msg = f"{fn.__name__}() {str(e)}"
+                raise TypeError(formatted_msg) from None
         
         with self._condition:
             if self._state == PENDING:
@@ -43,12 +45,13 @@ class Future(_BaseFuture):
         fn()
 
     def add_done_callback(self, fn: Callable[[_BaseFuture], None]):
-        signature: inspect.Signature = inspect.signature(fn)
-        try:
-            signature.bind(self)
-        except TypeError as e:
-            formatted_msg = f"{fn.__name__}() {str(e)}"
-            raise TypeError(formatted_msg) from None
+        if self._check_args:
+            signature: inspect.Signature = inspect.signature(fn)
+            try:
+                signature.bind(self)
+            except TypeError as e:
+                formatted_msg = f"{fn.__name__}() {str(e)}"
+                raise TypeError(formatted_msg) from None
 
         with self._condition:
             if self._state not in [CANCELLED, CANCELLED_AND_NOTIFIED, FINISHED]:
@@ -62,7 +65,7 @@ class Future(_BaseFuture):
             self._invoke_start_callbackes()
 
     def __getitem__(self, key: Any) -> Future:
-        child: Future = Future()
+        child: Future = Future(self._check_args)
 
         def callback(fut: _BaseFuture) -> None:
             try:
@@ -74,7 +77,7 @@ class Future(_BaseFuture):
         return child
     
     def unpack(self, n: int) -> List[Future]:
-        children: List[Future] = [Future() for _ in range(n)]
+        children: List[Future] = [Future(self._check_args) for _ in range(n)]
     
         def callback(fut: _BaseFuture) -> None:
             try:

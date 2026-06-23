@@ -31,7 +31,7 @@ class Task:
 
     def __init__(
         self, pool: Pool, func: Union[Callable[..., Any], str], args: Tuple[Any, ...], kwargs: Dict[str, Any],
-        cpu_mode_res: Resource, gpu_mode_res: Resource,
+        cpu_mode_res: Resource, gpu_mode_res: Resource, check_args: bool,
         use_torch: bool, device_changeable: bool, calculate_module_deps: bool
     ):
         self.id: str = str(uuid.uuid4())
@@ -47,6 +47,7 @@ class Task:
         self.kwargs: Dict[str, Any] = kwargs
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
+        self.check_args: bool = check_args
         self.use_torch: bool = use_torch
         self.device_changeable: bool = device_changeable
         self.estimated_need_cpu_mem: float = 0.0
@@ -112,7 +113,7 @@ class Task:
     @property
     def future(self)->Future:
         if self._future is None:
-            self._future = Future()
+            self._future = Future(self.check_args)
 
         return self._future
 
