@@ -161,7 +161,8 @@ class InferSessionPool(Pool):
         providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
         run_options: Optional[ort.RunOptions] = None,
         use_io_binding: bool = False,
-        copy_outputs_to_cpu: bool = True
+        copy_outputs_to_cpu: bool = True,
+        chunksize: int = 1
     ) -> Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
@@ -191,16 +192,46 @@ class InferSessionPool(Pool):
             infer_session_pool=self, model_path=model_path, kwargs=merged_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res, check_args=check_args,
             output_names=output_names, user_providers=providers, run_options=run_options,
-            use_io_binding=use_io_binding, copy_outputs_to_cpu=copy_outputs_to_cpu
+            use_io_binding=use_io_binding, copy_outputs_to_cpu=copy_outputs_to_cpu,
+            chunksize=chunksize
         )
         if check_args:
             self._validate_resource_feasibility(task)
 
-        with self._lock:
-            if not task.ready_to_run:
-                self._not_ready_tasks[task.id] = task
+        self._submit_or_chunk(task)
+        return task.future
 
-            return self._submit(task)
+    def _put_in_chunk(self, task: InfersessionTask) -> Future:
+        from .inferchunktask import InferChunkTask
+        import threading
+        from queue import Queue
+
+        key = (task.model_path, task.chunksize)
+        if self._flush_chunk_thread is None:
+            self._flush_chunk_queue = Queue()
+            self._flush_chunk_thread = threading.Thread(target=self._flushing_chunk, daemon=True, name="flushing_chunk")
+            self._flush_chunk_thread.start()
+
+        if key not in self._chunk_tasks:
+            model_info = self.model_info(task.model_path)
+            self._chunk_tasks[key] = InferChunkTask(
+                pool=self,
+                model_path=task.model_path,
+                model_info=model_info,
+                output_names=task.output_names,
+                run_options=task.run_options,
+                use_io_binding=task.use_io_binding,
+                copy_outputs_to_cpu=task.copy_outputs_to_cpu,
+                chunksize=task.chunksize,
+                cpu_mode_res=task.cpu_mode_res,
+                gpu_mode_res=task.gpu_mode_res,
+                user_providers=task.user_providers
+            )
+            self._flush_chunk_queue.put(True)
+
+        chunk_task: InferChunkTask = self._chunk_tasks[key]
+        chunk_task.add_task(task)
+        return task.future
 
     def _try_assign_task(self, task: InfersessionTask) -> bool:
         if not task.ready_to_run or self._workers_working_count >= self._max_workers:

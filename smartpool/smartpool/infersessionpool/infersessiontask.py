@@ -21,7 +21,8 @@ class InfersessionTask(Task):
         output_names: Optional[List[str]],
         user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]],
         run_options: Optional[ort.RunOptions],
-        use_io_binding: bool, copy_outputs_to_cpu: bool
+        use_io_binding: bool, copy_outputs_to_cpu: bool,
+        chunksize: int = 1
     ):
         self.model_path: str = model_path
         self.user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = user_providers
@@ -37,6 +38,7 @@ class InfersessionTask(Task):
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
             check_args=check_args,
+            chunksize=chunksize,
             use_torch=False,
             device_changeable=False,
             calculate_module_deps=False
