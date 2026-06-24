@@ -20,23 +20,15 @@ from .resource import Resource
 
 if TYPE_CHECKING:
     import threading
+    from queue import Queue
     
     from .futures import Future
     from .gpuinfo import GPUInfoSnapshot
     from .sysinfo import SysInfo
     from .task import Task
+    from .chunk_task import ChunkTask
     from .utils import QueueLike
     from .worker import Worker
-
-
-def _process_batch(func, items_args_kwargs):
-    results = []
-    for args, kwargs in items_args_kwargs:
-        try:
-            results.append((True, func(*args, **kwargs)))
-        except Exception as e:
-            results.append((False, e))
-    return results
 
 
 class Pool(ABC):
@@ -94,16 +86,15 @@ class Pool(ABC):
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
-        self._submit_buffers: Dict = {}
+        self._chunk_tasks: Dict[Tuple[Callable[..., Any], int], ChunkTask] = {}
         self._flush_chunk_thread: Optional[threading.Thread] = None
-
+        self._flush_chunk_queue: Optional[Queue] = None
+        self._result_queue:Optional[QueueLike[Tuple[str, bool, Any]]] = None
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
                 result_queue_kwargs = {}
 
             self._result_queue:Optional[QueueLike[Tuple[str, bool, Any]]] = result_queue_cls(*result_queue_args, **result_queue_kwargs)
-        else:
-            self._result_queue:Optional[QueueLike[Tuple[str, bool, Any]]] = None
 
         Pool._instances.add(self)
 
@@ -139,186 +130,80 @@ class Pool(ABC):
         if use_torch is None:
             use_torch = self._use_torch
 
-        if chunksize <= 1:
-            from .task import Task
+        from .task import Task
 
-            task = Task(
-                pool=self,
-                func=func,
-                args=args,
-                kwargs=kwargs,
-                cpu_mode_res=cpu_mode_res,
-                gpu_mode_res=gpu_mode_res,
-                check_args=check_args,
-                chunksize=chunksize,
-                use_torch=use_torch,
-                device_changeable=device_changeable,
-                calculate_module_deps=self._need_module_deps
-            )
-            if check_args:
-                self._validate_resource_feasibility(task)
+        task = Task(
+            pool=self,
+            func=func,
+            args=args,
+            kwargs=kwargs,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            check_args=check_args,
+            chunksize=1,
+            use_torch=use_torch,
+            device_changeable=device_changeable,
+            calculate_module_deps=self._need_module_deps
+        )
+        if check_args:
+            self._validate_resource_feasibility(task)
 
-            with self._lock:
-                self._tasks[task.id] = task
-                if not task.ready_to_run:
-                    self._not_ready_tasks[task.id] = task
-                    return
-                
-                return self._submit(task)
-
-        from .chunk_task import ChunkTask
-        from functools import partial
-        from .futures import Future
-        import time
-        import threading
-
-        chunk_task = ChunkTask(self, chunksize)
-        key = (func, chunksize)
-        with self._lock:
-            if self._flush_chunk_thread is None:
-                self._flush_daemon_started = True
-                thread = threading.Thread(target=self._flush_daemon, daemon=True, name="flush_daemon")
-                thread.start()
-            if key not in self._submit_buffers:
-                self._submit_buffers[key] = {
-                    'items': [],
-                    'last_submit_time': 0.0,
-                }
-            buf = self._submit_buffers[key]
-            buf['items'].append((
-                func, args, kwargs, cpu_mode_res, gpu_mode_res,
-                use_torch, device_changeable, future,
-            ))
-            buf['last_submit_time'] = time.monotonic()
-            future.add_done_callback(partial(self._try_remove_from_buffer, key=key))
-            if len(buf['items']) >= chunksize:
-                self._flush_key(key)
-
-        return future
+        self._submit_or_chunk(task)
 
     def flush(self) -> None:
         with self._lock:
             self._flush()
 
-    def _try_remove_from_buffer(self, future: Future, key) -> None:
-        with self._lock:
-            buf = self._submit_buffers.get(key)
-            if buf is None:
-                return
-            try:
-                items = buf['items']
-                idx = next(i for i, item in enumerate(items) if item[-1] is future)
-                del items[idx]
-                if not items:
-                    del self._submit_buffers[key]
-            except (StopIteration, ValueError):
-                pass
-
-    def _flush_key(self, key) -> None:
-        buf = self._submit_buffers.get(key)
-        if buf is None or not buf['items']:
-            return
-
-        items = buf['items']
-        func = items[0][0]
-
-        items_data = []
-        ind_futures = []
-        for entry in items:
-            func, args, kwargs, cpu_mode_res, gpu_mode_res, use_torch, device_changeable, future = entry
-            items_data.append((func, args, kwargs, cpu_mode_res, gpu_mode_res, use_torch, device_changeable))
-            ind_futures.append(future)
-
-        del self._submit_buffers[key]
-
-        from functools import partial
-        from .task import Task
-
-        cpu_res_list = [item[3] for item in items_data]
-        gpu_res_list = [item[4] for item in items_data]
-
-        batch_func = partial(_process_batch, func, [(a, k) for (_, a, k, _, _, _, _) in items_data])
-        batch_cpu = self._batch_resource(cpu_res_list)
-        batch_gpu = self._batch_resource(gpu_res_list)
-        batch_use_torch = any(item[5] for item in items_data)
-
-        batch_task = Task(
-            pool=self, func=batch_func, args=(), kwargs={},
-            cpu_mode_res=batch_cpu, gpu_mode_res=batch_gpu,
-            check_args=False, use_torch=batch_use_torch,
-            device_changeable=False, calculate_module_deps=False,
-        )
-
-        try:
-            self._validate_resource_feasibility(batch_task)
-        except Exception as e:
-            for f in ind_futures:
-                try:
-                    f.set_exception(e)
-                except Exception:
-                    pass
-            return
-
-        batch_task.future.add_done_callback(
-            partial(Pool._fan_out_batch_results, ind_futures=ind_futures)
-        )
-
-        self._tasks[batch_task.id] = batch_task
-        self._submit(batch_task)
-
     def _flush(self) -> None:
-        for key in list(self._submit_buffers.keys()):
-            self._flush_key(key)
+        for chunk_task in list(self._chunk_tasks.values()):
+            chunk_task.submit()
 
-    @staticmethod
-    def _fan_out_batch_results(batch_future: Future, ind_futures: List[Future]) -> None:
-        if batch_future.cancelled():
-            for f in ind_futures:
-                try:
-                    f.cancel()
-                except Exception:
-                    pass
-            return
-
-        try:
-            results = batch_future.result()
-        except Exception as exc:
-            for f in ind_futures:
-                try:
-                    f.set_exception(exc)
-                except Exception:
-                    pass
-            return
-
-        for (success, val), f in zip(results, ind_futures):
-            try:
-                if success:
-                    f.set_result(val)
-                else:
-                    f.set_exception(val)
-            except Exception:
-                pass
-
-    def _flush_daemon(self) -> None:
+    def _flushing_chunk(self) -> None:
         import time
         while not self._shutdown:
+            running = self._flush_chunk_queue.get()
+            if not running:
+                break
+
             time.sleep(0.1)
             with self._lock:
-                now = time.monotonic()
-                for key, buf in list(self._submit_buffers.items()):
-                    if buf['items'] and now - buf['last_submit_time'] >= 0.1:
-                        self._flush_key(key)
+                now = time.time()
+                for chunk_task in list(self._chunk_tasks.values()):
+                    if now - chunk_task.last_add_time >= 0.1:
+                        chunk_task.submit()
+
+    def _put_in_chunk(self, task: Task) -> Future:
+        from .chunk_task import ChunkTask
+        import threading
+        from queue import Queue
+
+        key = (task.func, task.chunksize)
+        if self._flush_chunk_thread is None:
+            self._flush_chunk_queue = Queue()
+            self._flush_chunk_thread = threading.Thread(target=self._flushing_chunk, daemon=True, name="flushing_chunk")
+            self._flush_chunk_thread.start()
+
+        if key not in self._chunk_tasks:
+            self._chunk_tasks[key] = ChunkTask(self, task.chunksize)
+            self._flush_chunk_queue.put(True)
+
+        chunk_task: ChunkTask = self._chunk_tasks[key]
+        chunk_task.add_task(task)
+
+        return task.future
 
     def _submit(self, task: Task) -> Future:
+        assert task.ready_to_run
+
+        if task.id in self._not_ready_tasks:
+            del self._not_ready_tasks[task.id]
+
         if task.future.done():
             if task.id in self._tasks:
                 del self._tasks[task.id]
 
             if task.id in self._delayed_tasks:
                 del self._delayed_tasks[task.id]
-
-            if task.id in self._not_ready_tasks:
-                del self._not_ready_tasks[task.id]
                 
             return task.future
         
@@ -333,15 +218,24 @@ class Pool(ABC):
         if task.id in self._delayed_tasks:
             del self._delayed_tasks[task.id]
 
-        if task.id in self._not_ready_tasks:
-            del self._not_ready_tasks[task.id]
-
         if self._result_queue is not None and self._result_thread is None:
             import threading
             self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
             self._result_thread.start()
 
         return task.future
+
+    def _submit_or_chunk(self, task: Task) -> Future:
+        with self._lock:
+            if task.chunksize <= 1:
+                self._tasks[task.id] = task
+                if not task.ready_to_run:
+                    self._not_ready_tasks[task.id] = task
+                    return
+                
+                return self._submit(task)
+            else:
+                return self._put_in_chunk(task)
 
     @classmethod
     def config(cls, pool_name:str, *args, **kwargs):
@@ -494,13 +388,14 @@ class Pool(ABC):
             for future in futures:
                 future.cancel()
 
-    def _batch_resource(self, resources: List[Resource]) -> Resource:
+    @staticmethod
+    def _batch_resource(resources: List[Resource], aggregate_func: Callable[[Iterable[float]], float]) -> Resource:
         return Resource(
-            cpu_cores_in_python=max(r.cpu_cores_in_python for r in resources),
-            cpu_cores_out_of_python=max(r.cpu_cores_out_of_python for r in resources),
-            cpu_mem=max(r.cpu_mem for r in resources),
-            gpu_cores=max(r.gpu_cores for r in resources),
-            gpu_mem=max(r.gpu_mem for r in resources),
+            cpu_cores_in_python=aggregate_func(res.cpu_cores_in_python for res in resources),
+            cpu_cores_out_of_python=aggregate_func(res.cpu_cores_out_of_python for res in resources),
+            cpu_mem=aggregate_func(res.cpu_mem for res in resources),
+            gpu_cores=aggregate_func(res.gpu_cores for res in resources),
+            gpu_mem=aggregate_func(res.gpu_mem for res in resources),
         )
 
     def map(
@@ -568,6 +463,9 @@ class Pool(ABC):
             if self._result_thread is not None and self._result_thread.is_alive() and self._result_queue is not None:
                 self._result_queue.put(None)
 
+            if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive() and self._flush_chunk_queue is not None:
+                self._flush_chunk_queue.put(False)
+
             if cancel_futures:
                 for task in self._tasks.values():
                     task.future.cancel()
@@ -578,6 +476,9 @@ class Pool(ABC):
 
             if self._result_thread is not None and self._result_thread.is_alive():
                 self._result_thread.join()
+
+            if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive():
+                self._flush_chunk_thread.join()
 
     def __enter__(self)->Pool:
         return self

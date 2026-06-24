@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import uuid
 import threading
-from functools import partial
 from concurrent.futures import Future as _BaseFuture
 from .futures import Future
 from typing import (
@@ -16,6 +15,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    Set
 )
 
 if TYPE_CHECKING:
@@ -34,6 +34,7 @@ class Task:
         cpu_mode_res: Resource, gpu_mode_res: Resource, check_args: bool, chunksize: int,
         use_torch: bool, device_changeable: bool, calculate_module_deps: bool
     ):
+        self.pool: Pool = pool
         self.id: str = str(uuid.uuid4())
         self.func: Callable[..., Any] = func
 
@@ -53,12 +54,12 @@ class Task:
         self.device_changeable: bool = device_changeable
         self.estimated_need_cpu_mem: float = 0.0
         self.modules_overlap_ratio: float = 0.0
-        self.module_deps: Dict[str, int] = {}
+        self.module_deps: Set[str] = set()
         self.ready_to_run: bool = True
 
         if calculate_module_deps:
             from .module_deps import module_deps
-            self.module_deps:Dict[str, int] = module_deps(sys.modules[func.__module__])
+            self.module_deps: Set[str] = module_deps(sys.modules[func.__module__])
 
         self._device: Optional[str] = None
         self._device_prefix: Optional[str] = None
@@ -82,14 +83,16 @@ class Task:
 
         if self.dep_futures:
             self.ready_to_run = False
-            callback = partial(self._dep_future_done_callback, pool)
             for dep_future in self.dep_futures:
-                dep_future.add_done_callback(callback)
+                dep_future.add_done_callback(self._dep_future_done_callback)
 
     def can_use(self)->bool:
         return True
 
-    def _dep_future_done_callback(self, pool: Pool, future: Future) -> None:
+    def _callback_hook(self, result: Any)->None:
+        pass
+
+    def _dep_future_done_callback(self, future: Future) -> None:
         try:
             with self.finished_dep_futures_count_lock:
                 self.finished_dep_futures_count += 1
@@ -101,18 +104,22 @@ class Task:
                 else:
                     self.kwargs[future_key] = result
 
+                self._callback_hook(result)
+
                 if self.finished_dep_futures_count == len(self.dep_futures):
                     self.ready_to_run = True
-                    with pool._lock:
-                        if self.id in pool._not_ready_tasks:
-                            del pool._not_ready_tasks[self.id]
-                            
-                        pool._submit(self)
+                    self.pool._submit_or_chunk(self)
         except Exception as e:
             self.future.set_exception(e)
-            with pool._lock:
-                if self.id in pool._tasks:
-                    pool._tasks.pop(self.id)
+            with self.pool._lock:
+                if self.id in self.pool._tasks:
+                    del self.pool._tasks[self.id]
+
+                if self.id in self.pool._delayed_tasks:
+                    del self.pool._delayed_tasks[self.id]
+
+                if self.id in self.pool._not_ready_tasks:
+                    del self.pool._not_ready_tasks[self.id]
 
     @property
     def future(self)->Future:
