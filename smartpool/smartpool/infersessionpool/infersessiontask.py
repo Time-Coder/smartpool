@@ -63,7 +63,10 @@ class InfersessionTask(Task):
                 if self.finished_dep_futures_count == len(self.dep_futures):
                     self.ready_to_run = True
                     with pool._lock:
-                        pool._submit(self, append_to_delay=False)
+                        if self.id in pool._not_ready_tasks:
+                            del pool._not_ready_tasks[self.id]
+
+                        pool._submit(self)
         except Exception as e:
             self.future.set_exception(e)
             with pool._lock:

@@ -89,7 +89,8 @@ class Pool(ABC):
         self._worker_cls: Type[Worker] = worker_cls
         self._workers: List[Worker] = []
         self._tasks: Dict[str, Task] = {}
-        self._delayed_tasks: List[Task] = []
+        self._not_ready_tasks: Dict[str, Task] = {}
+        self._delayed_tasks: Dict[str, Task] = {}
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
@@ -164,7 +165,11 @@ class Pool(ABC):
 
             with self._lock:
                 self._tasks[task.id] = task
-                return self._submit(task, append_to_delay=True)
+                if not task.ready_to_run:
+                    self._not_ready_tasks[task.id] = task
+                    return
+                
+                return self._submit(task)
 
         from functools import partial
         from .futures import Future
@@ -263,7 +268,7 @@ class Pool(ABC):
         )
 
         self._tasks[batch_task.id] = batch_task
-        self._submit(batch_task, append_to_delay=True)
+        self._submit(batch_task)
 
     def _flush(self) -> None:
         for key in list(self._submit_buffers.keys()):
@@ -308,10 +313,16 @@ class Pool(ABC):
                     if buf['items'] and now - buf['last_submit_time'] >= 0.1:
                         self._flush_key(key)
 
-    def _submit(self, task: Task, append_to_delay: bool) -> Future:
+    def _submit(self, task: Task) -> Future:
         if task.future.done():
             if task.id in self._tasks:
                 del self._tasks[task.id]
+
+            if task.id in self._delayed_tasks:
+                del self._delayed_tasks[task.id]
+
+            if task.id in self._not_ready_tasks:
+                del self._not_ready_tasks[task.id]
                 
             return task.future
         
@@ -319,16 +330,15 @@ class Pool(ABC):
             return task.future
         
         if not self._try_assign_task(task):            
-            if append_to_delay:
-                self._delayed_tasks.append(task)
-
+            self._delayed_tasks[task.id] = task
             return task.future
 
         self._put_task(task)
-        try:
-            self._delayed_tasks.remove(task)
-        except ValueError:
-            pass
+        if task.id in self._delayed_tasks:
+            del self._delayed_tasks[task.id]
+
+        if task.id in self._not_ready_tasks:
+            del self._not_ready_tasks[task.id]
 
         if self._result_queue is not None and self._result_thread is None:
             import threading
@@ -385,7 +395,7 @@ class Pool(ABC):
             raise TypeError(formatted_msg) from None
 
     def _try_assign_task(self, task: Task) -> bool:
-        if not task.ready_to_run or self._workers_working_count >= self._max_workers:
+        if self._workers_working_count >= self._max_workers:
             return False
         
         gpu_res = task.gpu_mode_res
@@ -617,22 +627,22 @@ class Pool(ABC):
 
     def _postprocess_after_task_done(self)->None:
         if self._delayed_tasks:
-            should_pop_indices = []
+            should_pop_task_ids_in_delayed = []
             cancelled_task_ids = []
-            for i, delayed_task in enumerate(self._delayed_tasks):
+            for task_id, delayed_task in self._delayed_tasks.items():
                 if delayed_task.future.cancelled():
-                    cancelled_task_ids.append(delayed_task.id)
-                    should_pop_indices.append(i)
+                    cancelled_task_ids.append(task_id)
+                    should_pop_task_ids_in_delayed.append(task_id)
                     continue
 
                 if not self._try_assign_task(delayed_task):
                     continue
 
                 self._put_task(delayed_task)
-                should_pop_indices.append(i)
+                should_pop_task_ids_in_delayed.append(task_id)
 
-            for i in reversed(should_pop_indices):
-                del self._delayed_tasks[i]
+            for task_id in should_pop_task_ids_in_delayed:
+                del self._delayed_tasks[task_id]
 
             for task_id in cancelled_task_ids:
                 del self._tasks[task_id]

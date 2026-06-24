@@ -198,7 +198,10 @@ class InferSessionPool(Pool):
 
         with self._lock:
             self._tasks[task.id] = task
-            return self._submit(task, append_to_delay=True)
+            if not task.ready_to_run:
+                self._not_ready_tasks[task.id] = task
+                
+            return self._submit(task)
 
     def _try_assign_task(self, task: InfersessionTask) -> bool:
         if not task.ready_to_run or self._workers_working_count >= self._max_workers:
