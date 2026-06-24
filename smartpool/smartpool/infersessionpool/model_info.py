@@ -147,7 +147,7 @@ class ModelInfo:
 
         return value.shape
 
-    def check_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], bool]:
+    def merge_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None, check: bool = True) -> Tuple[Dict[str, Any], bool]:
         if kwargs is None:
             kwargs = {}
 
@@ -165,30 +165,33 @@ class ModelInfo:
                 continue
 
             cls_name = value.__class__.__name__
-            if cls_name not in ("ndarray", "OrtValue", "Tensor"):
+            if check and cls_name not in ("ndarray", "OrtValue", "Tensor"):
                 raise TypeError(f"model '{self.model_name}' input node '{name}' need type (numpy.ndarray, onnxruntime.OrtValue, torch.Tensor), {type(value)} were given")
 
             if cls_name == "OrtValue":
                 has_ortvalue: bool = True
+                if not check:
+                    break
 
-            node = self.inputs[name]
+            if check:
+                node = self.inputs[name]
 
-            expected_type = node.dtype
-            actual_type = self.get_dtype(value)
-            if actual_type != expected_type:
-                raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
+                expected_type = node.dtype
+                actual_type = self.get_dtype(value)
+                if actual_type != expected_type:
+                    raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
 
-            expected_shape = node.shape
-            actual_shape = self.get_shape(value)
-            if len(expected_shape) != len(actual_shape):
-                raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
-
-            for i, dim in enumerate(expected_shape):
-                if isinstance(dim, str) or dim is None or dim == -1:
-                    continue
-
-                if actual_shape[i] != dim:
+                expected_shape = node.shape
+                actual_shape = self.get_shape(value)
+                if len(expected_shape) != len(actual_shape):
                     raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
+
+                for i, dim in enumerate(expected_shape):
+                    if isinstance(dim, str) or dim is None or dim == -1:
+                        continue
+
+                    if actual_shape[i] != dim:
+                        raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
 
         return kwargs, has_ortvalue
 

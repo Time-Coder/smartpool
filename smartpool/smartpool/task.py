@@ -30,12 +30,12 @@ class Task:
     _torch_gpu_backend: Optional[str] = None
 
     def __init__(
-        self, pool: Pool, func: Union[Callable[..., Any], str], args: Tuple[Any, ...], kwargs: Dict[str, Any],
-        cpu_mode_res: Resource, gpu_mode_res: Resource, check_args: bool,
+        self, pool: Pool, func: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any],
+        cpu_mode_res: Resource, gpu_mode_res: Resource, check_args: bool, chunksize: int,
         use_torch: bool, device_changeable: bool, calculate_module_deps: bool
     ):
         self.id: str = str(uuid.uuid4())
-        self.func: Union[Callable[..., Any], str] = func
+        self.func: Callable[..., Any] = func
 
         if args is None:
             args = ()
@@ -48,6 +48,7 @@ class Task:
         self.cpu_mode_res: Resource = cpu_mode_res
         self.gpu_mode_res: Resource = gpu_mode_res
         self.check_args: bool = check_args
+        self.chunksize: int = chunksize
         self.use_torch: bool = use_torch
         self.device_changeable: bool = device_changeable
         self.estimated_need_cpu_mem: float = 0.0

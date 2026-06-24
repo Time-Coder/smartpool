@@ -95,7 +95,7 @@ class Pool(ABC):
         self._shutdown: bool = False
         self._result_thread: Optional[threading.Thread] = None
         self._submit_buffers: Dict = {}
-        self._flush_daemon_started: bool = False
+        self._flush_chunk_thread: Optional[threading.Thread] = None
 
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -139,12 +139,6 @@ class Pool(ABC):
         if use_torch is None:
             use_torch = self._use_torch
 
-        if chunksize > 1:
-            from concurrent.futures import Future as _BaseFuture
-            if any(isinstance(arg, _BaseFuture) for arg in args) \
-            or any(isinstance(v, _BaseFuture) for v in kwargs.values()):
-                chunksize = 1
-
         if chunksize <= 1:
             from .task import Task
 
@@ -156,6 +150,7 @@ class Pool(ABC):
                 cpu_mode_res=cpu_mode_res,
                 gpu_mode_res=gpu_mode_res,
                 check_args=check_args,
+                chunksize=chunksize,
                 use_torch=use_torch,
                 device_changeable=device_changeable,
                 calculate_module_deps=self._need_module_deps
@@ -171,15 +166,16 @@ class Pool(ABC):
                 
                 return self._submit(task)
 
+        from .chunk_task import ChunkTask
         from functools import partial
         from .futures import Future
         import time
         import threading
 
-        future = Future(check_args)
+        chunk_task = ChunkTask(self, chunksize)
         key = (func, chunksize)
         with self._lock:
-            if not self._flush_daemon_started:
+            if self._flush_chunk_thread is None:
                 self._flush_daemon_started = True
                 thread = threading.Thread(target=self._flush_daemon, daemon=True, name="flush_daemon")
                 thread.start()

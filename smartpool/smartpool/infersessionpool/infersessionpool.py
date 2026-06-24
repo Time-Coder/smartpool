@@ -170,7 +170,7 @@ class InferSessionPool(Pool):
         from .infersessiontask import InfersessionTask
         
         model_info: ModelInfo = self.model_info(model_path)
-        validated_kwargs, has_ortvalue = model_info.check_args(args, kwargs)
+        merged_kwargs, has_ortvalue = model_info.merge_args(args, kwargs, check_args)
         
         if check_args:
             model_info.check_outputs(output_names)
@@ -188,7 +188,7 @@ class InferSessionPool(Pool):
 
         model_path = os.path.abspath(model_path).replace("\\", "/")
         task = InfersessionTask(
-            infer_session_pool=self, model_path=model_path, kwargs=validated_kwargs,
+            infer_session_pool=self, model_path=model_path, kwargs=merged_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res, check_args=check_args,
             output_names=output_names, user_providers=providers, run_options=run_options,
             use_io_binding=use_io_binding, copy_outputs_to_cpu=copy_outputs_to_cpu
