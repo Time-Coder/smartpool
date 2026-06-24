@@ -197,10 +197,9 @@ class InferSessionPool(Pool):
             self._validate_resource_feasibility(task)
 
         with self._lock:
-            self._tasks[task.id] = task
             if not task.ready_to_run:
                 self._not_ready_tasks[task.id] = task
-                
+
             return self._submit(task)
 
     def _try_assign_task(self, task: InfersessionTask) -> bool:

@@ -105,9 +105,9 @@ class Pool(ABC):
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         check_args: bool = True,
-        use_torch: Optional[bool] = None,
-        device_changeable: bool = False,
         chunksize: int = 1,
+        use_torch: Optional[bool] = None,
+        device_changeable: bool = False
     )->Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
@@ -140,7 +140,7 @@ class Pool(ABC):
             cpu_mode_res=cpu_mode_res,
             gpu_mode_res=gpu_mode_res,
             check_args=check_args,
-            chunksize=1,
+            chunksize=chunksize,
             use_torch=use_torch,
             device_changeable=device_changeable,
             calculate_module_deps=self._need_module_deps
@@ -149,6 +149,7 @@ class Pool(ABC):
             self._validate_resource_feasibility(task)
 
         self._submit_or_chunk(task)
+        return task.future
 
     def flush(self) -> None:
         with self._lock:
@@ -166,8 +167,8 @@ class Pool(ABC):
                 break
 
             time.sleep(0.1)
+            now = time.time()
             with self._lock:
-                now = time.time()
                 for chunk_task in list(self._chunk_tasks.values()):
                     if now - chunk_task.last_add_time >= 0.1:
                         chunk_task.submit()
@@ -184,7 +185,7 @@ class Pool(ABC):
             self._flush_chunk_thread.start()
 
         if key not in self._chunk_tasks:
-            self._chunk_tasks[key] = ChunkTask(self, task.chunksize)
+            self._chunk_tasks[key] = ChunkTask(self, task.func, task.chunksize)
             self._flush_chunk_queue.put(True)
 
         chunk_task: ChunkTask = self._chunk_tasks[key]
@@ -194,6 +195,8 @@ class Pool(ABC):
 
     def _submit(self, task: Task) -> Future:
         assert task.ready_to_run
+        
+        self._tasks[task.id] = task
 
         if task.id in self._not_ready_tasks:
             del self._not_ready_tasks[task.id]
@@ -210,7 +213,7 @@ class Pool(ABC):
         if task.worker is not None:
             return task.future
         
-        if not self._try_assign_task(task):            
+        if not self._try_assign_task(task):
             self._delayed_tasks[task.id] = task
             return task.future
 
@@ -227,12 +230,11 @@ class Pool(ABC):
 
     def _submit_or_chunk(self, task: Task) -> Future:
         with self._lock:
+            if not task.ready_to_run:
+                self._not_ready_tasks[task.id] = task
+                return
+            
             if task.chunksize <= 1:
-                self._tasks[task.id] = task
-                if not task.ready_to_run:
-                    self._not_ready_tasks[task.id] = task
-                    return
-                
                 return self._submit(task)
             else:
                 return self._put_in_chunk(task)

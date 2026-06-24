@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, List, Tuple, Any, Dict
+from typing import TYPE_CHECKING, List, Tuple, Any, Dict, Callable
 from .task import Task
 from .resource import Resource
 
@@ -10,25 +10,28 @@ if TYPE_CHECKING:
 
 class ChunkTask(Task):
 
-    def __init__(self, pool: Pool, chunksize: int):
+    def __init__(self, pool: Pool, func: Callable[..., Any], chunksize: int):
         self._sub_tasks: List[Task] = []
         self._args_list: List[Tuple[Any, ...]] = []
         self._kwargs_list: List[Dict[str, Any]] = []
         self.last_add_time: float = 0.0
+        self._submitted: bool = False
+        self._key: Tuple[Callable[..., Any], int] = (func, chunksize)
         Task.__init__(
-            self, pool=pool, func=self._process_batch, args=None, kwargs=None,
+            self, pool=pool, func=self._process_batch,
+            args=(func, self._args_list, self._kwargs_list), kwargs=None,
             cpu_mode_res=Resource(), gpu_mode_res=Resource(), check_args=False, chunksize=chunksize,
             use_torch=False, device_changeable=False, calculate_module_deps=False
         )
         self.future.add_done_callback(self._fan_out_batch_results)
         
     def add_task(self, task: Task)->None:
+        if self._submitted:
+            return
+
         import time
 
         self.last_add_time = time.time()
-        if not self.args:
-            self.args = (task.func, self._args_list, self._kwargs_list)
-
         self._sub_tasks.append(task)
         self._args_list.append(task.args)
         self._kwargs_list.append(task.kwargs)
@@ -53,19 +56,22 @@ class ChunkTask(Task):
             for sub_task in self._sub_tasks:
                 sub_task.future.set_exception(e)
 
-            if self.id in self.pool._chunk_tasks:
-                del self.pool._chunk_tasks[self.id]
+            if self._key in self.pool._chunk_tasks:
+                del self.pool._chunk_tasks[self._key]
 
             return
 
         if len(self._sub_tasks) >= self.chunksize:
-            if self.id in self.pool._chunk_tasks:
-                del self.pool._chunk_tasks[self.id]
-
             self.submit()
 
     def submit(self):
-        self.pool._tasks[self.id] = self
+        if self._submitted:
+            return
+
+        self._submitted = True
+        if self._key in self.pool._chunk_tasks:
+            del self.pool._chunk_tasks[self._key]
+
         self.pool._submit(self)
 
     @staticmethod
