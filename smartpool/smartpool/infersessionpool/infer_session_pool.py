@@ -29,9 +29,9 @@ class InferSessionPool(Pool):
     _model_infos: Dict[str, ModelInfo] = {}
 
     PROVIDER_MEMORY_MULTIPLIERS: Dict[str, Tuple[int, int]] = {
-        "CPUExecutionProvider": (3, 0),
-        "CUDAExecutionProvider": (1, 2),
-        "TensorrtExecutionProvider": (256, 256),
+        "CPUExecutionProvider": (4, 0),
+        "CUDAExecutionProvider": (3, 7),
+        "TensorrtExecutionProvider": (356, 45),
         "DmlExecutionProvider": (1, 2),
         "OpenVINOExecutionProvider": (2, 0),
         "CoreMLExecutionProvider": (2, 1),
