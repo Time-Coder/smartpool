@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from torch.cuda import Stream
 
     from ..task import Task
-    from .threadpool import ThreadPool
+    from .thread_pool import ThreadPool
 
 
 class ThreadWorker(Worker):

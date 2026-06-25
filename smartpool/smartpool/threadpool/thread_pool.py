@@ -7,7 +7,7 @@ from ..pool import Pool
 if TYPE_CHECKING:
     from ..resource import Resource
     from ..task import Task
-    from .threadworker import ThreadWorker
+    from .thread_worker import ThreadWorker
 
 
 class ThreadPool(Pool):
@@ -22,7 +22,7 @@ class ThreadPool(Pool):
         max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
-        from .threadworker import ThreadWorker
+        from .thread_worker import ThreadWorker
 
         if max_workers <= 0:
             import os

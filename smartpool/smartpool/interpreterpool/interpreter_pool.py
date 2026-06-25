@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
     from ..resource import Resource
     from ..task import Task
-    from .interpreterworker import InterpreterWorker
+    from .interpreter_worker import InterpreterWorker
 
 
 class InterpreterPool(Pool):
@@ -24,7 +24,7 @@ class InterpreterPool(Pool):
     ):
         import concurrent.interpreters as interpreters
         
-        from .interpreterworker import InterpreterWorker
+        from .interpreter_worker import InterpreterWorker
 
         if max_workers <= 0:
             import os

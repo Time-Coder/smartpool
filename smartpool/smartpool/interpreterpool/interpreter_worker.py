@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     import threading
     from concurrent.interpreters import Queue
 
-    from .interpreterpool import InterpreterPool
+    from .interpreter_pool import InterpreterPool
 
 
 class InterpreterWorker(Worker):

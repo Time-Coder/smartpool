@@ -7,7 +7,7 @@ from ..pool import Pool
 if TYPE_CHECKING:
     from ..resource import Resource
     from ..task import Task
-    from .processworker import ProcessWorker
+    from .process_worker import ProcessWorker
 
 
 class ProcessPool(Pool):
@@ -34,7 +34,7 @@ class ProcessPool(Pool):
             import multiprocessing as mp
             from multiprocessing.queues import SimpleQueue
 
-        from .processworker import ProcessWorker
+        from .process_worker import ProcessWorker
 
         if max_workers <= 0:
             import os

@@ -39,6 +39,7 @@ class ModelInfo:
         self._inputs: Optional[Dict[str, NodeInfo]] = None
         self._outputs: Optional[Dict[str, NodeInfo]] = None
         self._signature: Optional[inspect.Signature] = None
+        self._support_batch_input: Optional[bool] = None
         self.load()
 
     @property
@@ -73,6 +74,11 @@ class ModelInfo:
     def signature(self)->inspect.Signature:
         self.load()
         return self._signature
+    
+    @property
+    def support_batch_input(self)->bool:
+        self.load()
+        return self._support_batch_input
 
     def load(self):
         if (
@@ -80,7 +86,8 @@ class ModelInfo:
             self._file_mtime is not None and
             self._inputs is not None and
             self._outputs is not None and
-            self._signature is not None
+            self._signature is not None and
+            self._support_batch_input is not None
         ):
             mtime = 0
             if os.path.isfile(self._model_path):
@@ -88,6 +95,13 @@ class ModelInfo:
 
             if self._file_mtime == mtime:
                 return
+            else:
+                self._file_size: Optional[int] = None
+                self._file_mtime: Optional[float] = None
+                self._inputs: Optional[Dict[str, NodeInfo]] = None
+                self._outputs: Optional[Dict[str, NodeInfo]] = None
+                self._signature: Optional[inspect.Signature] = None
+                self._support_batch_input: Optional[bool] = None
 
         if not os.path.isfile(self._model_path):
             raise FileNotFoundError(self._model_path)
@@ -112,7 +126,15 @@ class ModelInfo:
         outputs = {}
         for node in model.graph.input:
             params.append(inspect.Parameter(node.name, inspect.Parameter.POSITIONAL_OR_KEYWORD))
-            inputs[node.name] = NodeInfo(node)
+            node_info = NodeInfo(node)
+            inputs[node.name] = node_info
+            if self._support_batch_input is None:
+                first_dim = node_info.shape[0] if node_info.shape else None
+                self._support_batch_input = (
+                    first_dim is None or
+                    not isinstance(first_dim, (int, float)) or
+                    first_dim <= 0
+                )
 
         for node in model.graph.output:
             outputs[node.name] = NodeInfo(node)

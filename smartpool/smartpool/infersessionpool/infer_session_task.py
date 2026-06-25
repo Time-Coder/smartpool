@@ -5,17 +5,20 @@ from ..task import Task
 
 if TYPE_CHECKING:
     from ..gpuinfo import GPUInfoSnapshot
-    from .infersessionpool import InferSessionPool
+    from .infer_session_pool import InferSessionPool
     from .session_info import SessionInfo
+    from .model_info import ModelInfo
     from ..resource import Resource
+
     import onnxruntime as ort
+    import numpy as np
 
 
 class InfersessionTask(Task):
 
     def __init__(
         self, infer_session_pool: InferSessionPool,
-        model_path: str, kwargs: Dict[str, Any],
+        model_info: ModelInfo, kwargs: Dict[str, Any],
         cpu_mode_res: Resource, gpu_mode_res: Resource,
         check_args: bool,
         output_names: Optional[List[str]],
@@ -24,7 +27,7 @@ class InfersessionTask(Task):
         use_io_binding: bool, copy_outputs_to_cpu: bool,
         chunksize: int = 1
     ):
-        self.model_path: str = model_path
+        self.model_info: ModelInfo = model_info
         self.user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = user_providers
         self.run_options: Optional[ort.RunOptions] = run_options
         self.output_names: Optional[List[str]] = output_names
@@ -93,3 +96,25 @@ class InfersessionTask(Task):
             success = False
 
         return success, result
+    
+    def run_async(self) -> None:
+        try:
+            self.session_info.run_async(self.output_names, input_feed=self.kwargs, callback=self.callback, user_data=None, run_options=self.run_options)
+        except Exception as e:
+            self.is_working = False
+            infer_session_pool: InferSessionPool = self.pool
+            infer_session_pool._remove_provider_running_device(self.provider)
+            infer_session_pool._on_task_done(self.id, False, e)
+    
+    def callback(self, results: np.ndarray, user_data: None, error_str: str) -> None:
+        task_id = self.id
+        if error_str:
+            success = False
+            result = RuntimeError(error_str)
+        else:
+            success = True
+            result = results
+
+        infer_session_pool: InferSessionPool = self.pool
+        infer_session_pool._remove_provider_running_device(self.provider)
+        infer_session_pool._on_task_done(task_id, success, result)

@@ -5,7 +5,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
 from ..pool import Pool
-from .infersessionworker import InferSessionWorker
+from .infer_session_worker import InferSessionWorker
 
 if TYPE_CHECKING:
     from ..futures import Future
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from ..resource import Resource
     from ..worker import Worker
-    from .infersessiontask import InfersessionTask
+    from .infer_session_task import InfersessionTask
     from .model_info import ModelInfo
     from .session_info import SessionInfo
 
@@ -168,7 +168,7 @@ class InferSessionPool(Pool):
             raise RuntimeError("cannot submit after shutdown")
         
         from ..resource import Resource
-        from .infersessiontask import InfersessionTask
+        from .infer_session_task import InfersessionTask
         
         model_info: ModelInfo = self.model_info(model_path)
         merged_kwargs, has_ortvalue = model_info.merge_args(args, kwargs, check_args)
@@ -187,9 +187,8 @@ class InferSessionPool(Pool):
             if not copy_outputs_to_cpu or has_ortvalue:
                 use_io_binding = True
 
-        model_path = os.path.abspath(model_path).replace("\\", "/")
         task = InfersessionTask(
-            infer_session_pool=self, model_path=model_path, kwargs=merged_kwargs,
+            infer_session_pool=self, model_info=model_info, kwargs=merged_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res, check_args=check_args,
             output_names=output_names, user_providers=providers, run_options=run_options,
             use_io_binding=use_io_binding, copy_outputs_to_cpu=copy_outputs_to_cpu,
@@ -201,31 +200,37 @@ class InferSessionPool(Pool):
         self._submit_or_chunk(task)
         return task.future
 
+    def _submit_or_chunk(self, task: InfersessionTask) -> Future:
+        with self._lock:
+            if not task.ready_to_run:
+                self._not_ready_tasks[task.id] = task
+                return
+            
+            if task.chunksize <= 1 or not task.model_info.support_batch_input:
+                return self._submit(task)
+            else:
+                return self._put_in_chunk(task)
+
     def _put_in_chunk(self, task: InfersessionTask) -> Future:
-        from .inferchunktask import InferChunkTask
+        from .infer_chunk_task import InferChunkTask
         import threading
         from queue import Queue
 
-        key = (task.model_path, task.chunksize)
         if self._flush_chunk_thread is None:
             self._flush_chunk_queue = Queue()
             self._flush_chunk_thread = threading.Thread(target=self._flushing_chunk, daemon=True, name="flushing_chunk")
             self._flush_chunk_thread.start()
 
+        key = InferChunkTask.get_key(task.model_info.model_path, task.use_io_binding, task.user_providers, task.run_options, task.chunksize)
         if key not in self._chunk_tasks:
-            model_info = self.model_info(task.model_path)
             self._chunk_tasks[key] = InferChunkTask(
                 pool=self,
-                model_path=task.model_path,
-                model_info=model_info,
-                output_names=task.output_names,
-                run_options=task.run_options,
+                model_info=task.model_info,
                 use_io_binding=task.use_io_binding,
-                copy_outputs_to_cpu=task.copy_outputs_to_cpu,
+                user_providers=task.user_providers,
+                run_options=task.run_options,
                 chunksize=task.chunksize,
-                cpu_mode_res=task.cpu_mode_res,
-                gpu_mode_res=task.gpu_mode_res,
-                user_providers=task.user_providers
+                key=key
             )
             self._flush_chunk_queue.put(True)
 
@@ -339,7 +344,7 @@ class InferSessionPool(Pool):
             task.session_info = None
             return None
 
-        task.session_info = self._session_info(task.model_path, provider)
+        task.session_info = self._session_info(task.model_info.model_path, provider)
         return task.session_info
 
     def _choose_task_worker(self, task: InfersessionTask, res: Resource) -> Optional[Worker]:

@@ -5,8 +5,8 @@ from ..worker import Worker
 if TYPE_CHECKING:
     import numpy as np
     import threading
-    from .infersessiontask import InfersessionTask
-    from .infersessionpool import InferSessionPool
+    from .infer_session_task import InfersessionTask
+    from .infer_session_pool import InferSessionPool
 
 
 class InferSessionWorker(Worker):
@@ -39,18 +39,10 @@ class InferSessionWorker(Worker):
         if infer_session_pool.print_info:
             print("infer with provider", task.provider, "in session", id(task.session_info.session))
 
-        provider = task.provider
-        infer_session_pool._add_provider_running_device(provider)
-
+        infer_session_pool._add_provider_running_device(task.provider)
         task.future.set_running_or_notify_cancel()
-
         if not task.use_io_binding:
-            try:
-                task.session_info.run_async(task.output_names, input_feed=task.kwargs, callback=self.callback, user_data=None, run_options=task.run_options)
-            except Exception as e:
-                self.is_working = False
-                infer_session_pool._remove_provider_running_device(provider)
-                infer_session_pool._on_task_done(task.id, False, e)
+            task.run_async()
         else:
             self.task_queue.put(task)
 
@@ -77,20 +69,6 @@ class InferSessionWorker(Worker):
             self.executor.join()
 
         self._clear()
-
-    def callback(self, results:np.ndarray, user_data: None, error_str: str) -> None:
-        task_id = self.active_task.id
-        if error_str:
-            success = False
-            result = RuntimeError(error_str)
-        else:
-            success = True
-            result = results
-
-        infer_session_pool: InferSessionPool = self.infer_session_pool
-        task: InfersessionTask = infer_session_pool._tasks[task_id]
-        infer_session_pool._remove_provider_running_device(task.provider)
-        infer_session_pool._on_task_done(task_id, success, result)
 
     def run(self):
         infer_session_pool: InferSessionPool = self.infer_session_pool

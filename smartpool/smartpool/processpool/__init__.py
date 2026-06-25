@@ -1,4 +1,4 @@
-from .processpool import ProcessPool
+from .process_pool import ProcessPool
 
 __all__ = [
     "ProcessPool"

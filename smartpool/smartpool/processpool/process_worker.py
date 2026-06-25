@@ -7,7 +7,7 @@ from ..worker import Worker
 
 if TYPE_CHECKING:
     import multiprocessing as mp
-    from .processpool import ProcessPool
+    from .process_pool import ProcessPool
 
 
 class ProcessWorker(Worker):

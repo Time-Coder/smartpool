@@ -36,7 +36,7 @@ class SessionInfo:
                 return
 
             import onnxruntime as ort
-            from .infersessionpool import InferSessionPool
+            from .infer_session_pool import InferSessionPool
 
             model_path = self._session_args[0]
             self._session = ort.InferenceSession(*self._session_args, **self._session_kwargs)

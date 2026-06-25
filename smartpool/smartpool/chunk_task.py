@@ -28,10 +28,7 @@ class ChunkTask(Task):
     def add_task(self, task: Task)->None:
         if self._submitted:
             return
-
-        import time
-
-        self.last_add_time = time.time()
+        
         self._sub_tasks.append(task)
         self._args_list.append(task.args)
         self._kwargs_list.append(task.kwargs)
@@ -61,6 +58,8 @@ class ChunkTask(Task):
 
             return
 
+        import time
+        self.last_add_time = time.time()
         if len(self._sub_tasks) >= self.chunksize:
             self.submit()
 

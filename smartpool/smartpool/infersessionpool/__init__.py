@@ -1,4 +1,4 @@
-from .infersessionpool import InferSessionPool
+from .infer_session_pool import InferSessionPool
 from .model_info import ModelInfo
 
 __all__ = [

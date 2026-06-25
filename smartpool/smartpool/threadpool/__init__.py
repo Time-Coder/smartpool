@@ -1,4 +1,4 @@
-from .threadpool import ThreadPool
+from .thread_pool import ThreadPool
 
 __all__ = [
     "ThreadPool"
