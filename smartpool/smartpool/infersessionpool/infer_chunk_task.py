@@ -80,24 +80,23 @@ class InferChunkTask(InferSessionTask):
         import json
 
         if providers is not None:
-            for i, provider in enumerate(providers):
-                if isinstance(provider, str):
-                    providers[i] = (provider, {})
-            return json.dumps(providers, sort_keys=True, separators=(", ", ":"))
+            normalized = [(p, {}) if isinstance(p, str) else p for p in providers]
+            return json.dumps(normalized, sort_keys=True, separators=(", ", ":"))
         else:
             if InferChunkTask._default_providers_str is None:
                 import onnxruntime as ort
-                providers = ort.get_available_providers()
-                for i, provider in enumerate(providers):
-                    if isinstance(provider, str):
-                        providers[i] = (provider, {})
+                default_providers = ort.get_available_providers()
+                normalized = [(p, {}) if isinstance(p, str) else p for p in default_providers]
 
-                InferChunkTask._default_providers_str = json.dumps(providers, sort_keys=True, separators=(", ", ":"))
+                InferChunkTask._default_providers_str = json.dumps(normalized, sort_keys=True, separators=(", ", ":"))
 
             return InferChunkTask._default_providers_str
 
     def add_task(self, sub_task: InferSessionTask) -> None:
         if self._submitted:
+            return
+
+        if sub_task.future.cancelled():
             return
 
         self._sub_tasks.append(sub_task)
@@ -151,7 +150,8 @@ class InferChunkTask(InferSessionTask):
     def _fan_out_batch_results(self, future: Future) -> None:
         if future.cancelled():
             for task in self._sub_tasks:
-                task.future.cancel()
+                if not task.future.done():
+                    task.future.cancel()
 
             return
 
@@ -159,7 +159,8 @@ class InferChunkTask(InferSessionTask):
             batch_result = future.result()
         except Exception as e:
             for task in self._sub_tasks:
-                task.future.set_exception(e)
+                if not task.future.done():
+                    task.future.set_exception(e)
 
             return
         
@@ -170,6 +171,9 @@ class InferChunkTask(InferSessionTask):
             full_output_names.append(node.name)
 
         for i, task in enumerate(self._sub_tasks):
+            if task.future.done():
+                continue
+
             try:
                 outputs = []
                 output_names = task.output_names

@@ -232,10 +232,13 @@ class InferSessionPool(Pool):
                 chunksize=task.chunksize,
                 key=key
             )
-            self._flush_chunk_queue.put(True)
 
         chunk_task: InferChunkTask = self._chunk_tasks[key]
         chunk_task.add_task(task)
+
+        if self._flush_chunk_queue is not None and not self._shutdown:
+            self._flush_chunk_queue.put(True)
+
         return task.future
 
     def _try_assign_task(self, task: InferSessionTask) -> bool:

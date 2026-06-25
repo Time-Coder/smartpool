@@ -28,7 +28,10 @@ class ChunkTask(Task):
     def add_task(self, task: Task)->None:
         if self._submitted:
             return
-        
+
+        if task.future.cancelled():
+            return
+
         self._sub_tasks.append(task)
         self._args_list.append(task.args)
         self._kwargs_list.append(task.kwargs)
@@ -91,7 +94,8 @@ class ChunkTask(Task):
     def _fan_out_batch_results(self, future: Future) -> None:
         if future.cancelled():
             for task in self._sub_tasks:
-                task.future.cancel()
+                if not task.future.done():
+                    task.future.cancel()
 
             return
 
@@ -99,11 +103,15 @@ class ChunkTask(Task):
             results = future.result()
         except Exception as exc:
             for task in self._sub_tasks:
-                task.future.set_exception(exc)
+                if not task.future.done():
+                    task.future.set_exception(exc)
                 
             return
 
         for (success, result), task in zip(results, self._sub_tasks):
+            if task.future.done():
+                continue
+
             if success:
                 task.future.set_result(result)
             else:
