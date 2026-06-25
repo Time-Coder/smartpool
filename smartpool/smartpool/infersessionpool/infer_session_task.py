@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 
-class InfersessionTask(Task):
+class InferSessionTask(Task):
 
     def __init__(
         self, infer_session_pool: InferSessionPool,

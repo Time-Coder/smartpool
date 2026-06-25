@@ -3,9 +3,8 @@ from typing import TYPE_CHECKING
 from ..worker import Worker
 
 if TYPE_CHECKING:
-    import numpy as np
     import threading
-    from .infer_session_task import InfersessionTask
+    from .infer_session_task import InferSessionTask
     from .infer_session_pool import InferSessionPool
 
 
@@ -29,7 +28,7 @@ class InferSessionWorker(Worker):
     def infer_session_pool(self)->InferSessionPool:
         return self.pool
 
-    def add_task(self, task: InfersessionTask)->None:
+    def add_task(self, task: InferSessionTask)->None:
         if task.use_io_binding:
             self.start()
 
@@ -73,7 +72,7 @@ class InferSessionWorker(Worker):
     def run(self):
         infer_session_pool: InferSessionPool = self.infer_session_pool
         while True:
-            task: InfersessionTask = self.task_queue.get()
+            task: InferSessionTask = self.task_queue.get()
             if task is None:
                 break
 

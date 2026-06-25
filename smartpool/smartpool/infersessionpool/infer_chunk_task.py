@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Optional
 import numpy as np
-from .infer_session_task import InfersessionTask
+from .infer_session_task import InferSessionTask
 from ..resource import Resource
 
 if TYPE_CHECKING:
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     import onnxruntime as ort
 
 
-class InferChunkTask(InfersessionTask):
+class InferChunkTask(InferSessionTask):
 
     _default_providers_str: Optional[str] = None
 
@@ -24,13 +24,13 @@ class InferChunkTask(InfersessionTask):
         chunksize: int,
         key: str
     ):
-        self._sub_tasks: List[InfersessionTask] = []
+        self._sub_tasks: List[InferSessionTask] = []
         self._kwargs_list: List[Dict[str, Any]] = []
         self._submitted: bool = False
         self._key: Tuple[str, int] = key
         self.last_add_time: float = 0.0
 
-        InfersessionTask.__init__(
+        InferSessionTask.__init__(
             self,
             infer_session_pool=pool,
             model_info=model_info,
@@ -96,7 +96,7 @@ class InferChunkTask(InfersessionTask):
 
             return InferChunkTask._default_providers_str
 
-    def add_task(self, sub_task: InfersessionTask) -> None:
+    def add_task(self, sub_task: InferSessionTask) -> None:
         if self._submitted:
             return
 

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from ..resource import Resource
     from ..worker import Worker
-    from .infer_session_task import InfersessionTask
+    from .infer_session_task import InferSessionTask
     from .model_info import ModelInfo
     from .session_info import SessionInfo
 
@@ -168,7 +168,7 @@ class InferSessionPool(Pool):
             raise RuntimeError("cannot submit after shutdown")
         
         from ..resource import Resource
-        from .infer_session_task import InfersessionTask
+        from .infer_session_task import InferSessionTask
         
         model_info: ModelInfo = self.model_info(model_path)
         merged_kwargs, has_ortvalue = model_info.merge_args(args, kwargs, check_args)
@@ -187,7 +187,7 @@ class InferSessionPool(Pool):
             if not copy_outputs_to_cpu or has_ortvalue:
                 use_io_binding = True
 
-        task = InfersessionTask(
+        task = InferSessionTask(
             infer_session_pool=self, model_info=model_info, kwargs=merged_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res, check_args=check_args,
             output_names=output_names, user_providers=providers, run_options=run_options,
@@ -200,7 +200,7 @@ class InferSessionPool(Pool):
         self._submit_or_chunk(task)
         return task.future
 
-    def _submit_or_chunk(self, task: InfersessionTask) -> Future:
+    def _submit_or_chunk(self, task: InferSessionTask) -> Future:
         with self._lock:
             if not task.ready_to_run:
                 self._not_ready_tasks[task.id] = task
@@ -211,7 +211,7 @@ class InferSessionPool(Pool):
             else:
                 return self._put_in_chunk(task)
 
-    def _put_in_chunk(self, task: InfersessionTask) -> Future:
+    def _put_in_chunk(self, task: InferSessionTask) -> Future:
         from .infer_chunk_task import InferChunkTask
         import threading
         from queue import Queue
@@ -238,7 +238,7 @@ class InferSessionPool(Pool):
         chunk_task.add_task(task)
         return task.future
 
-    def _try_assign_task(self, task: InfersessionTask) -> bool:
+    def _try_assign_task(self, task: InferSessionTask) -> bool:
         if not task.ready_to_run or self._workers_working_count >= self._max_workers:
             return False
 
@@ -288,7 +288,7 @@ class InferSessionPool(Pool):
 
         return False
 
-    def _reclaim_cpu_memory(self, task: InfersessionTask, res: Resource, mode: str, reclaim_items: List) -> bool:
+    def _reclaim_cpu_memory(self, task: InferSessionTask, res: Resource, mode: str, reclaim_items: List) -> bool:
         idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
         if not idle:
             return False
@@ -303,7 +303,7 @@ class InferSessionPool(Pool):
             return False
         return True
 
-    def _reclaim_gpu_memory(self, task: InfersessionTask, res: Resource, mode: str) -> bool:
+    def _reclaim_gpu_memory(self, task: InferSessionTask, res: Resource, mode: str) -> bool:
         idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
         if not idle:
             return False
@@ -338,7 +338,7 @@ class InferSessionPool(Pool):
                     del self._sessions[key]
                     sess.stop()
 
-    def _choose_task_session(self, task: InfersessionTask) -> Optional[SessionInfo]:
+    def _choose_task_session(self, task: InferSessionTask) -> Optional[SessionInfo]:
         provider: Tuple[str, Dict[str, Any]] = task.provider
         if not self._can_use_provider(provider):
             task.session_info = None
@@ -347,7 +347,7 @@ class InferSessionPool(Pool):
         task.session_info = self._session_info(task.model_info.model_path, provider)
         return task.session_info
 
-    def _choose_task_worker(self, task: InfersessionTask, res: Resource) -> Optional[Worker]:
+    def _choose_task_worker(self, task: InferSessionTask, res: Resource) -> Optional[Worker]:
         for worker in self._workers:
             if worker.is_working:
                 continue
@@ -370,13 +370,13 @@ class InferSessionPool(Pool):
 
         return task.worker
 
-    def _put_task(self, task: InfersessionTask) -> None:
+    def _put_task(self, task: InferSessionTask) -> None:
         self._take_resource(task)
         worker: InferSessionWorker = task.worker
         worker.is_working = True
         worker.add_task(task)
 
-    def _take_resource(self, task: InfersessionTask) -> None:
+    def _take_resource(self, task: InferSessionTask) -> None:
         with self._sys_info_lock:
             res = task.effective_res
             task.estimated_need_cpu_mem = res.cpu_mem
@@ -386,7 +386,7 @@ class InferSessionPool(Pool):
                 self._sys_info.gpu_infos[task.gpu_index].n_cores_free -= res.gpu_cores
                 self._sys_info.gpu_infos[task.gpu_index].mem_free -= res.gpu_mem
 
-    def _release_resource(self, task: InfersessionTask) -> None:
+    def _release_resource(self, task: InferSessionTask) -> None:
         with self._sys_info_lock:
             res = task.effective_res
             self._sys_info.cpu_cores_free += res.cpu_cores

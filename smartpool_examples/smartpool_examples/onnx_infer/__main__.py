@@ -19,7 +19,7 @@ class Method(Enum):
 @app.command()
 def main(
     method: Method = typer.Option(
-        Method.Ray,
+        Method.SmartPool,
         "--method"
     )
 ):
@@ -50,6 +50,7 @@ def main(
     download_dataset()
 
     image_paths = glob.glob(DATASET_FOLDER + "/*.jpg")
+    # image_paths = image_paths[:100]
     n_tasks = len(image_paths)
 
     progress_info = ProgressInfo(n_tasks)
