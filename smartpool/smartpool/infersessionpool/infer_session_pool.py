@@ -187,6 +187,9 @@ class InferSessionPool(Pool):
             if not copy_outputs_to_cpu or has_ortvalue:
                 use_io_binding = True
 
+        if not model_info.support_batch_input:
+            chunksize = 1
+
         task = InferSessionTask(
             infer_session_pool=self, model_info=model_info, kwargs=merged_kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res, check_args=check_args,
@@ -199,17 +202,6 @@ class InferSessionPool(Pool):
 
         self._submit_or_chunk(task)
         return task.future
-
-    def _submit_or_chunk(self, task: InferSessionTask) -> Future:
-        with self._lock:
-            if not task.ready_to_run:
-                self._not_ready_tasks[task.id] = task
-                return
-            
-            if task.chunksize <= 1 or not task.model_info.support_batch_input:
-                return self._submit(task)
-            else:
-                return self._put_in_chunk(task)
 
     def _put_in_chunk(self, task: InferSessionTask) -> Future:
         from .infer_chunk_task import InferChunkTask

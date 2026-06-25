@@ -56,6 +56,7 @@ class Pool(ABC):
         max_tasks_per_child: Optional[int]=None,
         worker_cls: Type[Worker],
         use_torch: bool = False,
+        chunk_timeout: float = 0.1,
         need_module_deps: bool = False
     ):
         self._init_sys_info()
@@ -85,6 +86,7 @@ class Pool(ABC):
         self._delayed_tasks: Dict[str, Task] = {}
         self._lock: threading.Lock = threading.Lock()
         self._shutdown: bool = False
+        self._chunk_timeout: float = chunk_timeout
         self._result_thread: Optional[threading.Thread] = None
         self._chunk_tasks: Dict[Tuple[Callable[..., Any], int], ChunkTask] = {}
         self._flush_chunk_thread: Optional[threading.Thread] = None
@@ -151,6 +153,14 @@ class Pool(ABC):
         self._submit_or_chunk(task)
         return task.future
 
+    @property
+    def chunk_timeout(self)->float:
+        return self._chunk_timeout
+    
+    @chunk_timeout.setter
+    def chunk_timeout(self, timeout:float)->None:
+        self._chunk_timeout = timeout
+
     def flush(self) -> None:
         with self._lock:
             self._flush()
@@ -166,12 +176,17 @@ class Pool(ABC):
             if not running:
                 break
 
-            time.sleep(0.1)
+            time.sleep(self._chunk_timeout)
             now = time.time()
             with self._lock:
                 for chunk_task in list(self._chunk_tasks.values()):
-                    if now - chunk_task.last_add_time >= 0.1:
+                    if now - chunk_task.last_add_time >= self._chunk_timeout:
                         chunk_task.submit()
+
+            while self._flush_chunk_queue.qsize() > 0:
+                running = self._flush_chunk_queue.get()
+                if not running:
+                    break
 
     def _put_in_chunk(self, task: Task) -> Future:
         from .chunk_task import ChunkTask
