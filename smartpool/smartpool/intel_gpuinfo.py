@@ -20,6 +20,34 @@ class IntelGPUInfo(GPUInfo):
         "DmlExecutionProvider"
     ]
 
+    # GPU model name -> Shader Processor count lookup table
+    # Arc Desktop: Shading Units directly
+    # Integrated: EU count × 8 ALUs per EU
+    _GPU_NAME_TO_SHADER_COUNT: Dict[str, int] = {
+        # Arc Desktop (Xe-HPG)
+        'Intel Arc A770': 4096,
+        'Intel Arc A750': 3584,
+        'Intel Arc A580': 3072,
+        'Intel Arc A380': 1024,
+        'Intel Arc A310': 768,
+        # Arc Laptop (Xe-HPG)
+        'Intel Arc A770M': 4096,
+        'Intel Arc A730M': 3072,
+        'Intel Arc A570M': 2048,
+        'Intel Arc A550M': 2048,
+        'Intel Arc A530M': 1536,
+        'Intel Arc A370M': 1024,
+        'Intel Arc A350M': 768,
+        # Integrated (Xe-LP / Xe-LPG) - EU × 8
+        'Intel Iris Xe Graphics': 768,  # 96 EU × 8
+        'Intel UHD Graphics 770': 256,  # 32 EU × 8
+        'Intel UHD Graphics 750': 256,  # 32 EU × 8
+        'Intel UHD Graphics 730': 192,  # 24 EU × 8
+        'Intel UHD Graphics 630': 192,  # 24 EU × 8
+        'Intel UHD Graphics 620': 192,  # 24 EU × 8
+        'Intel UHD Graphics 610': 128,  # 16 EU × 8
+    }
+
     def __init__(self, device_id: int, index: int):
         GPUInfo.__init__(self, device_id, index)
         self._ensure_init()
@@ -180,17 +208,31 @@ class IntelGPUInfo(GPUInfo):
     def _fetch_display_active(self) -> Optional[bool]:
         return None
 
-    def _fetch_num_cores(self) -> int:
-        import pyopencl as cl
-        platforms = cl.get_platforms()
-        for plat in platforms:
-            vendor = plat.vendor.lower()
-            if 'intel' not in vendor:
-                continue
+    def _fetch_num_cores(self) -> Optional[int]:
+        info = self._get_device_info()
+        gpu_name = info.get('name', '')
+        if not gpu_name:
+            return None
 
-            devices = plat.get_devices(device_type=cl.device_type.GPU)
-            if 0 <= self._device_id < len(devices):
-                device = devices[self._device_id]
-                return device.max_compute_units * device.max_work_group_size
+        # Try exact match first
+        count = self._GPU_NAME_TO_SHADER_COUNT.get(gpu_name)
+        if count is not None:
+            return count
 
-        raise RuntimeError("cannot fetch num cores of current Intel GPU")
+        # Normalize name
+        normalized = gpu_name.replace('(R)', '').replace('(TM)', '').replace('  ', ' ').strip()
+
+        # Try exact match with normalized name
+        count = self._GPU_NAME_TO_SHADER_COUNT.get(normalized)
+        if count is not None:
+            return count
+
+        # Try partial match
+        for name, shader_count in self._GPU_NAME_TO_SHADER_COUNT.items():
+            if name in gpu_name or gpu_name in name:
+                return shader_count
+            norm_name = name.replace('(R)', '').replace('(TM)', '').replace('  ', ' ').strip()
+            if norm_name in normalized or normalized in norm_name:
+                return shader_count
+
+        return None
