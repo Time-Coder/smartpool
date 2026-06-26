@@ -465,28 +465,40 @@ class Pool(ABC):
             self._flush()
             self._shutdown = True
 
-            for worker in self._workers:
-                worker.stop(wait=False, clear=False)
-
-            if self._result_thread is not None and self._result_thread.is_alive() and self._result_queue is not None:
-                self._result_queue.put(None)
-
             if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive() and self._flush_chunk_queue is not None:
                 self._flush_chunk_queue.put(False)
+
+            self._stop_feeding()
 
             if cancel_futures:
                 for task in self._tasks.values():
                     task.future.cancel()
 
         if wait:
+            self._join_feeding()
+
+        with self._lock:
+            for worker in self._workers:
+                worker.stop(wait=False, clear=False)
+
+        if wait:
             for worker in self._workers:
                 worker.join()
+
+            if self._result_thread is not None and self._result_thread.is_alive() and self._result_queue is not None:
+                self._result_queue.put(None)
 
             if self._result_thread is not None and self._result_thread.is_alive():
                 self._result_thread.join()
 
             if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive():
                 self._flush_chunk_thread.join()
+
+    def _stop_feeding(self) -> None:
+        pass
+
+    def _join_feeding(self) -> None:
+        pass
 
     def __enter__(self)->Pool:
         return self
@@ -522,7 +534,7 @@ class Pool(ABC):
                 pool._postprocess_after_task_done()
 
     def _collecting_result(self)->None:
-        while not self._shutdown:
+        while True:
             result_tuple = self._result_queue.get()
             if result_tuple is None:
                 break

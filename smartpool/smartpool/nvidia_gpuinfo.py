@@ -140,7 +140,10 @@ class NvidiaGPUInfo(GPUInfo):
         with self._lock:
             try:
                 return pynvml.nvmlDeviceGetNumGpuCores(self._get_handle())
-            except Exception as e:
+            except Exception:
+                pass
+
+            try:
                 import pyopencl as cl
                 platforms = cl.get_platforms()
                 for plat in platforms:
@@ -152,5 +155,101 @@ class NvidiaGPUInfo(GPUInfo):
                     if 0 <= self._device_id < len(devices):
                         device = devices[self._device_id]
                         return device.max_compute_units * device.max_work_group_size
+            except Exception:
+                pass
 
-                raise RuntimeError("cannot fetch num cores of current NVIDIA GPU") from e
+            return self._fetch_num_cores_from_compute_capability()
+
+    @staticmethod
+    def _fetch_num_cores_from_compute_capability() -> Optional[int]:
+        try:
+            cc = pynvml.nvmlDeviceGetCudaComputeCapability(
+                pynvml.nvmlDeviceGetHandleByIndex(0)
+            )
+            cores_per_sm = NvidiaGPUInfo._CC_TO_CORES_PER_SM.get(cc)
+            if cores_per_sm is None:
+                return None
+
+            name = pynvml.nvmlDeviceGetName(
+                pynvml.nvmlDeviceGetHandleByIndex(0)
+            )
+            if isinstance(name, bytes):
+                name = name.decode('utf-8')
+            sm_count = NvidiaGPUInfo._GPU_NAME_TO_SM_COUNT.get(name)
+            if sm_count is None:
+                return None
+
+            return cores_per_sm * sm_count
+        except Exception:
+            return None
+
+    _CC_TO_CORES_PER_SM = {
+        (3, 0): 192, (3, 2): 192, (3, 5): 192, (3, 7): 192,
+        (5, 0): 128, (5, 2): 128, (5, 3): 128,
+        (6, 0): 64,
+        (6, 1): 128, (6, 2): 128,
+        (7, 0): 64, (7, 2): 64,
+        (7, 5): 64,
+        (8, 0): 64,
+        (8, 6): 128, (8, 7): 128, (8, 9): 128,
+        (9, 0): 128,
+    }
+
+    _GPU_NAME_TO_SM_COUNT = {
+        'NVIDIA GeForce RTX 4090': 128,
+        'NVIDIA GeForce RTX 4080': 76,
+        'NVIDIA GeForce RTX 4080 SUPER': 80,
+        'NVIDIA GeForce RTX 4070 Ti': 60,
+        'NVIDIA GeForce RTX 4070 Ti SUPER': 66,
+        'NVIDIA GeForce RTX 4070': 36,
+        'NVIDIA GeForce RTX 4070 SUPER': 46,
+        'NVIDIA GeForce RTX 4060 Ti': 34,
+        'NVIDIA GeForce RTX 4060': 24,
+        'NVIDIA GeForce RTX 3090 Ti': 84,
+        'NVIDIA GeForce RTX 3090': 82,
+        'NVIDIA GeForce RTX 3080 Ti': 80,
+        'NVIDIA GeForce RTX 3080': 68,
+        'NVIDIA GeForce RTX 3070 Ti': 48,
+        'NVIDIA GeForce RTX 3070': 46,
+        'NVIDIA GeForce RTX 3060 Ti': 38,
+        'NVIDIA GeForce RTX 3060': 28,
+        'NVIDIA GeForce RTX 2080 Ti': 68,
+        'NVIDIA GeForce RTX 2080 SUPER': 48,
+        'NVIDIA GeForce RTX 2080': 46,
+        'NVIDIA GeForce RTX 2070 SUPER': 40,
+        'NVIDIA GeForce RTX 2070': 36,
+        'NVIDIA GeForce RTX 2060 SUPER': 34,
+        'NVIDIA GeForce RTX 2060': 30,
+        'NVIDIA GeForce RTX 4090 Laptop GPU': 76,
+        'NVIDIA GeForce RTX 4080 Laptop GPU': 58,
+        'NVIDIA GeForce RTX 4070 Laptop GPU': 36,
+        'NVIDIA GeForce RTX 4060 Laptop GPU': 24,
+        'NVIDIA GeForce RTX 3080 Laptop GPU': 48,
+        'NVIDIA GeForce RTX 3070 Laptop GPU': 32,
+        'NVIDIA GeForce RTX 3060 Laptop GPU': 30,
+        'NVIDIA GeForce RTX 2080 with Max-Q Design': 46,
+        'NVIDIA GeForce RTX 2070 with Max-Q Design': 36,
+        'NVIDIA GeForce RTX 2060 with Max-Q Design': 30,
+        'NVIDIA GeForce GTX 1660 Ti': 24,
+        'NVIDIA GeForce GTX 1660 SUPER': 22,
+        'NVIDIA GeForce GTX 1660': 22,
+        'NVIDIA GeForce GTX 1650 SUPER': 20,
+        'NVIDIA GeForce GTX 1650': 14,
+        'NVIDIA A100 80GB PCIe': 108,
+        'NVIDIA A100 40GB PCIe': 108,
+        'NVIDIA A100-SXM4-80GB': 108,
+        'NVIDIA A100-SXM4-40GB': 108,
+        'NVIDIA H100 80GB HBM3': 132,
+        'NVIDIA H100 PCIe': 114,
+        'NVIDIA L40S': 142,
+        'NVIDIA L40': 142,
+        'NVIDIA L4': 58,
+        'NVIDIA A10': 72,
+        'NVIDIA A30': 28,
+        'NVIDIA A16': 40,
+        'NVIDIA Tesla V100-SXM2-32GB': 80,
+        'NVIDIA Tesla V100-SXM2-16GB': 80,
+        'NVIDIA Tesla V100-PCIE-32GB': 80,
+        'NVIDIA Tesla V100-PCIE-16GB': 80,
+        'NVIDIA Tesla T4': 40,
+    }

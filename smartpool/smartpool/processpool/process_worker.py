@@ -109,7 +109,7 @@ class ProcessWorker(Worker):
         self._take_worker_memory()
 
     def join(self)->None:
-        if self.executor is not None:
+        if self.executor is not None and self.executor._popen is not None:
             self.executor.join()
             
         self._clear()

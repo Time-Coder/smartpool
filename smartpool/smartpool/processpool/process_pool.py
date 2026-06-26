@@ -116,8 +116,11 @@ class ProcessPool(Pool):
         self._feeding_queue.put(task)
 
     def _feeding(self)->None:
-        while not self._shutdown:
+        while True:
             task = self._feeding_queue.get()
+            if task is None:
+                break
+
             if task.future.cancelled():
                 continue
 
@@ -125,3 +128,10 @@ class ProcessPool(Pool):
                 task.worker.add_task(task)
             except Exception as e:
                 task.future.set_exception(e)
+
+    def _stop_feeding(self) -> None:
+        self._feeding_queue.put(None)
+
+    def _join_feeding(self) -> None:
+        if self._feeding_thread is not None and self._feeding_thread.is_alive():
+            self._feeding_thread.join()

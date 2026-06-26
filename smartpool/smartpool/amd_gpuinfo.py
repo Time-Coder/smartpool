@@ -76,7 +76,11 @@ class AMDGPUInfo(GPUInfo):
         cls._device_info = []
 
         import pyamdgpuinfo
-        count = pyamdgpuinfo.detect_gpus()
+        try:
+            count = pyamdgpuinfo.detect_gpus()
+        except Exception:
+            count = 0
+
         if count > 0:
             for i in range(count):
                 gpu = pyamdgpuinfo.get_gpu(i)
@@ -85,8 +89,41 @@ class AMDGPUInfo(GPUInfo):
                     'vram_size': getattr(gpu, 'vram_size', None),
                 })
             return
-        else:
-            warnings.warn("ROCm is not installed, AMD GPU is not available now", stacklevel=2)
+
+        cls._init_wsl_fallback()
+
+    @classmethod
+    def _init_wsl_fallback(cls) -> None:
+        try:
+            import subprocess
+            import json
+            result = subprocess.run(
+                ['powershell.exe', '-Command',
+                 'Get-WmiObject Win32_VideoController | Select-Object Name, AdapterRAM | ConvertTo-Json'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                return
+
+            data = json.loads(result.stdout)
+            if isinstance(data, dict):
+                data = [data]
+
+            for gpu in data:
+                name = gpu.get('Name', '')
+                if not name or 'AMD' not in name.upper() and 'Radeon' not in name.upper():
+                    continue
+
+                vram = gpu.get('AdapterRAM')
+                if vram is not None:
+                    vram = int(vram)
+
+                cls._device_info.append({
+                    'name': name,
+                    'vram_size': vram,
+                })
+        except Exception:
+            pass
 
     @classmethod
     def _init_mac(cls) -> None:
@@ -151,9 +188,12 @@ class AMDGPUInfo(GPUInfo):
                 return str(gpu.Name())
         elif system == "Linux":
             with self._lock:
-                import pyamdgpuinfo
-                gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                return gpu.name
+                try:
+                    import pyamdgpuinfo
+                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    return gpu.name
+                except Exception:
+                    pass
 
         info = self._get_device_info()
         return info.get('name', 'Unknown AMD GPU')
@@ -193,11 +233,14 @@ class AMDGPUInfo(GPUInfo):
                 return (total, used)
         elif system == "Linux":
             with self._lock:
-                import pyamdgpuinfo
-                gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                used = int(gpu.query_vram_usage())
-                total = int(getattr(gpu, 'vram_size', 0))
-                return (total, used)
+                try:
+                    import pyamdgpuinfo
+                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    used = int(gpu.query_vram_usage())
+                    total = int(getattr(gpu, 'vram_size', 0))
+                    return (total, used)
+                except Exception:
+                    pass
 
         info = self._get_device_info()
         vram_size = info.get('vram_size')
@@ -221,9 +264,12 @@ class AMDGPUInfo(GPUInfo):
                 return usage / 100.0
         elif system == "Linux":
             with self._lock:
-                import pyamdgpuinfo
-                gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                return float(gpu.query_load())
+                try:
+                    import pyamdgpuinfo
+                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    return float(gpu.query_load())
+                except Exception:
+                    return None
         elif system == "Darwin":
             return self._fetch_utilization_mac()
         else:
@@ -264,11 +310,14 @@ class AMDGPUInfo(GPUInfo):
                 return temp
         elif system == "Linux":
             with self._lock:
-                import pyamdgpuinfo
-                gpu = pyamdgpuinfo.get_gpu(self._device_id)
-                return float(gpu.query_temperature())
+                try:
+                    import pyamdgpuinfo
+                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    return float(gpu.query_temperature())
+                except Exception:
+                    return None
         else:
-            raise RuntimeError(f"not supported system: {system}")
+            return None
 
     def _fetch_display_mode(self) -> Optional[bool]:
         return None
@@ -276,17 +325,22 @@ class AMDGPUInfo(GPUInfo):
     def _fetch_display_active(self) -> Optional[bool]:
         return None
 
-    def _fetch_num_cores(self) -> int:
-        import pyopencl as cl
-        platforms = cl.get_platforms()
-        for plat in platforms:
-            vendor = plat.vendor.lower()
-            if 'amd' not in vendor and 'advanced micro devices' not in vendor:
-                continue
+    def _fetch_num_cores(self) -> Optional[int]:
+        try:
+            import pyopencl as cl
+            platforms = cl.get_platforms()
+            for plat in platforms:
+                vendor = plat.vendor.lower()
+                if 'amd' not in vendor and 'advanced micro devices' not in vendor:
+                    continue
 
-            devices = plat.get_devices(device_type=cl.device_type.GPU)
-            if 0 <= self._device_id < len(devices):
-                device = devices[self._device_id]
-                return device.max_compute_units * device.max_work_group_size
+                devices = plat.get_devices(device_type=cl.device_type.GPU)
+                if 0 <= self._device_id < len(devices):
+                    device = devices[self._device_id]
+                    return device.max_compute_units * device.max_work_group_size
+        except Exception:
+            pass
+
+        return None
 
         raise RuntimeError("cannot fetch num cores of current AMD GPU")
