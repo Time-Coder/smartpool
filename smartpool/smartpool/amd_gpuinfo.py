@@ -1,5 +1,7 @@
 import contextlib
+import json
 import platform
+import re
 import subprocess
 import threading
 import uuid
@@ -19,12 +21,70 @@ class AMDGPUInfo(GPUInfo):
     _perf_monitoring = None
     _vram_ranges: Dict[int, int] = {}
     _device_info: List[Dict] = []
+    _wsl_fallback: bool = False
 
     _supported_ort_providers: List[str] = [
         "ROCMExecutionProvider",
         "MIGraphXExecutionProvider",
         "DmlExecutionProvider"
     ]
+
+    # GPU model name -> Shader Processor (Stream Processor) count lookup table
+    _GPU_NAME_TO_CU_COUNT: Dict[str, int] = {
+        # RDNA 3 (Desktop)
+        'AMD Radeon RX 7900 XTX': 6144,
+        'AMD Radeon RX 7900 XT': 5376,
+        'AMD Radeon RX 7900 GRE': 5120,
+        'AMD Radeon RX 7800 XT': 3840,
+        'AMD Radeon RX 7700 XT': 3456,
+        'AMD Radeon RX 7600': 2048,
+        # RDNA 3 (Laptop)
+        'AMD Radeon RX 7900S': 2048,
+        'AMD Radeon RX 7700S': 1792,
+        'AMD Radeon RX 7600S': 1792,
+        # RDNA 2 (Desktop)
+        'AMD Radeon RX 6950 XT': 5120,
+        'AMD Radeon RX 6900 XT': 5120,
+        'AMD Radeon RX 6800 XT': 4608,
+        'AMD Radeon RX 6800': 3840,
+        'AMD Radeon RX 6750 XT': 2560,
+        'AMD Radeon RX 6700 XT': 2560,
+        'AMD Radeon RX 6700': 2304,
+        'AMD Radeon RX 6650 XT': 2048,
+        'AMD Radeon RX 6600 XT': 2048,
+        'AMD Radeon RX 6600': 1792,
+        'AMD Radeon RX 6500 XT': 1024,
+        'AMD Radeon RX 6400': 768,
+        # RDNA 2 (Laptop)
+        'AMD Radeon RX 6850M XT': 2560,
+        'AMD Radeon RX 6800M': 2560,
+        'AMD Radeon RX 6700M': 2304,
+        'AMD Radeon RX 6600M': 1792,
+        'AMD Radeon RX 6500M': 1024,
+        # RDNA 2 (Integrated)
+        'AMD Radeon 680M': 768,
+        'AMD Radeon 660M': 384,
+        'AMD Radeon 610M': 128,
+        # RDNA (Desktop)
+        'AMD Radeon RX 5700 XT': 2560,
+        'AMD Radeon RX 5700': 2304,
+        'AMD Radeon RX 5600 XT': 2304,
+        'AMD Radeon RX 5600M': 2304,
+        # Vega
+        'AMD Radeon VII': 3840,
+        'AMD Radeon RX Vega 64': 4096,
+        'AMD Radeon RX Vega 56': 3584,
+        # Polaris
+        'AMD Radeon RX 590': 2304,
+        'AMD Radeon RX 580': 2304,
+        'AMD Radeon RX 570': 2048,
+        # Professional
+        'AMD Radeon Pro W6800': 5120,
+        'AMD Radeon Pro W6600': 2048,
+        'AMD Radeon Pro W6400': 1536,
+        'AMD Radeon Pro W5500': 1408,
+        'AMD Radeon Pro W5700': 2304,
+    }
 
     def __init__(self, device_id: int, index: int):
         GPUInfo.__init__(self, device_id, index)
@@ -74,6 +134,7 @@ class AMDGPUInfo(GPUInfo):
     @classmethod
     def _init_linux(cls) -> None:
         cls._device_info = []
+        cls._wsl_fallback = False
 
         import pyamdgpuinfo
         try:
@@ -99,7 +160,7 @@ class AMDGPUInfo(GPUInfo):
             import json
             result = subprocess.run(
                 ['powershell.exe', '-Command',
-                 'Get-WmiObject Win32_VideoController | Select-Object Name, AdapterRAM | ConvertTo-Json'],
+                 'Get-WmiObject Win32_VideoController | Select-Object Name, AdapterRAM, PNPDeviceID | ConvertTo-Json'],
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode != 0:
@@ -121,7 +182,11 @@ class AMDGPUInfo(GPUInfo):
                 cls._device_info.append({
                     'name': name,
                     'vram_size': vram,
+                    'pnp_device_id': gpu.get('PNPDeviceID', ''),
                 })
+
+            if cls._device_info:
+                cls._wsl_fallback = True
         except Exception:
             pass
 
@@ -263,6 +328,8 @@ class AMDGPUInfo(GPUInfo):
                 usage = metrics.GPUUsage()
                 return usage / 100.0
         elif system == "Linux":
+            if self._wsl_fallback:
+                return self._fetch_utilization_wsl()
             with self._lock:
                 try:
                     import pyamdgpuinfo
@@ -274,6 +341,70 @@ class AMDGPUInfo(GPUInfo):
             return self._fetch_utilization_mac()
         else:
             raise RuntimeError(f"unsupported system {system}")
+
+    def _fetch_utilization_wsl(self) -> Optional[float]:
+        try:
+            result = subprocess.run(
+                ['powershell.exe', '-Command',
+                 r"Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty CounterSamples | Select-Object InstanceName, CookedValue | ConvertTo-Json"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                return None
+
+            data = json.loads(result.stdout)
+            if not data:
+                return None
+
+            # Get all unique LUIDs and their engine counts
+            # Format: pid_12345_luid_0x00000000_0x0001272b_phys_0_eng_0_engtype_3d
+            luid_engines = {}
+            for item in data:
+                match = re.search(r'luid_0x[0-9a-f]+_(0x[0-9a-f]+)_phys', item.get('InstanceName', ''))
+                if match:
+                    luid = match.group(1)
+                    if luid not in luid_engines:
+                        luid_engines[luid] = 0
+                    luid_engines[luid] += 1
+
+            # AMD GPUs typically have fewer engines than NVIDIA
+            # Sort by engine count and pick the one with moderate count (AMD-like)
+            # NVIDIA typically has 300+ engines, AMD typically has 100-200
+            amd_luid = None
+            for luid, count in luid_engines.items():
+                if 50 < count < 300:  # AMD-like engine count
+                    amd_luid = luid
+                    break
+
+            if not amd_luid:
+                # Fallback: use the LUID with the most engines that isn't the first one
+                sorted_luids = sorted(luid_engines.items(), key=lambda x: x[1], reverse=True)
+                if len(sorted_luids) > 1:
+                    amd_luid = sorted_luids[1][0]  # Second highest (likely AMD)
+                elif sorted_luids:
+                    amd_luid = sorted_luids[0][0]
+
+            if not amd_luid:
+                return None
+
+            # Get max utilization across main engine types (3d, videodecode, videoencode)
+            # These represent actual GPU workload, not idle copy/security engines
+            max_util = 0.0
+            for item in data:
+                if f'luid_0x00000000_{amd_luid}' in item.get('InstanceName', ''):
+                    instance_name = item.get('InstanceName', '')
+                    # Only consider main workload engines
+                    if 'engtype_3d' in instance_name or 'engtype_videodecode' in instance_name or 'engtype_videoencode' in instance_name:
+                        util = item.get('CookedValue', 0.0)
+                        if util > max_util:
+                            max_util = util
+
+            return max_util / 100.0
+
+        except Exception:
+            pass
+
+        return None
 
     def _fetch_utilization_mac(self) -> float:
         result = subprocess.run(
@@ -326,21 +457,31 @@ class AMDGPUInfo(GPUInfo):
         return None
 
     def _fetch_num_cores(self) -> Optional[int]:
-        try:
-            import pyopencl as cl
-            platforms = cl.get_platforms()
-            for plat in platforms:
-                vendor = plat.vendor.lower()
-                if 'amd' not in vendor and 'advanced micro devices' not in vendor:
-                    continue
+        # Fall back to lookup table
+        if self._device_info:
+            info = self._get_device_info()
+            gpu_name = info.get('name', '')
+            if gpu_name:
+                # Try exact match first
+                cu_count = self._GPU_NAME_TO_CU_COUNT.get(gpu_name)
+                if cu_count is not None:
+                    return cu_count
 
-                devices = plat.get_devices(device_type=cl.device_type.GPU)
-                if 0 <= self._device_id < len(devices):
-                    device = devices[self._device_id]
-                    return device.max_compute_units * device.max_work_group_size
-        except Exception:
-            pass
+                # Normalize name by removing common variations
+                normalized = gpu_name.replace('(TM)', '').replace('(R)', '').replace('  ', ' ').strip()
+
+                # Try exact match with normalized name
+                cu_count = self._GPU_NAME_TO_CU_COUNT.get(normalized)
+                if cu_count is not None:
+                    return cu_count
+
+                # Try partial match
+                for name, count in self._GPU_NAME_TO_CU_COUNT.items():
+                    if name in gpu_name or gpu_name in name:
+                        return count
+                    # Also try normalized partial match
+                    norm_name = name.replace('(TM)', '').replace('(R)', '').replace('  ', ' ').strip()
+                    if norm_name in normalized or normalized in norm_name:
+                        return count
 
         return None
-
-        raise RuntimeError("cannot fetch num cores of current AMD GPU")

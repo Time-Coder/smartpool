@@ -143,21 +143,6 @@ class NvidiaGPUInfo(GPUInfo):
             except Exception:
                 pass
 
-            try:
-                import pyopencl as cl
-                platforms = cl.get_platforms()
-                for plat in platforms:
-                    vendor = plat.vendor.lower()
-                    if 'nvidia' not in vendor:
-                        continue
-
-                    devices = plat.get_devices(device_type=cl.device_type.GPU)
-                    if 0 <= self._device_id < len(devices):
-                        device = devices[self._device_id]
-                        return device.max_compute_units * device.max_work_group_size
-            except Exception:
-                pass
-
             return self._fetch_num_cores_from_compute_capability()
 
     @staticmethod

@@ -18,3 +18,4 @@ dataset
 *.code-workspace
 __trtcache__
 note.txt
+*venv
