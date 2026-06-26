@@ -126,13 +126,22 @@ class InferChunkTask(InferSessionTask):
         
         self._submitted = True
 
+        if self._key in self.pool._chunk_tasks:
+            del self.pool._chunk_tasks[self._key]
+
+        if not self._sub_tasks:
+            return
+
+        if len(self._sub_tasks) == 1:
+            task = self._sub_tasks[0]
+            if not task.future.done():
+                self.pool._submit(task)
+            return
+
         self.kwargs = {}
         for name in self.model_info.inputs:
             parts = [self._to_numpy(kwargs[name]) for kwargs in self._kwargs_list]
             self.kwargs[name] = np.concatenate(parts, axis=0)
-
-        if self._key in self.pool._chunk_tasks:
-            del self.pool._chunk_tasks[self._key]
 
         self.pool._submit(self)
 

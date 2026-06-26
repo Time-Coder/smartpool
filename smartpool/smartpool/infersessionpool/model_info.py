@@ -170,6 +170,9 @@ class ModelInfo:
         return value.shape
 
     def merge_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None, check: bool = True) -> Tuple[Dict[str, Any], bool]:
+        if args is None:
+            args = ()
+
         if kwargs is None:
             kwargs = {}
 

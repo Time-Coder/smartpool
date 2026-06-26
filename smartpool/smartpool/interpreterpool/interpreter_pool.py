@@ -20,6 +20,7 @@ class InterpreterPool(Pool):
         initkwargs:Optional[Dict[str, Any]]=None,
         *,
         max_tasks_per_child:Optional[int]=None,
+        chunk_timeout:float=0.1,
         use_torch:bool=False
     ):
         import concurrent.interpreters as interpreters
@@ -42,6 +43,7 @@ class InterpreterPool(Pool):
             max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
             worker_cls=InterpreterWorker,
+            chunk_timeout=chunk_timeout,
             need_module_deps=True
         )
 

@@ -74,6 +74,15 @@ class ChunkTask(Task):
         if self._key in self.pool._chunk_tasks:
             del self.pool._chunk_tasks[self._key]
 
+        if not self._sub_tasks:
+            return
+
+        if len(self._sub_tasks) == 1:
+            task = self._sub_tasks[0]
+            if not task.future.done():
+                self.pool._submit(task)
+            return
+
         self.pool._submit(self)
 
     @staticmethod

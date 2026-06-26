@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from ..pool import Pool
 from .infer_session_worker import InferSessionWorker
@@ -46,7 +46,8 @@ class InferSessionPool(Pool):
     def __init__(
         self, max_workers: int = 0,
         thread_name_prefix: str = "InferSessionPool.worker:",
-        session_options: Optional[ort.SessionOptions] = None
+        session_options: Optional[ort.SessionOptions] = None,
+        chunk_timeout: float = 0.1
     ):
         if max_workers <= 0:
             import os
@@ -56,7 +57,8 @@ class InferSessionPool(Pool):
             self, max_workers=max_workers,
             initializer=None, initargs=(), initkwargs=None,
             result_queue_cls=None,
-            worker_cls=InferSessionWorker
+            worker_cls=InferSessionWorker,
+            chunk_timeout=chunk_timeout
         )
         self._thread_name_prefix: str = thread_name_prefix
         self._session_options: Optional[ort.SessionOptions] = session_options
@@ -202,6 +204,62 @@ class InferSessionPool(Pool):
 
         self._submit_or_chunk(task)
         return task.future
+
+    def map(
+        self,
+        model_path: str,
+        *iterables: Iterable[Any],
+        output_names: Optional[Union[List[str], None]] = None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+        check_args: bool = True,
+        providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
+        run_options: Optional[ort.RunOptions] = None,
+        use_io_binding: bool = False,
+        copy_outputs_to_cpu: bool = True,
+        timeout: Optional[Union[float, int]] = None,
+        chunksize: int = 1
+    ) -> Iterable[Any]:
+        import time
+
+        if not iterables:
+            raise ValueError("at least one iterable is required")
+
+        if chunksize < 1:
+            raise ValueError("chunksize must be >= 1")
+
+        end_time = None
+        if timeout is not None:
+            end_time = timeout + time.monotonic()
+
+        model_info: ModelInfo = self.model_info(model_path)
+        input_names = list(model_info.inputs.keys())
+
+        if len(iterables) != len(input_names):
+            raise ValueError(
+                f"model has {len(input_names)} inputs ({input_names}), "
+                f"but {len(iterables)} iterables were provided"
+            )
+
+        futures: List[Future] = []
+        for item in zip(*iterables):
+            kwargs = {name: item[i] for i, name in enumerate(input_names)}
+            future = self.submit(
+                model_path,
+                kwargs=kwargs,
+                output_names=output_names,
+                cpu_mode_res=cpu_mode_res,
+                gpu_mode_res=gpu_mode_res,
+                check_args=check_args,
+                providers=providers,
+                run_options=run_options,
+                use_io_binding=use_io_binding,
+                copy_outputs_to_cpu=copy_outputs_to_cpu,
+                chunksize=chunksize
+            )
+            futures.append(future)
+
+        return Pool._result_iterator(futures, end_time)
 
     def _put_in_chunk(self, task: InferSessionTask) -> Future:
         from .infer_chunk_task import InferChunkTask

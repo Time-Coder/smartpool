@@ -426,13 +426,6 @@ class Pool(ABC):
         import itertools
         import time
         from collections.abc import Iterable
-        from concurrent.futures.process import (
-            _chain_from_iterable_of_lists,
-            _process_chunk,
-        )
-        from functools import partial
-
-        from .utils import batched
 
         if cpu_mode_res is None:
             cpu_mode_res = Resource()
@@ -452,19 +445,17 @@ class Pool(ABC):
         if timeout is not None:
             end_time = timeout + time.monotonic()
 
-        target_func = partial(_process_chunk, func)
         futures:List[Future] = []
-        iterator = zip(zip(*iterable), cpu_mode_res, gpu_mode_res)
-        for batch in batched(iterator, chunksize):
-            args_batch, cpu_res_batch, gpu_res_batch = zip(*batch)
+        for args, cpu_res, gpu_res in zip(zip(*iterable), cpu_mode_res, gpu_mode_res):
             future = self.submit(
-                target_func, args=(args_batch,),
-                cpu_mode_res=self._batch_resource(cpu_res_batch),
-                gpu_mode_res=self._batch_resource(gpu_res_batch),
+                func, args=args,
+                cpu_mode_res=cpu_res,
+                gpu_mode_res=gpu_res,
+                chunksize=chunksize
             )
             futures.append(future)
 
-        return _chain_from_iterable_of_lists(Pool._result_iterator(futures, end_time))
+        return Pool._result_iterator(futures, end_time)
 
     def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None:
         with self._lock:
