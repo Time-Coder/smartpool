@@ -441,9 +441,6 @@ class Pool(ABC):
         elif not isinstance(gpu_mode_res, Iterable):
             gpu_mode_res = itertools.repeat(gpu_mode_res)
 
-        if chunksize < 1:
-            raise ValueError("chunksize must be >= 1.")
-
         end_time = None
         if timeout is not None:
             end_time = timeout + time.monotonic()

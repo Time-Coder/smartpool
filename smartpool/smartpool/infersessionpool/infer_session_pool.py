@@ -156,7 +156,7 @@ class InferSessionPool(Pool):
         self, model_path: str,
         args: Optional[Tuple[Any]] = None,
         kwargs: Optional[Dict[str, Any]] = None,
-        output_names: Optional[Union[List[str], None]] = None,
+        output_names: Optional[List[str]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         check_args: bool = True,
@@ -212,7 +212,7 @@ class InferSessionPool(Pool):
         self,
         model_path: str,
         *iterables: Iterable[Any],
-        output_names: Optional[Union[List[str], None]] = None,
+        output_names: Optional[List[str]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
         check_args: bool = True,
@@ -224,12 +224,6 @@ class InferSessionPool(Pool):
         chunksize: int = 1
     ) -> Iterable[Any]:
         import time
-
-        if not iterables:
-            raise ValueError("at least one iterable is required")
-
-        if chunksize < 1:
-            raise ValueError("chunksize must be >= 1")
 
         end_time = None
         if timeout is not None:
