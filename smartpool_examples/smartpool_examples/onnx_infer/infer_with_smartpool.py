@@ -50,7 +50,7 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         preprocess_future.add_done_callback(progress_info.finish_one_preprocess)
 
         img, blob, scale, pad = preprocess_future.unpack(4)
-        infer_future = infer_session_pool.submit(model_path, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res, use_io_binding=False, check_args=False)
+        infer_future = infer_session_pool.submit(model_path, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res, use_io_binding=False, check_args=False, chunksize=1)
         infer_future.add_start_callback(progress_info.start_one_infer)
         infer_future.add_done_callback(progress_info.finish_one_infer)
 

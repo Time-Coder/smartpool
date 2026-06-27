@@ -51,7 +51,7 @@ def download_model():
     print("[DOWNLOAD] YOLOv8n via ultralytics...")
     from ultralytics import YOLO
     model = YOLO(MODEL_FOLDER + "/yolov8n.pt")
-    exported_path = model.export(format="onnx")
+    exported_path = model.export(format="onnx", dynamic=True)
     
     exported_path = exported_path.replace("\\", "/")
     if os.path.normpath(exported_path) != os.path.normpath(MODEL_PATH):

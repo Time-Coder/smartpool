@@ -15,7 +15,7 @@ class ChunkTask(Task):
         self._args_list: List[Tuple[Any, ...]] = []
         self._kwargs_list: List[Dict[str, Any]] = []
         self.last_add_time: float = 0.0
-        self._submitted: bool = False
+        self.submitted: bool = False
         self._key: Tuple[Callable[..., Any], int] = (func, chunksize)
         Task.__init__(
             self, pool=pool, func=self._process_batch,
@@ -24,13 +24,9 @@ class ChunkTask(Task):
             use_torch=False, device_changeable=False, calculate_module_deps=False
         )
         self.future.add_done_callback(self._fan_out_batch_results)
-    
-    @property
-    def submitted(self)->bool:
-        return self._submitted
 
     def add_task(self, task: Task)->None:
-        if self._submitted:
+        if self.submitted:
             return
 
         if task.future.cancelled():
@@ -71,10 +67,10 @@ class ChunkTask(Task):
             self.submit()
 
     def submit(self):
-        if self._submitted:
+        if self.submitted:
             return
 
-        self._submitted = True
+        self.submitted = True
         if self._key in self.pool._chunk_tasks:
             del self.pool._chunk_tasks[self._key]
 

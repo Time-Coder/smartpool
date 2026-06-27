@@ -26,7 +26,7 @@ class InferChunkTask(InferSessionTask):
     ):
         self._sub_tasks: List[InferSessionTask] = []
         self._kwargs_list: List[Dict[str, Any]] = []
-        self._submitted: bool = False
+        self.submitted: bool = False
         self._key: Tuple[str, int] = key
         self.last_add_time: float = 0.0
 
@@ -93,7 +93,7 @@ class InferChunkTask(InferSessionTask):
             return InferChunkTask._default_providers_str
 
     def add_task(self, sub_task: InferSessionTask) -> None:
-        if self._submitted:
+        if self.submitted:
             return
 
         if sub_task.future.cancelled():
@@ -121,10 +121,10 @@ class InferChunkTask(InferSessionTask):
             self.submit()
 
     def submit(self) -> None:
-        if self._submitted:
+        if self.submitted:
             return
         
-        self._submitted = True
+        self.submitted = True
 
         if self._key in self.pool._chunk_tasks:
             del self.pool._chunk_tasks[self._key]
