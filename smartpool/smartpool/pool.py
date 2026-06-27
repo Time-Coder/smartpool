@@ -90,7 +90,7 @@ class Pool(ABC):
         self._result_thread: Optional[threading.Thread] = None
         self._chunk_tasks: Dict[Tuple[Callable[..., Any], int], ChunkTask] = {}
         self._flush_chunk_thread: Optional[threading.Thread] = None
-        self._flush_chunk_queue: Optional[Queue] = None
+        self._flush_chunk_queue: Optional[QueueLike[Optional[ChunkTask]]] = None
         self._result_queue:Optional[QueueLike[Tuple[str, bool, Any]]] = None
         if result_queue_cls is not None:
             if result_queue_kwargs is None:
@@ -172,21 +172,15 @@ class Pool(ABC):
     def _flushing_chunk(self) -> None:
         import time
         while not self._shutdown:
-            running = self._flush_chunk_queue.get()
-            if not running:
+            chunk_task: Optional[ChunkTask] = self._flush_chunk_queue.get()
+            if chunk_task is None:
                 break
 
             time.sleep(self._chunk_timeout)
-            now = time.time()
-            with self._lock:
-                for chunk_task in list(self._chunk_tasks.values()):
-                    if now - chunk_task.last_add_time >= self._chunk_timeout:
-                        chunk_task.submit()
+            if chunk_task.submitted:
+                continue
 
-            while self._flush_chunk_queue.qsize() > 0:
-                running = self._flush_chunk_queue.get()
-                if not running:
-                    break
+            chunk_task.submit()
 
     def _put_in_chunk(self, task: Task) -> Future:
         from .chunk_task import ChunkTask
@@ -454,6 +448,8 @@ class Pool(ABC):
                 chunksize=chunksize
             )
             futures.append(future)
+
+        self.flush()
 
         return Pool._result_iterator(futures, end_time)
 

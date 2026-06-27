@@ -259,6 +259,8 @@ class InferSessionPool(Pool):
             )
             futures.append(future)
 
+        self.flush()
+
         return Pool._result_iterator(futures, end_time)
 
     def _put_in_chunk(self, task: InferSessionTask) -> Future:

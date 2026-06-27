@@ -24,7 +24,11 @@ class ChunkTask(Task):
             use_torch=False, device_changeable=False, calculate_module_deps=False
         )
         self.future.add_done_callback(self._fan_out_batch_results)
-        
+    
+    @property
+    def submitted(self)->bool:
+        return self._submitted
+
     def add_task(self, task: Task)->None:
         if self._submitted:
             return
