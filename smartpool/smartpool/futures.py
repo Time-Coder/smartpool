@@ -146,4 +146,3 @@ class Future(_BaseFuture):
         with self._condition:
             for sub_future in itertools.chain(self._sub_futures.values(), self._attached_futures):
                 sub_future.set_exception(exception)
-    
