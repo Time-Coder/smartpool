@@ -248,6 +248,9 @@ class Pool(ABC):
             if not task.ready_to_run:
                 self._not_ready_tasks[task.id] = task
                 return
+
+            if task.id in self._not_ready_tasks:
+                del self._not_ready_tasks[task.id]
             
             if task.chunksize <= 1:
                 return self._submit(task)

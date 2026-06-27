@@ -137,8 +137,7 @@ class InferChunkTask(InferSessionTask):
         if len(self._sub_tasks) == 1:
             task = self._sub_tasks[0]
             if not task.future.done():
-                with self.pool._lock:
-                    self.pool._submit(task)
+                self.pool._submit(task)
             return
 
         self.kwargs = {}
@@ -146,8 +145,7 @@ class InferChunkTask(InferSessionTask):
             parts = [self._to_numpy(kwargs[name]) for kwargs in self._kwargs_list]
             self.kwargs[name] = np.concatenate(parts, axis=0)
 
-        with self.pool._lock:
-            self.pool._submit(self)
+        self.pool._submit(self)
 
     @staticmethod
     def _to_numpy(value: Any) -> np.ndarray:
@@ -211,14 +209,7 @@ class InferChunkTask(InferSessionTask):
         if target_res.cpu_cores_in_python > src_res.cpu_cores_in_python:
             src_res.cpu_cores_in_python = target_res.cpu_cores_in_python
 
-        if target_res.cpu_cores_out_of_python > src_res.cpu_cores_out_of_python:
-            src_res.cpu_cores_out_of_python = target_res.cpu_cores_out_of_python
-
-        if target_res.cpu_mem > src_res.cpu_mem:
-            src_res.cpu_mem = target_res.cpu_mem
-
-        if target_res.gpu_cores > src_res.gpu_cores:
-            src_res.gpu_cores = target_res.gpu_cores
-        
-        if target_res.gpu_mem > src_res.gpu_mem:
-            src_res.gpu_mem = target_res.gpu_mem
+        src_res.cpu_cores_out_of_python += target_res.cpu_cores_out_of_python
+        src_res.cpu_mem += target_res.cpu_mem
+        src_res.gpu_cores += target_res.gpu_cores
+        src_res.gpu_mem += target_res.gpu_mem
