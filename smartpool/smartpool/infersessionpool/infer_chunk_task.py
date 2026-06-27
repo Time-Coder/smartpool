@@ -41,7 +41,7 @@ class InferChunkTask(InferSessionTask):
             user_providers=user_providers,
             run_options=run_options,
             use_io_binding=use_io_binding,
-            copy_outputs_to_cpu=True,
+            copy_outputs_to_cpu=False,
             output_names=None,
             chunksize=chunksize
         )
@@ -172,7 +172,7 @@ class InferChunkTask(InferSessionTask):
                     task.future.set_exception(e)
 
             return
-        
+
         batch_output_dict = {}
         full_output_names = []
         for node, batch_output in zip(self.model_info.outputs, batch_result):
@@ -190,7 +190,17 @@ class InferChunkTask(InferSessionTask):
                     output_names = full_output_names
 
                 for output_name in output_names:
-                    outputs.append(batch_output_dict[output_name][i:i+1])
+                    batch_out = batch_output_dict[output_name]
+                    slice_np = batch_out.numpy()[i:i+1].copy()
+                    if task.copy_outputs_to_cpu:
+                        outputs.append(slice_np)
+                    else:
+                        import onnxruntime as ort
+                        outputs.append(ort.OrtValue.ortvalue_from_numpy(
+                            slice_np,
+                            device_type=self.session_info.device_type,
+                            device_id=self.session_info.device_id
+                        ))
 
                 task.future.set_result(outputs)
             except Exception as e:
