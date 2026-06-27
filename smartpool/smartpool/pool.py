@@ -84,7 +84,7 @@ class Pool(ABC):
         self._tasks: Dict[str, Task] = {}
         self._not_ready_tasks: Dict[str, Task] = {}
         self._delayed_tasks: Dict[str, Task] = {}
-        self._lock: threading.Lock = threading.Lock()
+        self._lock: threading.RLock = threading.RLock()
         self._shutdown: bool = False
         self._chunk_timeout: float = chunk_timeout
         self._result_thread: Optional[threading.Thread] = None
@@ -546,25 +546,22 @@ class Pool(ABC):
 
     def _postprocess_after_task_done(self)->None:
         if self._delayed_tasks:
-            should_pop_task_ids_in_delayed = []
-            cancelled_task_ids = []
-            for task_id, delayed_task in self._delayed_tasks.items():
+            for task_id in list(self._delayed_tasks):
+                delayed_task = self._delayed_tasks.get(task_id)
+                if delayed_task is None:
+                    continue
+
                 if delayed_task.future.cancelled():
-                    cancelled_task_ids.append(task_id)
-                    should_pop_task_ids_in_delayed.append(task_id)
+                    del self._delayed_tasks[task_id]
+                    if task_id in self._tasks:
+                        del self._tasks[task_id]
                     continue
 
                 if not self._try_assign_task(delayed_task):
                     continue
 
-                self._put_task(delayed_task)
-                should_pop_task_ids_in_delayed.append(task_id)
-
-            for task_id in should_pop_task_ids_in_delayed:
                 del self._delayed_tasks[task_id]
-
-            for task_id in cancelled_task_ids:
-                del self._tasks[task_id]
+                self._put_task(delayed_task)
 
         for task in self._tasks.values():
             self._try_move_to_gpu(task)

@@ -96,24 +96,26 @@ class InferChunkTask(InferSessionTask):
         if self.submitted:
             return
 
-        if sub_task.future.cancelled():
-            return
+        if sub_task.check_args or self.check_args:
+            try:
+                self.pool._validate_resource_feasibility(self)
+            except Exception as e:
+                for sub_task in self._sub_tasks:
+                    sub_task.future.set_exception(e)
 
+                if self._key in self.pool._chunk_tasks:
+                    del self.pool._chunk_tasks[self._key]
+                    
+                return
+
+        self.future.add_future(sub_task.future)
         self._sub_tasks.append(sub_task)
         self._kwargs_list.append(sub_task.kwargs)
         self._update_res(self.cpu_mode_res, sub_task.cpu_mode_res)
         self._update_res(self.gpu_mode_res, sub_task.gpu_mode_res)
 
-        try:
-            self.pool._validate_resource_feasibility(self)
-        except Exception as e:
-            for sub_task in self._sub_tasks:
-                sub_task.future.set_exception(e)
-
-            if self._key in self.pool._chunk_tasks:
-                del self.pool._chunk_tasks[self._key]
-                
-            return
+        if sub_task.check_args:
+            self.check_args = True
 
         import time
         self.last_add_time = time.time()
@@ -135,7 +137,8 @@ class InferChunkTask(InferSessionTask):
         if len(self._sub_tasks) == 1:
             task = self._sub_tasks[0]
             if not task.future.done():
-                self.pool._submit(task)
+                with self.pool._lock:
+                    self.pool._submit(task)
             return
 
         self.kwargs = {}
@@ -143,7 +146,8 @@ class InferChunkTask(InferSessionTask):
             parts = [self._to_numpy(kwargs[name]) for kwargs in self._kwargs_list]
             self.kwargs[name] = np.concatenate(parts, axis=0)
 
-        self.pool._submit(self)
+        with self.pool._lock:
+            self.pool._submit(self)
 
     @staticmethod
     def _to_numpy(value: Any) -> np.ndarray:
@@ -157,27 +161,19 @@ class InferChunkTask(InferSessionTask):
         return value
 
     def _fan_out_batch_results(self, future: Future) -> None:
-        if future.cancelled():
-            for task in self._sub_tasks:
-                if not task.future.done():
-                    task.future.cancel()
-
-            return
-
         try:
             batch_result = future.result()
         except Exception as e:
-            for task in self._sub_tasks:
-                if not task.future.done():
-                    task.future.set_exception(e)
-
             return
+
+        if batch_result.__class__.__name__ == "ndarray":
+            batch_result = [batch_result]
 
         batch_output_dict = {}
         full_output_names = []
-        for node, batch_output in zip(self.model_info.outputs, batch_result):
-            batch_output_dict[node.name] = batch_output
-            full_output_names.append(node.name)
+        for node_name, batch_output in zip(self.model_info.outputs, batch_result):
+            batch_output_dict[node_name] = batch_output
+            full_output_names.append(node_name)
 
         for i, task in enumerate(self._sub_tasks):
             if task.future.done():
@@ -191,7 +187,9 @@ class InferChunkTask(InferSessionTask):
 
                 for output_name in output_names:
                     batch_out = batch_output_dict[output_name]
-                    slice_np = batch_out.numpy()[i:i+1].copy()
+                    if batch_out.__class__.__name__ == "OrtValue":
+                        batch_out = batch_out.numpy()
+                    slice_np = batch_out[i:i+1].copy()
                     if task.copy_outputs_to_cpu:
                         outputs.append(slice_np)
                     else:
@@ -202,9 +200,11 @@ class InferChunkTask(InferSessionTask):
                             device_id=self.session_info.device_id
                         ))
 
-                task.future.set_result(outputs)
+                if not task.future.done():
+                    task.future.set_result(outputs)
             except Exception as e:
-                task.future.set_exception(e)
+                if not task.future.done():
+                    task.future.set_exception(e)
 
     @staticmethod
     def _update_res(src_res: Resource, target_res: Resource) -> None:

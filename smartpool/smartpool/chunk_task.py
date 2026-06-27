@@ -25,41 +25,40 @@ class ChunkTask(Task):
         )
         self.future.add_done_callback(self._fan_out_batch_results)
 
-    def add_task(self, task: Task)->None:
+    def add_task(self, sub_task: Task)->None:
         if self.submitted:
             return
+        
+        if sub_task.check_args or self.check_args:
+            try:
+                self.pool._validate_resource_feasibility(self)
+            except Exception as e:
+                for sub_task in self._sub_tasks:
+                    sub_task.future.set_exception(e)
 
-        if task.future.cancelled():
-            return
+                if self._key in self.pool._chunk_tasks:
+                    del self.pool._chunk_tasks[self._key]
 
-        self._sub_tasks.append(task)
-        self._args_list.append(task.args)
-        self._kwargs_list.append(task.kwargs)
-        if task.use_torch:
+                return
+
+        self.future.add_future(sub_task.future)
+        self._sub_tasks.append(sub_task)
+        self._args_list.append(sub_task.args)
+        self._kwargs_list.append(sub_task.kwargs)
+        if sub_task.use_torch:
             self.use_torch = True
 
-        if task.check_args:
+        if sub_task.check_args:
             self.check_args = True
 
-        if task.device_changeable:
+        if sub_task.device_changeable:
             self.device_changeable = True
 
-        if task.module_deps:
-            self.module_deps.update(task.module_deps)
+        if sub_task.module_deps:
+            self.module_deps.update(sub_task.module_deps)
 
-        self._update_res(self.cpu_mode_res, task.cpu_mode_res)
-        self._update_res(self.gpu_mode_res, task.gpu_mode_res)
-
-        try:
-            self.pool._validate_resource_feasibility(self)
-        except Exception as e:
-            for sub_task in self._sub_tasks:
-                sub_task.future.set_exception(e)
-
-            if self._key in self.pool._chunk_tasks:
-                del self.pool._chunk_tasks[self._key]
-
-            return
+        self._update_res(self.cpu_mode_res, sub_task.cpu_mode_res)
+        self._update_res(self.gpu_mode_res, sub_task.gpu_mode_res)
 
         import time
         self.last_add_time = time.time()
@@ -101,20 +100,9 @@ class ChunkTask(Task):
         return results
     
     def _fan_out_batch_results(self, future: Future) -> None:
-        if future.cancelled():
-            for task in self._sub_tasks:
-                if not task.future.done():
-                    task.future.cancel()
-
-            return
-
         try:
             results = future.result()
-        except Exception as exc:
-            for task in self._sub_tasks:
-                if not task.future.done():
-                    task.future.set_exception(exc)
-                
+        except Exception as e:                
             return
 
         for (success, result), task in zip(results, self._sub_tasks):
