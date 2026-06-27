@@ -176,7 +176,11 @@ class Pool(ABC):
             if chunk_task is None:
                 break
 
+            if chunk_task.submitted:
+                continue
+
             time.sleep(self._chunk_timeout)
+
             if chunk_task.submitted:
                 continue
 
@@ -194,10 +198,12 @@ class Pool(ABC):
             self._flush_chunk_thread.start()
 
         if key not in self._chunk_tasks:
-            self._chunk_tasks[key] = ChunkTask(self, task.func, task.chunksize)
-            self._flush_chunk_queue.put(True)
-
-        chunk_task: ChunkTask = self._chunk_tasks[key]
+            chunk_task: ChunkTask = ChunkTask(self, task.func, task.chunksize)
+            self._chunk_tasks[key] = chunk_task
+            self._flush_chunk_queue.put(chunk_task)
+        else:
+            chunk_task: ChunkTask = self._chunk_tasks[key]
+            
         chunk_task.add_task(task)
 
         return task.future
@@ -462,7 +468,7 @@ class Pool(ABC):
             self._shutdown = True
 
             if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive() and self._flush_chunk_queue is not None:
-                self._flush_chunk_queue.put(False)
+                self._flush_chunk_queue.put(None)
 
             self._stop_feeding()
 

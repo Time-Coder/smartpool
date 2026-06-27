@@ -189,8 +189,11 @@ class InferSessionPool(Pool):
             if not copy_outputs_to_cpu or has_ortvalue:
                 use_io_binding = True
 
-        if not model_info.support_batch_input:
+        if chunksize > 1 and not model_info.support_batch_input:
             chunksize = 1
+
+            import warnings
+            warnings.warn(f"model {model_info.model_name} not support batch input, reset chunksize to 1")
 
         task = InferSessionTask(
             infer_session_pool=self, model_info=model_info, kwargs=merged_kwargs,
@@ -275,7 +278,7 @@ class InferSessionPool(Pool):
 
         key = InferChunkTask.get_key(task.model_info.model_path, task.use_io_binding, task.user_providers, task.run_options, task.chunksize)
         if key not in self._chunk_tasks:
-            self._chunk_tasks[key] = InferChunkTask(
+            chunk_task: InferChunkTask = InferChunkTask(
                 pool=self,
                 model_info=task.model_info,
                 use_io_binding=task.use_io_binding,
@@ -284,12 +287,12 @@ class InferSessionPool(Pool):
                 chunksize=task.chunksize,
                 key=key
             )
-
-        chunk_task: InferChunkTask = self._chunk_tasks[key]
+            self._chunk_tasks[key] = chunk_task
+            self._flush_chunk_queue.put(chunk_task)
+        else:
+            chunk_task: InferChunkTask = self._chunk_tasks[key]
+            
         chunk_task.add_task(task)
-
-        if self._flush_chunk_queue is not None and not self._shutdown:
-            self._flush_chunk_queue.put(True)
 
         return task.future
 
