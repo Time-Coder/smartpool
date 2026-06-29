@@ -65,44 +65,46 @@ class Future(_BaseFuture):
 
     def add_future(self, future: _BaseFuture)->None:
         with self._condition:
-            future._state = self._state
             self._attached_futures.add(future)
+            if self._state == FINISHED:
+                if self._exception is not None:
+                    future.set_exception(self._exception)
+                    raise self._exception
+            elif self._state in (CANCELLED, CANCELLED_AND_NOTIFIED):
+                future.cancel()
+            else:
+                future._state = self._state
 
-    def __getitem__(self, key: Any) -> Future:
-        with self._condition:
-            if key not in self._sub_futures:
-                child = Future(self._check_args)
-                self._sub_futures[key] = child
-                if self._state == FINISHED:
+    def _getitem(self, key: Any)->Future:
+        if key not in self._sub_futures:
+            child = Future(self._check_args)
+            self._sub_futures[key] = child
+            if self._state == FINISHED:
+                if self._exception is not None:
+                    child.set_exception(self._exception)
+                    raise self._exception
+                else:
                     try:
                         child.set_result(self._result[key])
                     except Exception as e:
                         child.set_exception(e)
-                elif self._state in (CANCELLED, CANCELLED_AND_NOTIFIED):
-                    child.cancel()
-                else:
-                    child._state = self._state
+                        raise
+            elif self._state in (CANCELLED, CANCELLED_AND_NOTIFIED):
+                child.cancel()
+            else:
+                child._state = self._state
 
-            return self._sub_futures[key]
+        return self._sub_futures[key]
+
+    def __getitem__(self, key: Any) -> Future:
+        with self._condition:
+            return self._getitem(key)
     
     def unpack(self, n: int) -> List[Future]:
         with self._condition:
             children = []
             for i in range(n):
-                if i not in self._sub_futures:
-                    child = Future(self._check_args)
-                    self._sub_futures[i] = child
-                    if self._state == FINISHED:
-                        try:
-                            child.set_result(self._result[i])
-                        except Exception as e:
-                            child.set_exception(e)
-                    elif self._state in (CANCELLED, CANCELLED_AND_NOTIFIED):
-                        child.cancel()
-                    else:
-                        child._state = self._state
-
-                children.append(self._sub_futures[i])
+                children.append(self._getitem(i))
 
             return children
 
