@@ -5,6 +5,7 @@ __version__ = "0.1.7"
 from .futures import Future
 from .amd_gpuinfo import AMDGPUInfo
 from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
+from .device import Device
 from .gpuinfos import GPUInfos
 from .infersessionpool import InferSessionPool, ModelInfo
 from .intel_gpuinfo import IntelGPUInfo
@@ -18,6 +19,7 @@ from .utils import best_device, best_stream, limit_num_single_thread, move_optim
 
 __all__ = [
     "Future",
+    "Device",
     "ProcessPool",
     "ThreadPool",
     "InterpreterPool",

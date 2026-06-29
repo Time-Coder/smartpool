@@ -147,7 +147,7 @@ class InferSessionPool(Pool):
 
         with self._sys_info_lock:
             for gpu_info in self._sys_info.gpu_infos:
-                if gpu_info.ort_provider(providers):
+                if gpu_info.device is not None and gpu_info.device.ort_provider(providers):
                     return
 
         raise ValueError(f"all providers are not supported: {providers}")
@@ -318,19 +318,10 @@ class InferSessionPool(Pool):
 
             devices, reclaim_items = self._choose_task_device(task, mode)
             for device in devices:
-                if isinstance(device, str):
-                    task.device = device
-                    task.gpu_index = -1
-                    task.dml_id = -1
-                else:
-                    task.device = device.device
-                    task.gpu_index = device.index
-                    task.dml_id = device.dml_id
+                task.device = device
 
                 if not self._choose_task_session(task) or not self._choose_task_worker(task, task.effective_res):
                     task.device = None
-                    task.gpu_index = -1
-                    task.dml_id = -1
                 else:
                     break
 
@@ -434,18 +425,20 @@ class InferSessionPool(Pool):
             task.estimated_need_cpu_mem = res.cpu_mem
             self._sys_info.cpu_cores_free -= res.cpu_cores
             self._sys_info.cpu_mem_free -= res.cpu_mem
-            if task.gpu_index != -1:
-                self._sys_info.gpu_infos[task.gpu_index].n_cores_free -= res.gpu_cores
-                self._sys_info.gpu_infos[task.gpu_index].mem_free -= res.gpu_mem
+            if task.device is not None and task.device.gpu_index != -1:
+                gpu_index = task.device.gpu_index
+                self._sys_info.gpu_infos[gpu_index].n_cores_free -= res.gpu_cores
+                self._sys_info.gpu_infos[gpu_index].mem_free -= res.gpu_mem
 
     def _release_resource(self, task: InferSessionTask) -> None:
         with self._sys_info_lock:
             res = task.effective_res
             self._sys_info.cpu_cores_free += res.cpu_cores
             self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
-            if task.gpu_index != -1:
-                self._sys_info.gpu_infos[task.gpu_index].n_cores_free += res.gpu_cores
-                self._sys_info.gpu_infos[task.gpu_index].mem_free += res.gpu_mem
+            if task.device is not None and task.device.gpu_index != -1:
+                gpu_index = task.device.gpu_index
+                self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
+                self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem
 
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores

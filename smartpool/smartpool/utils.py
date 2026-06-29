@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Protocol, TypeVar, List
+from typing import TYPE_CHECKING, Optional, Protocol, TypeVar
 import os
 
 if TYPE_CHECKING:
     from torch.cuda import Stream
+    from .device import Device
 
 TRT_CACHE_PATH: str = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
 
@@ -91,7 +92,7 @@ _best_device_lock = None
 _best_device = {}
 _best_stream = {}
 
-def _set_best_device(device:str, tid=None)->None:
+def _set_best_device(device:Device, tid=None)->None:
     import threading
 
     global _best_device_lock
@@ -104,7 +105,7 @@ def _set_best_device(device:str, tid=None)->None:
     with _best_device_lock:
         _best_device[tid] = device
 
-def best_device()->str:
+def best_device()->Device:
     import threading
 
     global _best_device_lock

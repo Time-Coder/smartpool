@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Optional, Type
+from .device import Device
 
 
 class GPUVendor(Enum):
@@ -16,18 +17,12 @@ class GPUVendor(Enum):
 class GPUInfoSnapshot:
 
     def __init__(self):
-        self.index: Optional[int] = None
-        self.device_id: Optional[int] = None
-        self.dml_id: Optional[int] = None
-        self.parent_class: Optional[Type[GPUInfo]] = None
-        self._ort_provider: Optional[Tuple[str, Dict[str, Any]]] = None
-
         self.name: Optional[str] = None
         self.uuid: Optional[uuid.UUID] = None
         self.serial: Optional[str] = None
         self.driver_version: Optional[str] = None
         self.vendor: Optional[str] = None
-        self.device: Optional[str] = None
+        self.device: Optional[Device] = None
         self.mem_total: Optional[int] = None
         self.mem_used: Optional[int] = None
         self.load: Optional[float] = None
@@ -53,59 +48,15 @@ class GPUInfoSnapshot:
     def n_cores_free(self, value: int) -> None:
         self.n_cores_used = self.n_cores - value
 
-    def ort_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
-        if providers is None and self._ort_provider is not None:
-            return self._ort_provider
-
-        import os
-
-        for provider_name in self.parent_class.supported_ort_providers():
-            options = {"device_id": self.device_id}
-            if provider_name == "DmlExecutionProvider":
-                options["device_id"] = self.dml_id
-            elif provider_name == "TensorrtExecutionProvider":
-                options["trt_engine_cache_enable"] = True
-                options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
-            current_provider = (provider_name, options)
-
-            if self._ort_provider is None:
-                self._ort_provider = current_provider
-
-            if providers is None:
-                return self._ort_provider
-
-            for provider in providers:
-                if isinstance(provider, str):
-                    if provider == provider_name:
-                        return current_provider
-                else:
-                    user_provider_name = provider[0]
-                    if user_provider_name != provider_name:
-                        continue
-
-                    user_provider_options = provider[1]
-                    if "device_id" in user_provider_options:
-                        device_id: int = user_provider_options["device_id"]
-
-                        if device_id != options["device_id"]:
-                            continue
-                    else:
-                        user_provider_options["device_id"] = options["device_id"]
-
-                    return (user_provider_name, user_provider_options)
-
-        return None
-
-
 class GPUInfo(ABC):
 
-    _supported_ort_providers:Optional[List[str]] = None
-
     def __init__(self, device_id: int, index: int):
-        self._device_id: int = device_id
-        self._index: int = index
-        self._dml_id: int = -1
-        self._ort_provider: Optional[Tuple[str, Dict[str, Any]]] = None
+        vendor_prefix = {
+            GPUVendor.NVIDIA: "cuda",
+            GPUVendor.INTEL: "xpu",
+            GPUVendor.AMD: "hip",
+        }
+        self._device = Device(torch_device=f"{vendor_prefix[self.vendor]}:{device_id}", gpu_index=index, dml_id=-1)
 
         self._name: Optional[str] = None
         self._uuid: Optional[uuid.UUID] = None
@@ -183,97 +134,25 @@ class GPUInfo(ABC):
         else:
             raise ValueError(f"Unknown device prefix: {device_prefix}")
 
-    @staticmethod
-    def _init_ort_providers()->None:
-        if GPUInfo._supported_ort_providers is not None:
-            return
-
-        import onnxruntime as ort
-        GPUInfo._supported_ort_providers = ort.get_available_providers()
-
-        from .amd_gpuinfo import AMDGPUInfo
-        from .intel_gpuinfo import IntelGPUInfo
-        from .nvidia_gpuinfo import NvidiaGPUInfo
-        children:List[Type[GPUInfo]] = [
-            IntelGPUInfo,
-            AMDGPUInfo,
-            NvidiaGPUInfo
-        ]
-        for child in children:
-            for i in range(len(child._supported_ort_providers)-1, -1, -1):
-                provider = child._supported_ort_providers[i]
-                if provider not in GPUInfo._supported_ort_providers:
-                    del child._supported_ort_providers[i]
-
-    @classmethod
-    def supported_ort_providers(cls)->List[str]:
-        cls._init_ort_providers()
-        return cls._supported_ort_providers
-
-    def ort_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None)->Optional[Tuple[str, Dict[str, Any]]]:
-        if providers is None and self._ort_provider is not None:
-            return self._ort_provider
-
-        import os
-
-        for provider_name in self.supported_ort_providers():
-            options = {"device_id": self.device_id}
-            if provider_name == "DmlExecutionProvider":
-                options["device_id"] = self.dml_id
-            elif provider_name == "TensorrtExecutionProvider":
-                options["trt_engine_cache_enable"] = True
-                options["trt_engine_cache_path"] = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"
-            current_provider = (provider_name, options)
-
-            if self._ort_provider is None:
-                self._ort_provider = current_provider
-
-            if providers is None:
-                return self._ort_provider
-
-            for provider in providers:
-                if isinstance(provider, str):
-                    if provider == provider_name:
-                        return current_provider
-                else:
-                    user_provider_name = provider[0]
-                    if user_provider_name != provider_name:
-                        continue
-
-                    user_provider_options = provider[1]
-                    if "device_id" in user_provider_options:
-                        device_id: int = user_provider_options["device_id"]
-
-                        if device_id != options["device_id"]:
-                            continue
-                    else:
-                        user_provider_options["device_id"] = options["device_id"]
-
-                    return (user_provider_name, user_provider_options)
-
-        return None
-
     @property
     def device_id(self) -> int:
-        return self._device_id
+        return self._device.device_id
 
     @property
     def index(self) -> int:
-        return self._index
+        return self._device.gpu_index
 
     @property
     def dml_id(self) -> int:
-        return self._dml_id
+        return self._device.dml_id
+
+    @dml_id.setter
+    def dml_id(self, value: int) -> None:
+        self._device.dml_id = value
 
     @property
-    def device(self) -> str:
-        vendor_prefix = {
-            GPUVendor.NVIDIA: "cuda",
-            GPUVendor.INTEL: "xpu",
-            GPUVendor.AMD: "hip",
-        }
-        prefix = vendor_prefix[self.vendor]
-        return f"{prefix}:{self.device_id}"
+    def device(self) -> Device:
+        return self._device
 
     @property
     def name(self) -> str:
@@ -424,12 +303,8 @@ class GPUInfo(ABC):
             n_cores_used = True
 
         snapshot = GPUInfoSnapshot()
-        snapshot.index = self._index
-        snapshot.device_id = self.device_id
         snapshot.vendor = self.vendor.value
         snapshot.device = self.device
-        snapshot.dml_id = self.dml_id
-        snapshot.parent_class = self.__class__
 
         if name:
             snapshot.name = self.name

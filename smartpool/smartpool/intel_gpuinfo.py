@@ -156,8 +156,8 @@ class IntelGPUInfo(GPUInfo):
             cls._device_info = []
 
     def _get_device_info(self) -> Dict:
-        if 0 <= self._device_id < len(self._device_info):
-            return self._device_info[self._device_id]
+        if 0 <= self.device.device_id < len(self._device_info):
+            return self._device_info[self.device.device_id]
         return {}
 
     def _fetch_name(self) -> str:

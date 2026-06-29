@@ -19,7 +19,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from .gpuinfo import GPUInfoSnapshot
+    from .gpuinfo import Device, GPUInfoSnapshot
     from .resource import Resource
     from .worker import Worker
     from .pool import Pool
@@ -61,11 +61,7 @@ class Task:
             from .module_deps import module_deps
             self.module_deps: Set[str] = module_deps(sys.modules[func.__module__])
 
-        self._device: Optional[str] = None
-        self._device_prefix: Optional[str] = None
-        self._device_id: Optional[int] = None
-        self.gpu_index: int = -1
-        self.dml_id: int = -1
+        self.device: Optional[Device] = None
         self.worker: Optional[Worker] = None
         self.mem_before_enter: int = 0
         self._future: Optional[Future] = None
@@ -129,19 +125,6 @@ class Task:
         return self._future
 
     @property
-    def device(self)->str:
-        return self._device
-
-    @device.setter
-    def device(self, device:str)->None:
-        if self._device == device:
-            return
-
-        self._device = device
-        self._device_prefix = None
-        self._device_id = None
-
-    @property
     def effective_res(self) -> Resource:
         if self.device and self.device != "cpu":
             return self.gpu_mode_res
@@ -150,50 +133,6 @@ class Task:
 
     def info(self):
         return (self.id, self.device, self.func, self.args, self.kwargs)
-
-    @property
-    def device_id(self)->int:
-        if self._device_id is not None:
-            return self._device_id
-
-        self._device_prefix = ""
-        self._device_id = 0
-        device = self._device
-        if isinstance(device, str):
-            if ":" in device:
-                parts = device.split(":")
-                if len(parts) == 2:
-                    try:
-                        self._device_prefix = parts[0]
-                        self._device_id = int(parts[1])
-                    except (ValueError, IndexError):
-                        pass
-            else:
-                self._device_prefix = device
-
-        return self._device_id
-
-    @property
-    def device_prefix(self)->str:
-        if self._device_prefix is not None:
-            return self._device_prefix
-
-        self._device_prefix = ""
-        self._device_id = -1
-        device = self._device
-        if isinstance(device, str):
-            if ":" in device:
-                parts = device.split(":")
-                if len(parts) == 2:
-                    try:
-                        self._device_prefix = parts[0]
-                        self._device_id = int(parts[1])
-                    except (ValueError, IndexError):
-                        pass
-            else:
-                self._device_prefix = device
-
-        return self._device_prefix
 
     def exec(self)->Tuple[bool, Any]:
         try:

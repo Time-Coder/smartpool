@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Tuple, Any, Dict, Optional, List, Union
 from ..task import Task
 
 if TYPE_CHECKING:
+    from ..device import Device
     from ..gpuinfo import GPUInfoSnapshot
     from .infer_session_pool import InferSessionPool
     from .session_info import SessionInfo
@@ -34,7 +35,6 @@ class InferSessionTask(Task):
         self.session_info: Optional[SessionInfo] = None
         self.use_io_binding: bool = use_io_binding
         self.copy_outputs_to_cpu: bool = copy_outputs_to_cpu
-        self._provider: Optional[Tuple[str, Dict]] = None
         Task.__init__(
             self, pool=infer_session_pool,
             func=None, args=None, kwargs=kwargs,
@@ -48,44 +48,25 @@ class InferSessionTask(Task):
         )
 
     def can_use(self, gpu:GPUInfoSnapshot)->bool:
-        return bool(gpu.ort_provider(self.user_providers))
+        return gpu.device is not None and bool(gpu.device.ort_provider(self.user_providers))
 
     def _callback_hook(self, result: Any):
         if result.__class__.__name__ == "OrtValue":
             self.use_io_binding = True
 
     @property
-    def device(self)->str:
-        return self._device
-
-    @device.setter
-    def device(self, device:str)->None:
-        if self._device == device:
-            return
-
-        self._device = device
-        self._device_prefix = None
-        self._device_id = None
-        self._provider = None
-
-    @property
     def provider(self)->Optional[Tuple[str, Dict]]:
         if self.device is None:
             return None
 
-        if self._provider is not None:
-            return self._provider
-
-        if self.device == "cpu":
-            self._provider = ("CPUExecutionProvider", {})
-            return self._provider
+        if self.device.torch_device == "cpu":
+            return ("CPUExecutionProvider", {})
 
         from ..pool import Pool
         with Pool._sys_info_lock:
-            gpuinfo_snapshot = Pool._sys_info.gpu_infos[self.gpu_index]
+            gpuinfo_snapshot = Pool._sys_info.gpu_infos[self.device.gpu_index]
 
-        self._provider = gpuinfo_snapshot.ort_provider(self.user_providers)
-        return self._provider
+        return gpuinfo_snapshot.device.ort_provider(self.user_providers)
 
     def exec(self) -> Tuple[bool, Any]:
         try:

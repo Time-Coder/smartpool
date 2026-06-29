@@ -241,21 +241,21 @@ class AMDGPUInfo(GPUInfo):
         return len(cls._device_info)
 
     def _get_device_info(self) -> Dict:
-        if 0 <= self._device_id < len(self._device_info):
-            return self._device_info[self._device_id]
+        if 0 <= self.device.device_id < len(self._device_info):
+            return self._device_info[self.device.device_id]
         return {}
 
     def _fetch_name(self) -> str:
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                gpu = self._gpu_list.At(self._device_id)
+                gpu = self._gpu_list.At(self.device.device_id)
                 return str(gpu.Name())
         elif system == "Linux":
             with self._lock:
                 try:
                     import pyamdgpuinfo
-                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    gpu = pyamdgpuinfo.get_gpu(self.device.device_id)
                     return gpu.name
                 except Exception:
                     pass
@@ -267,7 +267,7 @@ class AMDGPUInfo(GPUInfo):
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                gpu = self._gpu_list.At(self._device_id)
+                gpu = self._gpu_list.At(self.device.device_id)
                 uid = gpu.UniqueId()
                 return uuid.UUID(int=uid)
         return None
@@ -279,7 +279,7 @@ class AMDGPUInfo(GPUInfo):
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                gpu = self._gpu_list.At(self._device_id)
+                gpu = self._gpu_list.At(self.device.device_id)
                 return f"AMD {gpu.DriverPath()}"
         return None
 
@@ -287,8 +287,8 @@ class AMDGPUInfo(GPUInfo):
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                gpu = self._gpu_list.At(self._device_id)
-                total_mb = self._vram_ranges.get(self._device_id, 0)
+                gpu = self._gpu_list.At(self.device.device_id)
+                total_mb = self._vram_ranges.get(self.device.device_id, 0)
                 if total_mb == 0:
                     total_mb = gpu.TotalVRAM()
                 metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
@@ -300,7 +300,7 @@ class AMDGPUInfo(GPUInfo):
             with self._lock:
                 try:
                     import pyamdgpuinfo
-                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    gpu = pyamdgpuinfo.get_gpu(self.device.device_id)
                     used = int(gpu.query_vram_usage())
                     total = int(getattr(gpu, 'vram_size', 0))
                     return (total, used)
@@ -323,7 +323,7 @@ class AMDGPUInfo(GPUInfo):
 
         if system == "Windows":
             with self._lock:
-                gpu = self._gpu_list.At(self._device_id)
+                gpu = self._gpu_list.At(self.device.device_id)
                 metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
                 usage = metrics.GPUUsage()
                 return usage / 100.0
@@ -333,7 +333,7 @@ class AMDGPUInfo(GPUInfo):
             with self._lock:
                 try:
                     import pyamdgpuinfo
-                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    gpu = pyamdgpuinfo.get_gpu(self.device.device_id)
                     return float(gpu.query_load())
                 except Exception:
                     return None
@@ -435,7 +435,7 @@ class AMDGPUInfo(GPUInfo):
         system = platform.system()
         if system == "Windows":
             with self._lock:
-                gpu = self._gpu_list.At(self._device_id)
+                gpu = self._gpu_list.At(self.device.device_id)
                 metrics = self._perf_monitoring.GetCurrentGPUMetrics(gpu)
                 temp = int(metrics.GPUTemperature())
                 return temp
@@ -443,7 +443,7 @@ class AMDGPUInfo(GPUInfo):
             with self._lock:
                 try:
                     import pyamdgpuinfo
-                    gpu = pyamdgpuinfo.get_gpu(self._device_id)
+                    gpu = pyamdgpuinfo.get_gpu(self.device.device_id)
                     return float(gpu.query_temperature())
                 except Exception:
                     return None

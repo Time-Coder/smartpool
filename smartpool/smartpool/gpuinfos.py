@@ -149,13 +149,13 @@ class MetaGPUInfos(type):
 
                 gpu_name = gpu.name.lower().strip()
                 if gpu_name in dml_map and dml_map[gpu_name]:
-                    gpu._dml_id = dml_map[gpu_name][0]
+                    gpu.dml_id = dml_map[gpu_name][0]
                 else:
                     for dml_name, dml_ids in dml_map.items():
                         if dml_ids and gpu_name and (
                             gpu_name in dml_name or dml_name in gpu_name
                         ):
-                            gpu._dml_id = dml_ids[0]
+                            gpu.dml_id = dml_ids[0]
                             break
 
             MetaGPUInfos.__n_devices += count

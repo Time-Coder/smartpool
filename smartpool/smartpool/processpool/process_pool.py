@@ -74,10 +74,10 @@ class ProcessPool(Pool):
             task.estimated_need_cpu_mem = max(0, res.cpu_mem - task.modules_overlap_ratio * worker.cached_rss)
             self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
 
-            task_gpu_index:int = task.gpu_index
-            if task_gpu_index != -1:
-                self._sys_info.gpu_infos[task_gpu_index].n_cores_free -= res.gpu_cores
-                self._sys_info.gpu_infos[task_gpu_index].mem_free -= res.gpu_mem
+            if task.device is not None and task.device.gpu_index != -1:
+                gpu_index = task.device.gpu_index
+                self._sys_info.gpu_infos[gpu_index].n_cores_free -= res.gpu_cores
+                self._sys_info.gpu_infos[gpu_index].mem_free -= res.gpu_mem
 
     def _release_resource(self, task:Task)->None:
         with self._sys_info_lock:
@@ -89,10 +89,10 @@ class ProcessPool(Pool):
             released_cpu_mem = task.estimated_need_cpu_mem - hold_cpu_mem
             self._sys_info.cpu_mem_free += released_cpu_mem
 
-            task_gpu_index:int = task.gpu_index
-            if task_gpu_index != -1:
-                self._sys_info.gpu_infos[task_gpu_index].n_cores_free += res.gpu_cores
-                self._sys_info.gpu_infos[task_gpu_index].mem_free += res.gpu_mem
+            if task.device is not None and task.device.gpu_index != -1:
+                gpu_index = task.device.gpu_index
+                self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
+                self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem
 
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores

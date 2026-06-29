@@ -47,7 +47,7 @@ class NvidiaGPUInfo(GPUInfo):
 
     def _get_handle(self):
         if self._handle is None:
-            self._handle = pynvml.nvmlDeviceGetHandleByIndex(self._device_id)
+            self._handle = pynvml.nvmlDeviceGetHandleByIndex(self.device.device_id)
 
         return self._handle
 

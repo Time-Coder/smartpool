@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Uni
 if TYPE_CHECKING:
     import multiprocessing as mp
 
+    from .device import Device
     from .pool import Pool
     from .task import Task
     from .utils import QueueLike
@@ -90,7 +91,7 @@ class Worker(ABC):
         self.executor = None
         self._is_working = False
 
-    def change_device(self, device:str)->None:
+    def change_device(self, device:Device)->None:
         pass
 
     @property

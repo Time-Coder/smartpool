@@ -9,6 +9,7 @@ from ..worker import Worker
 if TYPE_CHECKING:
     from torch.cuda import Stream
 
+    from ..gpuinfo import Device
     from ..task import Task
     from .thread_pool import ThreadPool
 
@@ -40,18 +41,18 @@ class ThreadWorker(Worker):
         task.future.set_running_or_notify_cancel()
         self.task_queue.put(task)
 
-    def change_device(self, device:str)->None:
+    def change_device(self, device:Device)->None:
         _set_best_device(device, self.executor.ident)
         self._set_stream(device)
 
-    def _set_stream(self, device:str):
+    def _set_stream(self, device:Device):
         if not self.active_task.use_torch:
             return
 
         if device not in self._streams:
             if device.startswith("cuda") or device.startswith("hip"):
                 from torch.cuda import Stream
-                self._streams[device] = Stream(device=device)
+                self._streams[device] = Stream(device=device.torch_device)
             else:
                 self._streams[device] = None
 

@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 
+from .device import Device
 from .resource import Resource
 
 if TYPE_CHECKING:
@@ -569,7 +570,7 @@ class Pool(ABC):
     def _sorted_idle_workers(self, exclude:Worker)->Tuple[List[Worker], int]:
         return [], 0
 
-    def _choose_task_device(self, task: Task, mode: str) -> Tuple[List[Union[GPUInfoSnapshot, str]], List]:
+    def _choose_task_device(self, task: Task, mode: str) -> Tuple[List[Device], List]:
         from .worker import Worker
 
         res = (task.cpu_mode_res if mode == "cpu" else task.gpu_mode_res)
@@ -581,8 +582,6 @@ class Pool(ABC):
             cpu_cores_needed = self._estimate_cpu_cores_needed(res)
             if cpu_cores_needed > self._sys_info.cpu_cores_free:
                 task.device = None
-                task.gpu_index = -1
-                task.dml_id = -1
                 return [], []
 
             reclaim_items = []
@@ -590,15 +589,11 @@ class Pool(ABC):
             if cpu_mem_needed > max(0, self._sys_info.cpu_mem_free):
                 if not self._reclaim_cpu_memory(task, res, mode, reclaim_items):
                     task.device = None
-                    task.gpu_index = -1
-                    task.dml_id = -1
                     return [], []
 
             if mode == "cpu":
-                task.device = "cpu"
-                task.gpu_index = -1
-                task.dml_id = -1
-                return ["cpu"], reclaim_items
+                task.device = Device()
+                return [Device()], reclaim_items
 
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             available_gpus = []
@@ -628,21 +623,15 @@ class Pool(ABC):
                         available_gpus.sort(key=lambda gpu: gpu.n_cores_free, reverse=True)
                         best_gpu = available_gpus[0]
                         task.device = best_gpu.device
-                        task.gpu_index = best_gpu.index
-                        task.dml_id = best_gpu.dml_id
-                        return available_gpus, reclaim_items
+                        return [gpu.device for gpu in available_gpus], reclaim_items
 
             task.device = None
-            task.gpu_index = -1
-            task.dml_id = -1
             return [], []
 
         available_gpus.sort(key=lambda gpu: gpu.n_cores_free, reverse=True)
         best_gpu: GPUInfoSnapshot = available_gpus[0]
         task.device = best_gpu.device
-        task.gpu_index = best_gpu.index
-        task.dml_id = best_gpu.dml_id
-        return available_gpus, reclaim_items
+        return [gpu.device for gpu in available_gpus], reclaim_items
 
     def _reclaim_cpu_memory(self, task: Task, res: Resource, mode: str, reclaim_items: List) -> bool:
         if not hasattr(task.worker, "cached_rss"):
@@ -754,8 +743,6 @@ class Pool(ABC):
             worker:Worker = task.worker
             worker.change_device(best_gpu.device)
             task.device = best_gpu.device
-            task.gpu_index = best_gpu.index
-            task.dml_id = best_gpu.dml_id
             best_gpu.n_cores_free -= gpu_res.gpu_cores
             best_gpu.mem_free -= gpu_res.gpu_mem
             self._sys_info.cpu_cores_free -= extra_cpu_cores_needed
