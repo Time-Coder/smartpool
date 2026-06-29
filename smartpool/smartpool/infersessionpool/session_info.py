@@ -16,6 +16,7 @@ class SessionInfo:
         self._session_args = args
         self._session_kwargs = kwargs
         self._session: Optional[ort.InferenceSession] = None
+        self.model_path: str = ""
         self.provider_name: str = ""
         self.provider_options: Dict[str, Any] = {}
         self.device_type: str = ""
@@ -26,8 +27,8 @@ class SessionInfo:
         self.estimated_cpu_mem: int = 0
         self.estimated_gpu_mem: int = 0
         self._lock: threading.Lock = threading.Lock()
-        self._last_use_time: float = 0
-        self._running_count: int = 0
+        self.last_use_time: float = 0
+        self.running_count: int = 0
         self._running_count_lock: threading.Lock = threading.Lock()
 
     def start(self) -> None:
@@ -38,7 +39,7 @@ class SessionInfo:
             import onnxruntime as ort
             from .infer_session_pool import InferSessionPool
 
-            model_path = self._session_args[0]
+            self.model_path = self._session_args[0]
             self._session = ort.InferenceSession(*self._session_args, **self._session_kwargs)
             self.provider_name: str = self._session.get_providers()[0]
             self.provider_options: Dict[str, Any] = self._session.get_provider_options().get(self.provider_name, {})
@@ -46,13 +47,13 @@ class SessionInfo:
             self.device_type = self._provider_device_type(self.provider_name)
             self._io_bindings = defaultdict(self._session.io_binding)
 
-            file_size = os.path.getsize(model_path)
+            file_size = os.path.getsize(self.model_path)
             cpu_mul, gpu_mul = InferSessionPool.PROVIDER_MEMORY_MULTIPLIERS.get(
                 self.provider_name, (3, 0)
             )
             self.estimated_cpu_mem = file_size * cpu_mul
             self.estimated_gpu_mem = file_size * gpu_mul
-            self._last_use_time = time.time()
+            self.last_use_time = time.time()
             self._take_session_resource()
         
     def stop(self) -> None:
@@ -74,12 +75,12 @@ class SessionInfo:
 
     def _increase_running_count(self):
         with self._running_count_lock:
-            self._last_use_time = time.time()
-            self._running_count += 1
+            self.last_use_time = time.time()
+            self.running_count += 1
 
     def _decrease_running_count(self):
         with self._running_count_lock:
-            self._running_count -= 1
+            self.running_count -= 1
 
     @property
     def session(self)->ort.InferenceSession:
@@ -106,7 +107,7 @@ class SessionInfo:
             if self.provider_name != "CPUExecutionProvider":
                 device_id_key: str = ("device_id" if self.provider_name != "DmlExecutionProvider" else "dml_id")
                 for index, gpu in enumerate(Pool._sys_info.gpu_infos):
-                    gpu_device_id: int = getattr(gpu, device_id_key)
+                    gpu_device_id: int = getattr(gpu.device, device_id_key)
                     if gpu_device_id == self.device_id:
                         gpu.mem_free -= self.estimated_gpu_mem
                         self._gpu_index = index

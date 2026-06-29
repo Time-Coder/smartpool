@@ -1,11 +1,11 @@
 from __future__ import annotations
+import copy
 from typing import TYPE_CHECKING, Tuple, Any, Dict, Optional, List, Union
 
 from ..task import Task
 
 if TYPE_CHECKING:
     from ..device import Device
-    from ..gpuinfo import GPUInfoSnapshot
     from .infer_session_pool import InferSessionPool
     from .session_info import SessionInfo
     from .model_info import ModelInfo
@@ -47,26 +47,32 @@ class InferSessionTask(Task):
             calculate_module_deps=False
         )
 
-    def can_use(self, gpu:GPUInfoSnapshot)->bool:
-        return gpu.device is not None and bool(gpu.device.ort_provider(self.user_providers))
+    @property
+    def device(self)->Device:
+        return self._device
+    
+    @device.setter
+    def device(self, device:Device)->None:
+        if device is None:
+            self._device = None
+            return
+        
+        self._device = copy.deepcopy(device)
+        self._device.select_provider(self.user_providers)
+
+    @property
+    def provider(self)->Optional[Tuple[str, Dict[str, Any]]]:
+        if self._device is None:
+            return None
+        
+        return self._device.ort_provider
+
+    def can_use(self, device: Device)->bool:
+        return bool(device.select_provider(self.user_providers))
 
     def _callback_hook(self, result: Any):
         if result.__class__.__name__ == "OrtValue":
             self.use_io_binding = True
-
-    @property
-    def provider(self)->Optional[Tuple[str, Dict]]:
-        if self.device is None:
-            return None
-
-        if self.device.torch_device == "cpu":
-            return ("CPUExecutionProvider", {})
-
-        from ..pool import Pool
-        with Pool._sys_info_lock:
-            gpuinfo_snapshot = Pool._sys_info.gpu_infos[self.device.gpu_index]
-
-        return gpuinfo_snapshot.device.ort_provider(self.user_providers)
 
     def exec(self) -> Tuple[bool, Any]:
         try:

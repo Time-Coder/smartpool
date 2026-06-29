@@ -20,6 +20,7 @@ def _init_ort_providers_cache() -> None:
         "cuda": ["TensorrtExecutionProvider", "CUDAExecutionProvider", "DmlExecutionProvider"],
         "xpu": ["OpenVINOExecutionProvider", "DnnlExecutionProvider", "DmlExecutionProvider"],
         "hip": ["ROCMExecutionProvider", "MIGraphXExecutionProvider", "DmlExecutionProvider"],
+        "cpu": ["CPUExecutionProvider"]
     }
 
     for prefix, providers in vendor_lists.items():
@@ -62,12 +63,9 @@ class Device:
 
     def _supported_ort_providers(self) -> List[str]:
         _init_ort_providers_cache()
-        return _VENDOR_ORT_PROVIDERS.get(self.device_prefix, [])
+        return _VENDOR_ORT_PROVIDERS[self.device_prefix]
 
-    def ort_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None) -> Optional[Tuple[str, Dict[str, Any]]]:
-        if providers is None and self._ort_provider is not None:
-            return self._ort_provider
-
+    def select_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None) -> Optional[Tuple[str, Dict[str, Any]]]:
         for provider_name in self._supported_ort_providers():
             options: Dict[str, Any] = {"device_id": self.device_id}
             if provider_name == "DmlExecutionProvider":
@@ -75,17 +73,16 @@ class Device:
             elif provider_name == "TensorrtExecutionProvider":
                 options["trt_engine_cache_enable"] = True
                 options["trt_engine_cache_path"] = _TRT_CACHE_PATH
+
             current_provider = (provider_name, options)
-
-            if self._ort_provider is None:
-                self._ort_provider = current_provider
-
             if providers is None:
-                return self._ort_provider
+                self._ort_provider = current_provider
+                return current_provider
 
             for provider in providers:
                 if isinstance(provider, str):
                     if provider == provider_name:
+                        self._ort_provider = current_provider
                         return current_provider
                 else:
                     user_provider_name = provider[0]
@@ -100,6 +97,13 @@ class Device:
                     else:
                         user_provider_options["device_id"] = options["device_id"]
 
-                    return (user_provider_name, user_provider_options)
+                    self._ort_provider = (user_provider_name, user_provider_options)
+                    return self._ort_provider
 
+        self._ort_provider = None
         return None
+
+    @property
+    def ort_provider(self)->Optional[Tuple[str, Dict[str, Any]]]:
+        return self._ort_provider
+    

@@ -147,7 +147,7 @@ class InferSessionPool(Pool):
 
         with self._sys_info_lock:
             for gpu_info in self._sys_info.gpu_infos:
-                if gpu_info.device is not None and gpu_info.device.ort_provider(providers):
+                if gpu_info.device.select_provider(providers):
                     return
 
         raise ValueError(f"all providers are not supported: {providers}")
@@ -319,7 +319,6 @@ class InferSessionPool(Pool):
             devices, reclaim_items = self._choose_task_device(task, mode)
             for device in devices:
                 task.device = device
-
                 if not self._choose_task_session(task) or not self._choose_task_worker(task, task.effective_res):
                     task.device = None
                 else:
@@ -331,46 +330,52 @@ class InferSessionPool(Pool):
 
         return False
 
-    def _reclaim_cpu_memory(self, task: InferSessionTask, res: Resource, mode: str, reclaim_items: List) -> bool:
-        idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
-        if not idle:
+    def _reclaim_cpu_memory(self, task: InferSessionTask, res: Resource, reclaim_items: List) -> bool:
+        idle = [(key, session) for key, session in self._sessions.items() if (session._session is not None and session.running_count == 0)]
+        if not idle or (len(idle) == 1 and idle[0][1].model_path == task.model_info.model_path):
             return False
-        idle.sort(key=lambda x: x[1]._last_use_time)
-        freed = 0
-        for key, sess in idle:
-            reclaim_items.append((key, sess))
-            freed += sess.estimated_cpu_mem
-            if res.cpu_mem <= self._sys_info.cpu_mem_free + freed:
+        
+        idle.sort(key=lambda x: x[1].last_use_time)
+        freed_cpu_mem = 0
+        for key, session in idle:
+            reclaim_items.append((key, session))
+            freed_cpu_mem += session.estimated_cpu_mem
+            if res.cpu_mem <= self._sys_info.cpu_mem_free + freed_cpu_mem:
                 break
-        if res.cpu_mem > self._sys_info.cpu_mem_free + freed:
+
+        if res.cpu_mem > self._sys_info.cpu_mem_free + freed_cpu_mem:
             return False
+        
         return True
 
-    def _reclaim_gpu_memory(self, task: InferSessionTask, res: Resource, mode: str) -> bool:
-        idle = [(k, s) for k, s in self._sessions.items() if s._running_count == 0]
-        if not idle:
+    def _reclaim_gpu_memory(self, task: InferSessionTask, res: Resource) -> bool:
+        idle = [(key, session) for key, session in self._sessions.items() if (session._session is not None and session.running_count == 0 and session.device_type != "cpu")]
+        if not idle or (len(idle) == 1 and idle[0][1].model_path == task.model_info.model_path):
             return False
-        idle.sort(key=lambda x: x[1]._last_use_time)
+        
+        idle.sort(key=lambda x: x[1].last_use_time)
 
         to_evict = []
         with self._sys_info_lock:
             freed_by_gpu = {}
-            for _, s in idle:
-                if s._gpu_index >= 0:
-                    freed_by_gpu[s._gpu_index] = freed_by_gpu.get(s._gpu_index, 0) + s.estimated_gpu_mem
+            for _, session in idle:
+                freed_by_gpu[session._gpu_index] = freed_by_gpu.get(session._gpu_index, 0) + session.estimated_gpu_mem
+            
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             for gpu in gpus:
-                extra = freed_by_gpu.get(gpu.index, 0)
+                extra = freed_by_gpu.get(gpu.device.gpu_index, 0)
                 if gpu.mem_free + extra >= res.gpu_mem and gpu.n_cores_free >= res.gpu_cores:
                     to_evict = idle[:]
                     break
 
         if to_evict:
-            for key, sess in to_evict:
+            for key, session in to_evict:
                 if key in self._sessions:
                     del self._sessions[key]
-                    sess.stop()
+                    session.stop()
+
             return True
+        
         return False
 
     def _reclaim_session_items(self, items: List) -> None:
@@ -425,8 +430,8 @@ class InferSessionPool(Pool):
             task.estimated_need_cpu_mem = res.cpu_mem
             self._sys_info.cpu_cores_free -= res.cpu_cores
             self._sys_info.cpu_mem_free -= res.cpu_mem
-            if task.device is not None and task.device.gpu_index != -1:
-                gpu_index = task.device.gpu_index
+            gpu_index = task.device.gpu_index
+            if gpu_index != -1:
                 self._sys_info.gpu_infos[gpu_index].n_cores_free -= res.gpu_cores
                 self._sys_info.gpu_infos[gpu_index].mem_free -= res.gpu_mem
 
@@ -435,11 +440,11 @@ class InferSessionPool(Pool):
             res = task.effective_res
             self._sys_info.cpu_cores_free += res.cpu_cores
             self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
-            if task.device is not None and task.device.gpu_index != -1:
-                gpu_index = task.device.gpu_index
+            gpu_index = task.device.gpu_index
+            if gpu_index != -1:
                 self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
                 self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem
-
+                
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores
 

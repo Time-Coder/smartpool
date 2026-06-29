@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import uuid
 import threading
+import copy
 from concurrent.futures import Future as _BaseFuture
 from .futures import Future
 from typing import (
@@ -61,7 +62,7 @@ class Task:
             from .module_deps import module_deps
             self.module_deps: Set[str] = module_deps(sys.modules[func.__module__])
 
-        self.device: Optional[Device] = None
+        self._device: Optional[Device] = None
         self.worker: Optional[Worker] = None
         self.mem_before_enter: int = 0
         self._future: Optional[Future] = None
@@ -82,7 +83,19 @@ class Task:
             for dep_future in self.dep_futures:
                 dep_future.add_done_callback(self._dep_future_done_callback)
 
-    def can_use(self)->bool:
+    @property
+    def device(self)->Device:
+        return self._device
+    
+    @device.setter
+    def device(self, device:Device)->None:
+        if device is None:
+            self._device = None
+            return
+        
+        self._device = copy.deepcopy(device)
+
+    def can_use(self, device: Device)->bool:
         return True
 
     def _callback_hook(self, result: Any)->None:
