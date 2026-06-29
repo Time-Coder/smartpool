@@ -131,6 +131,12 @@ class AMDGPUInfo(GPUInfo):
             except Exception:
                 cls._vram_ranges[i] = 0
 
+            try:
+                name = str(gpu.Name())
+                cls._device_info.append({'name': name})
+            except Exception:
+                cls._device_info.append({'name': 'Unknown AMD GPU'})
+
     @classmethod
     def _init_linux(cls) -> None:
         cls._device_info = []
