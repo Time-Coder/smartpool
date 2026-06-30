@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 
-class SessionInfo:
+class InferSession:
 
     def __init__(self, *args, **kwargs)->None:
         self._session_args = args

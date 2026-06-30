@@ -7,7 +7,7 @@ from ..task import Task
 if TYPE_CHECKING:
     from ..device import Device
     from .infer_session_pool import InferSessionPool
-    from .session_info import SessionInfo
+    from .infer_session import InferSession
     from .model_info import ModelInfo
     from ..resource import Resource
 
@@ -32,7 +32,7 @@ class InferSessionTask(Task):
         self.user_providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = user_providers
         self.run_options: Optional[ort.RunOptions] = run_options
         self.output_names: Optional[List[str]] = output_names
-        self.session_info: Optional[SessionInfo] = None
+        self.session: Optional[InferSession] = None
         self.use_io_binding: bool = use_io_binding
         self.copy_outputs_to_cpu: bool = copy_outputs_to_cpu
         Task.__init__(
@@ -76,7 +76,7 @@ class InferSessionTask(Task):
 
     def exec(self) -> Tuple[bool, Any]:
         try:
-            result = self.session_info.run_with_iobinding(self.output_names, self.kwargs, self.run_options, self.copy_outputs_to_cpu)
+            result = self.session.run_with_iobinding(self.output_names, self.kwargs, self.run_options, self.copy_outputs_to_cpu)
             success = True
         except Exception as e:
             result = e
@@ -86,7 +86,7 @@ class InferSessionTask(Task):
     
     def run_async(self) -> None:
         try:
-            self.session_info.run_async(self.output_names, input_feed=self.kwargs, callback=self.callback, user_data=None, run_options=self.run_options)
+            self.session.run_async(self.output_names, input_feed=self.kwargs, callback=self.callback, user_data=None, run_options=self.run_options)
         except Exception as e:
             self.is_working = False
             infer_session_pool: InferSessionPool = self.pool

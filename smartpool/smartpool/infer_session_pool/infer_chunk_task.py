@@ -194,8 +194,8 @@ class InferChunkTask(InferSessionTask):
                         import onnxruntime as ort
                         outputs.append(ort.OrtValue.ortvalue_from_numpy(
                             slice_np,
-                            device_type=self.session_info.device_type,
-                            device_id=self.session_info.device_id
+                            device_type=self.session.device_type,
+                            device_id=self.session.device_id
                         ))
 
                 if not task.future.done():

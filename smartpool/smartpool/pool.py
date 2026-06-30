@@ -36,7 +36,7 @@ class Pool(ABC):
 
     _sys_info_lock: Optional[threading.Lock] = None
     _sys_info: Optional[SysInfo] = None
-    _updating_sysinfo_thread: Optional[threading.Thread] = None
+    _housekeeping_thread: Optional[threading.Thread] = None
     _instances: weakref.WeakSet[Pool] = weakref.WeakSet()
     _instance_config: Dict[Type[Pool], Dict[str, Tuple[Tuple[Any, ...], Dict[str, Any]]]] = defaultdict(dict)
     _instance_dict: Dict[Type[Pool], Dict[str, Pool]] = defaultdict(dict)
@@ -374,11 +374,11 @@ class Pool(ABC):
 
         Pool._sys_info = SysInfo()
         Pool._sys_info_lock = threading.Lock()
-        Pool._updating_sysinfo_thread = threading.Thread(target=Pool._updating_sysinfo, daemon=True)
-        Pool._updating_sysinfo_thread.start()
+        Pool._housekeeping_thread = threading.Thread(target=Pool._housekeeping, daemon=True)
+        Pool._housekeeping_thread.start()
 
     @staticmethod
-    def _updating_sysinfo()->None:
+    def _housekeeping()->None:
         from .worker import Worker
 
         while True:

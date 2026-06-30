@@ -7,13 +7,13 @@ from .amd_gpuinfo import AMDGPUInfo
 from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .device import Device
 from .gpuinfos import GPUInfos
-from .infersessionpool import InferSessionPool, ModelInfo
+from .infer_session_pool import InferSessionPool, ModelInfo
 from .intel_gpuinfo import IntelGPUInfo
-from .interpreterpool import InterpreterPool
+from .interpreter_pool import InterpreterPool
 from .nvidia_gpuinfo import NvidiaGPUInfo
-from .processpool import ProcessPool
+from .process_pool import ProcessPool
 from .resource import DataSize, Resource
-from .threadpool import ThreadPool
+from .thread_pool import ThreadPool
 from .utils import best_device, best_stream, limit_num_single_thread, move_optimizer_to, TRT_CACHE_PATH
 
 

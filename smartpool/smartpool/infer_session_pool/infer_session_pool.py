@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..worker import Worker
     from .infer_session_task import InferSessionTask
     from .model_info import ModelInfo
-    from .session_info import SessionInfo
+    from .infer_session import InferSession
 
 
 class InferSessionPool(Pool):
@@ -62,7 +62,7 @@ class InferSessionPool(Pool):
         )
         self._thread_name_prefix: str = thread_name_prefix
         self._session_options: Optional[ort.SessionOptions] = session_options
-        self._sessions: Dict[Tuple[str, str, str], SessionInfo] = {}
+        self._sessions: Dict[Tuple[str, str, str], InferSession] = {}
         self.print_info: bool = False
 
     @staticmethod
@@ -95,12 +95,12 @@ class InferSessionPool(Pool):
             json.dumps(provider[1], sort_keys=True, separators=(', ', ':'))
         )
 
-    def _session_info(self, model_path:str, provider: Tuple[str, Dict[str, Any]])->SessionInfo:
+    def _infer_session(self, model_path:str, provider: Tuple[str, Dict[str, Any]])->InferSession:
         key = self._provider_key(model_path, provider)
         if key not in self._sessions:
-            from .session_info import SessionInfo
-            session_info = SessionInfo(model_path, self.session_options, providers=[provider], enable_fallback=False)
-            self._sessions[key] = session_info
+            from .infer_session import InferSession
+            session = InferSession(model_path, self.session_options, providers=[provider], enable_fallback=False)
+            self._sessions[key] = session
 
         return self._sessions[key]
 
@@ -325,7 +325,7 @@ class InferSessionPool(Pool):
                 else:
                     break
 
-            if task.device is not None and task.session_info is not None and task.worker is not None:
+            if task.device is not None and task.session is not None and task.worker is not None:
                 self._reclaim_session_items(reclaim_items)
                 return True
 
@@ -387,14 +387,14 @@ class InferSessionPool(Pool):
                     del self._sessions[key]
                     sess.stop()
 
-    def _choose_task_session(self, task: InferSessionTask) -> Optional[SessionInfo]:
+    def _choose_task_session(self, task: InferSessionTask) -> Optional[InferSession]:
         provider: Tuple[str, Dict[str, Any]] = task.provider
         if not self._can_use_provider(provider):
-            task.session_info = None
+            task.session = None
             return None
 
-        task.session_info = self._session_info(task.model_info.model_path, provider)
-        return task.session_info
+        task.session = self._infer_session(task.model_info.model_path, provider)
+        return task.session
 
     def _choose_task_worker(self, task: InferSessionTask, res: Resource) -> Optional[Worker]:
         for worker in self._workers:

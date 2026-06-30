@@ -36,7 +36,7 @@ class InferSessionWorker(Worker):
         infer_session_pool: InferSessionPool = self.infer_session_pool
 
         if infer_session_pool.print_info:
-            print("infer with provider", task.provider, "in session", id(task.session_info.session))
+            print("infer with provider", task.provider, "in session", id(task.session.session))
 
         infer_session_pool._add_provider_running_device(task.provider)
         task.future.set_running_or_notify_cancel()
