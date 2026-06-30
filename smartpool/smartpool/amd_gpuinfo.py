@@ -23,12 +23,6 @@ class AMDGPUInfo(GPUInfo):
     _device_info: List[Dict] = []
     _wsl_fallback: bool = False
 
-    _supported_ort_providers: List[str] = [
-        "ROCMExecutionProvider",
-        "MIGraphXExecutionProvider",
-        "DmlExecutionProvider"
-    ]
-
     # GPU model name -> Shader Processor (Stream Processor) count lookup table
     _GPU_NAME_TO_CU_COUNT: Dict[str, int] = {
         # RDNA 3 (Desktop)

@@ -96,7 +96,20 @@ class Task:
         self._device = copy.deepcopy(device)
 
     def can_use(self, device: Device)->bool:
-        return True
+        if not self.use_torch:
+            return True
+
+        if Task._torch_gpu_backend is None:
+            import torch
+            if torch.cuda.is_available():
+                Task._torch_gpu_backend = "cuda"
+
+            if getattr(torch, "hip", None) and torch.hip.is_available():
+                Task._torch_gpu_backend = "hip"
+            elif getattr(torch, "xpu", None) and torch.xpu.is_available():
+                Task._torch_gpu_backend = "xpu"
+
+        return device.startswith(Task._torch_gpu_backend)
 
     def _callback_hook(self, result: Any)->None:
         pass
@@ -158,17 +171,4 @@ class Task:
         return success, result
 
     def filter_gpu_infos(self, gpu_infos: List[GPUInfoSnapshot]) -> Iterable[GPUInfoSnapshot]:
-        if not self.use_torch or not gpu_infos:
-            return gpu_infos
-
-        if Task._torch_gpu_backend is None:
-            import torch
-            if torch.cuda.is_available():
-                Task._torch_gpu_backend = "cuda"
-
-            if getattr(torch, "hip", None) and torch.hip.is_available():
-                Task._torch_gpu_backend = "hip"
-            elif getattr(torch, "xpu", None) and torch.xpu.is_available():
-                Task._torch_gpu_backend = "xpu"
-
-        return filter(lambda gpu: gpu.device.startswith(Task._torch_gpu_backend), gpu_infos)
+        return filter(lambda gpu: self.can_use(gpu.device), gpu_infos)

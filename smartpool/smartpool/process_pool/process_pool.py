@@ -94,20 +94,6 @@ class ProcessPool(Pool):
                 self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
                 self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem
 
-    def _estimate_cpu_cores_needed(self, res: Resource) -> float:
-        return res.cpu_cores
-
-    def _sorted_idle_workers(self, exclude: ProcessWorker) -> Tuple[List[ProcessWorker], int]:
-        workers:List[ProcessWorker] = []
-        total_hold_mem:int = 0
-        for worker in self._workers:
-            if not worker.is_working and worker is not exclude and worker.cached_rss > 0:
-                workers.append(worker)
-                total_hold_mem += worker.cached_rss
-
-        workers.sort(key=lambda worker: worker.cached_rss, reverse=True)
-        return workers, total_hold_mem
-
     def _put_task(self, task:Task)->None:
         self._take_resource(task)
         worker:ProcessWorker = task.worker

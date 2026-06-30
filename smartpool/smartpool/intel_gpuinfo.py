@@ -14,12 +14,6 @@ class IntelGPUInfo(GPUInfo):
     _initialized = False
     _device_info: List[Dict] = []
 
-    _supported_ort_providers: List[str] = [
-        "OpenVINOExecutionProvider",
-        "DnnlExecutionProvider",
-        "DmlExecutionProvider"
-    ]
-
     # GPU model name -> Shader Processor count lookup table
     # Arc Desktop: Shading Units directly
     # Integrated: EU count × 8 ALUs per EU

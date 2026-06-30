@@ -61,12 +61,13 @@ class Device:
     def startswith(self, prefix: str) -> bool:
         return self.torch_device.startswith(prefix)
 
-    def _supported_ort_providers(self) -> List[str]:
+    @property
+    def supported_ort_providers(self) -> List[str]:
         _init_ort_providers_cache()
         return _VENDOR_ORT_PROVIDERS[self.device_prefix]
 
     def select_provider(self, providers: Optional[List[Union[str, Tuple[str, Dict[str, Any]]]]] = None) -> Optional[Tuple[str, Dict[str, Any]]]:
-        for provider_name in self._supported_ort_providers():
+        for provider_name in self.supported_ort_providers:
             options: Dict[str, Any] = {"device_id": self.device_id}
             if provider_name == "DmlExecutionProvider":
                 options["device_id"] = self.dml_id

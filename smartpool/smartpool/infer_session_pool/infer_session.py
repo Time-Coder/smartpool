@@ -8,17 +8,19 @@ import os
 if TYPE_CHECKING:
     import onnxruntime as ort
     import numpy as np
+    from ..device import Device
 
 
 class InferSession:
 
-    def __init__(self, *args, **kwargs)->None:
+    def __init__(self, model_path, *args, device: Device, **kwargs)->None:
         self._session_args = args
         self._session_kwargs = kwargs
         self._session: Optional[ort.InferenceSession] = None
-        self.model_path: str = ""
+        self.model_path: str = model_path
         self.provider_name: str = ""
         self.provider_options: Dict[str, Any] = {}
+        self.device: Device = device
         self.device_type: str = ""
         self.device_id: int = 0
         self._gpu_index: int = -1
@@ -39,18 +41,16 @@ class InferSession:
             import onnxruntime as ort
             from .infer_session_pool import InferSessionPool
 
-            self.model_path = self._session_args[0]
             self._session = ort.InferenceSession(*self._session_args, **self._session_kwargs)
             self.provider_name: str = self._session.get_providers()[0]
             self.provider_options: Dict[str, Any] = self._session.get_provider_options().get(self.provider_name, {})
             self.device_id = self.provider_options.get("device_id", 0)
             self.device_type = self._provider_device_type(self.provider_name)
             self._io_bindings = defaultdict(self._session.io_binding)
-
-            file_size = os.path.getsize(self.model_path)
             cpu_mul, gpu_mul = InferSessionPool.PROVIDER_MEMORY_MULTIPLIERS.get(
                 self.provider_name, (3, 0)
             )
+            file_size = os.path.getsize(self.model_path)
             self.estimated_cpu_mem = file_size * cpu_mul
             self.estimated_gpu_mem = file_size * gpu_mul
             self.last_use_time = time.time()

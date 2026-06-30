@@ -116,7 +116,7 @@ class Worker(ABC):
     def start(self):
         pass
 
-    def stop(self, wait:bool=True, clear:bool=False)->None:
+    def stop(self, wait:bool=False, clear:bool=True)->None:
         if self.executor is None:
             return
 
@@ -124,6 +124,7 @@ class Worker(ABC):
         self.task_queue.put(None)
         if wait:
             self.join()
+            
         elif clear:
             self._clear()
 
