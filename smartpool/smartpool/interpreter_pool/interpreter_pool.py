@@ -6,7 +6,6 @@ from ..pool import Pool
 
 if TYPE_CHECKING:
 
-    from ..resource import Resource
     from ..task import Task
     from .interpreter_worker import InterpreterWorker
 
@@ -24,7 +23,7 @@ class InterpreterPool(Pool):
         use_torch:bool=False
     ):
         import concurrent.interpreters as interpreters
-        
+
         from .interpreter_worker import InterpreterWorker
 
         if max_workers <= 0:

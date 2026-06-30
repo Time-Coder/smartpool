@@ -9,16 +9,15 @@ from ..pool import Pool
 from .infer_session_worker import InferSessionWorker
 
 if TYPE_CHECKING:
-    from ..futures import Future
-
     import onnxruntime as ort
 
+    from ..futures import Future
+    from ..gpuinfo import GPUInfoSnapshot
     from ..resource import Resource
     from ..worker import Worker
-    from ..gpuinfo import GPUInfoSnapshot
+    from .infer_session import InferSession
     from .infer_session_task import InferSessionTask
     from .model_info import ModelInfo
-    from .infer_session import InferSession
 
 
 class InferSessionPool(Pool):
@@ -54,7 +53,7 @@ class InferSessionPool(Pool):
         if max_workers <= 0:
             import os
             max_workers = os.cpu_count()
-            
+
         Pool.__init__(
             self, max_workers=max_workers,
             initializer=None, initargs=(), initkwargs=None,
@@ -161,13 +160,13 @@ class InferSessionPool(Pool):
     ) -> Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
-        
+
         from ..resource import Resource
         from .infer_session_task import InferSessionTask
-        
+
         model_info: ModelInfo = self.model_info(model_path)
         merged_kwargs, has_ortvalue = model_info.merge_args(args, kwargs, check_args)
-        
+
         if check_args:
             model_info.check_outputs(output_names)
             self._check_providers(providers)
@@ -178,15 +177,14 @@ class InferSessionPool(Pool):
         if gpu_mode_res is None:
             gpu_mode_res = cpu_mode_res
 
-        if not use_io_binding:
-            if not copy_outputs_to_cpu or has_ortvalue:
-                use_io_binding = True
+        if not copy_outputs_to_cpu or has_ortvalue:
+            use_io_binding = True
 
         if chunksize > 1 and not model_info.support_batch_input:
             chunksize = 1
 
             import warnings
-            warnings.warn(f"model {model_info.model_name} not support batch input, reset chunksize to 1")
+            warnings.warn(f"model {model_info.model_name} not support batch input, reset chunksize to 1", stacklevel=1)
 
         task = InferSessionTask(
             infer_session_pool=self, model_info=model_info, kwargs=merged_kwargs,
@@ -254,9 +252,10 @@ class InferSessionPool(Pool):
         return Pool._result_iterator(futures, end_time)
 
     def _put_in_chunk(self, task: InferSessionTask) -> Future:
-        from .infer_chunk_task import InferChunkTask
         import threading
         from queue import Queue
+
+        from .infer_chunk_task import InferChunkTask
 
         if self._flush_chunk_thread is None:
             self._flush_chunk_queue = Queue()
@@ -278,7 +277,7 @@ class InferSessionPool(Pool):
             self._flush_chunk_queue.put(chunk_task)
         else:
             chunk_task: InferChunkTask = self._chunk_tasks[key]
-            
+
         chunk_task.add_task(task)
 
         return task.future
@@ -291,7 +290,7 @@ class InferSessionPool(Pool):
         modes = []
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             modes.append("gpu")
-            
+
         modes.append("cpu")
 
         for mode in modes:
@@ -344,7 +343,7 @@ class InferSessionPool(Pool):
         idle_sessions = [session for session in self._sessions.values() if (session._session is not None and session.running_count == 0)]
         if not idle_sessions or (len(idle_sessions) == 1 and idle_sessions[0].model_path == task.model_info.model_path):
             return []
-        
+
         idle_sessions.sort(key=lambda x: x.last_use_time)
         to_evict = []
         freed_cpu_mem = 0
@@ -357,14 +356,14 @@ class InferSessionPool(Pool):
 
         if res.cpu_mem > self._sys_info.cpu_mem_free + freed_cpu_mem:
             return []
-        
+
         return to_evict
 
     def _reclaim_gpu_memory(self, task: InferSessionTask, res: Resource, gpu: GPUInfoSnapshot, reclaim_items: List[InferSession]) -> List[InferSession]:
         idle_sessions = [session for session in self._sessions.values() if (session._session is not None and session.running_count == 0 and session not in reclaim_items and session.device == gpu.device)]
         if not idle_sessions or (len(idle_sessions) == 1 and idle_sessions[0].model_path == task.model_info.model_path):
             return []
-        
+
         idle_sessions.sort(key=lambda x: x.last_use_time)
         to_evict = []
         freed_gpu_mem = 0
@@ -377,7 +376,7 @@ class InferSessionPool(Pool):
 
         if res.gpu_mem > gpu.mem_free + freed_gpu_mem:
             return []
-        
+
         return to_evict
 
     def _choose_task_session(self, task: InferSessionTask) -> Optional[InferSession]:

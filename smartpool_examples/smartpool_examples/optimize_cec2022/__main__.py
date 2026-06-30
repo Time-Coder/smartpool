@@ -52,7 +52,7 @@ def main(
     from config import ALGORITHMS, N_RUNS
     from functions import FUNC_CLASSES
     from progress_info import ProgressInfo
-    from visualization import print_results_table, plot_convergence
+    from visualization import plot_convergence, print_results_table
 
     n_funcs = len(FUNC_CLASSES)
     n_algos = len(ALGORITHMS)

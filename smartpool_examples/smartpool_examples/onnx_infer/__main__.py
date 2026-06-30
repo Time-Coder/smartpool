@@ -5,8 +5,9 @@ if __name__ == "__main__":
     target_folder = os.path.abspath(self_folder + "/../../../smartpool").replace("\\", "/")
     sys.path.append(target_folder)
 
-import typer
 from enum import Enum
+
+import typer
 
 app = typer.Typer(help="Use different methods to do YOLOv8n ONNX inference on COCO val2017 with real-time progress.")
 
@@ -37,8 +38,8 @@ def main(
         print("ONNX Runtime is not installed. Follow https://onnxruntime.ai/docs/install/ instructions to install ONNX Runtime.")
         return
 
-    import time
     import glob
+    import time
 
     sys.path.append(self_folder)
 
@@ -66,7 +67,9 @@ def main(
             from infer_sequentially import infer_sequentially
             infer_sequentially(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
         elif method == Method.Ultralytics:
-            from infer_sequentially_with_ultralytics import infer_sequentially_with_ultralytics
+            from infer_sequentially_with_ultralytics import (
+                infer_sequentially_with_ultralytics,
+            )
             infer_sequentially_with_ultralytics(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
         elif method == Method.Ray:
             from infer_with_ray import infer_with_ray

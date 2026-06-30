@@ -5,7 +5,6 @@ import re
 import subprocess
 import threading
 import uuid
-import warnings
 from typing import Dict, List, Optional, Tuple
 
 from .gpuinfo import GPUInfo, GPUVendor
@@ -156,8 +155,8 @@ class AMDGPUInfo(GPUInfo):
     @classmethod
     def _init_wsl_fallback(cls) -> None:
         try:
-            import subprocess
             import json
+            import subprocess
             result = subprocess.run(
                 ['powershell.exe', '-Command',
                  'Get-WmiObject Win32_VideoController | Select-Object Name, AdapterRAM, PNPDeviceID | ConvertTo-Json'],

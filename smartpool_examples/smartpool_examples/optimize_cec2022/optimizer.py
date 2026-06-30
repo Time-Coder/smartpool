@@ -2,12 +2,10 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-import numpy as np
-from mealpy import DE, PSO, FloatVar
-from mealpy.utils.problem import Problem
-
 from config import DIM, MAX_ITER, POP_SIZE
 from functions import FUNC_CLASSES, FUNC_NAMES
+from mealpy import DE, PSO, FloatVar
+from mealpy.utils.problem import Problem
 
 
 @dataclass

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
+
 import psutil
 
 from ..worker import Worker
 
 if TYPE_CHECKING:
     import multiprocessing as mp
+
     from .process_pool import ProcessPool
 
 
@@ -111,5 +113,5 @@ class ProcessWorker(Worker):
     def join(self)->None:
         if self.executor is not None and self.executor._popen is not None:
             self.executor.join()
-            
+
         self._clear()

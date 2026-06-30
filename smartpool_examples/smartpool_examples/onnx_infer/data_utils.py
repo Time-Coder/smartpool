@@ -1,5 +1,5 @@
-import os
 import glob
+import os
 import shutil
 
 from config import DATASET_FOLDER, MODEL_FOLDER, MODEL_PATH
@@ -47,14 +47,14 @@ def download_model():
 
     if not os.path.isdir(MODEL_FOLDER):
         os.makedirs(MODEL_FOLDER)
-    
+
     print("[DOWNLOAD] YOLOv8n via ultralytics...")
     from ultralytics import YOLO
     model = YOLO(MODEL_FOLDER + "/yolov8n.pt")
     exported_path = model.export(format="onnx", dynamic=True)
-    
+
     exported_path = exported_path.replace("\\", "/")
     if os.path.normpath(exported_path) != os.path.normpath(MODEL_PATH):
         shutil.copy2(exported_path, MODEL_PATH)
-    
+
     print(f"[DONE] Model ready at {MODEL_PATH}")

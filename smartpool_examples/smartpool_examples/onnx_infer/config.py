@@ -1,6 +1,5 @@
 import os
 
-
 self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
 DATA_FOLDER = self_folder + "/data"
 MODEL_FOLDER = DATA_FOLDER + "/models"

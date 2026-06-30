@@ -1,8 +1,7 @@
 from typing import Dict, Set
 
+from optimizer import ErrorInfo
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
-
-from optimizer import ErrorInfo, ProgressInfo as RunProgress, OptimizationResult
 
 
 class ProgressInfo:

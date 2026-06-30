@@ -1,9 +1,9 @@
 from collections import defaultdict
 
-from smartpool import DataSize, ProcessPool, Resource
-
 from optimizer import optimize_single
 from progress_info import ProgressInfo
+
+from smartpool import DataSize, ProcessPool, Resource
 
 
 def optimize_with_smartpool(task_templates, max_workers, pool_type, progress_info: ProgressInfo):

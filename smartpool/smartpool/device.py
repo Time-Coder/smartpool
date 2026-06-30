@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-
 _VENDOR_ORT_PROVIDERS: Dict[str, List[str]] = {}
 _TRT_CACHE_PATH: Optional[str] = None
 
@@ -107,4 +106,3 @@ class Device:
     @property
     def ort_provider(self)->Optional[Tuple[str, Dict[str, Any]]]:
         return self._ort_provider
-    

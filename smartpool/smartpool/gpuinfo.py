@@ -4,6 +4,7 @@ import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Type
+
 from .device import Device
 
 

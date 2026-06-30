@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Union, Type
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Type, Union
 
 if TYPE_CHECKING:
     import multiprocessing as mp
@@ -51,7 +51,7 @@ class Worker(ABC):
 
             if self.task_queue_kwargs is None:
                 self.task_queue_kwargs = {}
-                
+
             self._task_queue: Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]] = self.task_queue_cls(*self.task_queue_args, **self.task_queue_kwargs)
 
         return self._task_queue
@@ -124,7 +124,7 @@ class Worker(ABC):
         self.task_queue.put(None)
         if wait:
             self.join()
-            
+
         elif clear:
             self._clear()
 

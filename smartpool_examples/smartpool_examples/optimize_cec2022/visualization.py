@@ -29,8 +29,7 @@ def print_results_table(results):
 
 
 def plot_convergence(results):
-    n_funcs = len(results)
-    fig, axes = plt.subplots(3, 4, figsize=(16, 10))
+    _, axes = plt.subplots(3, 4, figsize=(16, 10))
     axes = axes.flatten()
 
     colors = {"DE": "#1f77b4", "PSO": "#ff7f0e"}

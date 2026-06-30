@@ -1,10 +1,10 @@
 from collections import defaultdict
 
-import torch
 import ray
-from smartpool import DataSize
-
+import torch
 from progress_info import ProgressInfo
+
+from smartpool import DataSize
 
 
 @ray.remote(num_cpus=1, memory=1.1 * DataSize.GB)
@@ -25,7 +25,7 @@ def train_with_ray(task_templates, max_workers, progress_info: ProgressInfo):
     tasks = [(*t, progress_queue) for t in task_templates]
 
     futures = {}
-    for i, task_args in enumerate(tasks):
+    for task_args in tasks:
         fold_idx, model_class = task_args[0], task_args[1]
         fut = train_fold_task.options(
             num_gpus=0.2 if has_gpu else 0
@@ -36,7 +36,7 @@ def train_with_ray(task_templates, max_workers, progress_info: ProgressInfo):
     progress_info.track(progress_queue)
 
     model_results = defaultdict(list)
-    for task_key, future in futures.items():
+    for future in futures.values():
         result = ray.get(future)
         model_results[result.model_name].append(result.val_accuracy)
 

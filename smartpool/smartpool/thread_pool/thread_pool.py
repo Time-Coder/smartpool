@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from ..pool import Pool
 
 if TYPE_CHECKING:
+    from ..futures import Future
     from ..resource import Resource
     from ..task import Task
-    from ..futures import Future
     from .thread_worker import ThreadWorker
 
 
@@ -56,7 +66,7 @@ class ThreadPool(Pool):
         check_args:bool=True,
         use_torch:Optional[bool]=None,
         device_changeable:bool=False
-    )->'Future':
+    )->Future:
         return super().submit(
             func, args=args, kwargs=kwargs,
             cpu_mode_res=cpu_mode_res, gpu_mode_res=gpu_mode_res,
@@ -67,8 +77,8 @@ class ThreadPool(Pool):
     def map(
         self, func:Callable[..., Any],
         *iterable:Iterable[Any],
-        cpu_mode_res:Optional[Union['Resource', Iterable['Resource']]] = None,
-        gpu_mode_res:Optional[Union['Resource', Iterable['Resource']]] = None,
+        cpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
+        gpu_mode_res:Optional[Union[Resource, Iterable[Resource]]] = None,
         timeout:Optional[Union[float, int]]=None
     )->Iterable[Any]:
         import itertools
@@ -91,7 +101,7 @@ class ThreadPool(Pool):
         if timeout is not None:
             end_time = timeout + time.monotonic()
 
-        futures:List['Future'] = []
+        futures:List[Future] = []
         for args, cpu_res, gpu_res in zip(zip(*iterable), cpu_mode_res, gpu_mode_res):
             future = super().submit(
                 func, args=args,

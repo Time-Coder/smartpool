@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 
 from ..pool import Pool
 
 if TYPE_CHECKING:
-    from ..resource import Resource
     from ..task import Task
     from .process_worker import ProcessWorker
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import weakref
-from collections import defaultdict
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -21,16 +21,16 @@ from .resource import Resource
 
 if TYPE_CHECKING:
     import threading
-    
+
+    from .chunk_task import ChunkTask
     from .futures import Future
     from .gpuinfo import GPUInfoSnapshot
+    from .infer_session_pool.infer_session import InferSession
     from .sysinfo import SysInfo
     from .task import Task
-    from .chunk_task import ChunkTask
     from .utils import QueueLike
     from .worker import Worker
-    from .infer_session_pool.infer_session import InferSession
-    
+
 class Pool(ABC):
 
     _sys_info_lock: Optional[threading.Lock] = None
@@ -113,7 +113,7 @@ class Pool(ABC):
     )->Future:
         if self._shutdown:
             raise RuntimeError("cannot submit after shutdown")
-        
+
         if args is None:
             args = []
 
@@ -156,7 +156,7 @@ class Pool(ABC):
     @property
     def chunk_timeout(self)->float:
         return self._chunk_timeout
-    
+
     @chunk_timeout.setter
     def chunk_timeout(self, timeout:float)->None:
         self._chunk_timeout = timeout
@@ -187,9 +187,10 @@ class Pool(ABC):
             chunk_task.submit()
 
     def _put_in_chunk(self, task: Task) -> Future:
-        from .chunk_task import ChunkTask
         import threading
         from queue import Queue
+
+        from .chunk_task import ChunkTask
 
         key = (task.func, task.chunksize)
         if self._flush_chunk_thread is None:
@@ -203,14 +204,14 @@ class Pool(ABC):
             self._flush_chunk_queue.put(chunk_task)
         else:
             chunk_task: ChunkTask = self._chunk_tasks[key]
-            
+
         chunk_task.add_task(task)
 
         return task.future
 
     def _submit(self, task: Task) -> Future:
         assert task.ready_to_run
-        
+
         self._tasks[task.id] = task
 
         if task.id in self._not_ready_tasks:
@@ -222,12 +223,12 @@ class Pool(ABC):
 
             if task.id in self._delayed_tasks:
                 del self._delayed_tasks[task.id]
-                
+
             return task.future
-        
+
         if task.worker is not None:
             return task.future
-        
+
         if not self._try_assign_task(task):
             self._delayed_tasks[task.id] = task
             return task.future
@@ -251,7 +252,7 @@ class Pool(ABC):
 
             if task.id in self._not_ready_tasks:
                 del self._not_ready_tasks[task.id]
-            
+
             if task.chunksize <= 1:
                 return self._submit(task)
             else:
@@ -280,15 +281,16 @@ class Pool(ABC):
 
         def decorator(func):
             import functools
+
             from .task_wrapper import TaskWrapper
 
             wrapper = functools.wraps(func)(TaskWrapper(cls, func, pool_name, submit_kwargs))
-            
+
             return wrapper
-        
+
         if func is not None:
             return decorator(func)
-        
+
         return decorator
 
     def _check_args(self, func:Optional[Callable[..., Any]], args:Tuple[Any], kwargs:Dict[str, Any]) -> None:
@@ -307,7 +309,7 @@ class Pool(ABC):
     def _try_assign_task(self, task: Task) -> bool:
         if self._workers_working_count >= self._max_workers:
             return False
-        
+
         gpu_res = task.gpu_mode_res
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             self._choose_task_worker(task, gpu_res)
@@ -341,7 +343,7 @@ class Pool(ABC):
                         idle_item.stop()
 
                     break
-                    
+
                 return True
 
         task.worker = None
@@ -615,7 +617,7 @@ class Pool(ABC):
             if mode == "cpu":
                 task.device = Device("cpu")
                 return [task.device], cpu_to_evict, []
-            
+
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             available_gpus: List[GPUInfoSnapshot] = []
             for gpu in gpus:
@@ -654,11 +656,11 @@ class Pool(ABC):
     def _reclaim_cpu_memory(self, task: Task, res: Resource) -> List:
         if not hasattr(task.worker, "cached_rss"):
             return []
-        
+
         idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
         if res.cpu_mem > self._sys_info.cpu_mem_free + total_hold_mem:
             return []
-        
+
         to_evict = []
         cpu_mem_needed = res.cpu_mem
         freed_cpu_mem = 0
@@ -667,9 +669,9 @@ class Pool(ABC):
             freed_cpu_mem += idle_worker.memory
             if cpu_mem_needed <= max(0, self._sys_info.cpu_mem_free) + freed_cpu_mem:
                 break
-        
+
         return to_evict
-    
+
     def _reclaim_gpu_memory(self, task: Task, res: Resource, gpu: GPUInfoSnapshot, reclaim_items: List)->List:
         return []
 

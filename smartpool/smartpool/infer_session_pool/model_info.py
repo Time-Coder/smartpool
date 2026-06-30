@@ -6,8 +6,8 @@ from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
-    import onnx
     import numpy as np
+    import onnx
 
 
 class NodeInfo:
@@ -74,7 +74,7 @@ class ModelInfo:
     def signature(self)->inspect.Signature:
         self.load()
         return self._signature
-    
+
     @property
     def support_batch_input(self)->bool:
         self.load()
@@ -163,7 +163,7 @@ class ModelInfo:
 
         if cls_name == "OrtValue":
             return tuple(value.shape())
-        
+
         if cls_name == "Tensor":
             return tuple(value.shape)
 

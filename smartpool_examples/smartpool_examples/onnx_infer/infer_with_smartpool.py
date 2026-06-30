@@ -1,11 +1,11 @@
-from typing import List
 import os
 from concurrent.futures import as_completed
+from typing import List
 
+from inference import postprocess, preprocess
 from progress_info import ProgressInfo
-from inference import preprocess, postprocess
 
-from smartpool import InferSessionPool, ThreadPool, Resource, DataSize
+from smartpool import DataSize, InferSessionPool, Resource, ThreadPool
 
 preprocess = ThreadPool.task(
     pool_name="pre_post",
@@ -62,7 +62,7 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         postprocess_future.add_start_callback(progress_info.start_one_postprocess)
         postprocess_future.add_done_callback(progress_info.finish_one_postprocess)
         # postprocess_future.result()
-        
+
         futures.append(postprocess_future)
 
     for future in as_completed(futures):

@@ -2,10 +2,10 @@ from collections import defaultdict
 
 import ray
 import ray.util.queue
-from smartpool import DataSize
-
 from optimizer import optimize_single
 from progress_info import ProgressInfo
+
+from smartpool import DataSize
 
 
 def optimize_with_ray(task_templates, max_workers, progress_info: ProgressInfo):

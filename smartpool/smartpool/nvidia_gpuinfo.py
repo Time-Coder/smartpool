@@ -1,6 +1,6 @@
 import threading
 import uuid
-from typing import List, Optional
+from typing import Optional
 
 import pynvml
 

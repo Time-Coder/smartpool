@@ -1,6 +1,8 @@
 from __future__ import annotations
-import psutil
+
 from typing import TYPE_CHECKING, List, Optional
+
+import psutil
 
 if TYPE_CHECKING:
     from .gpuinfo import GPUInfoSnapshot

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import sys
-import uuid
-import threading
 import copy
+import sys
+import threading
+import uuid
 from concurrent.futures import Future as _BaseFuture
-from .futures import Future
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -14,16 +13,18 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Set,
     Tuple,
     Union,
-    Set
 )
+
+from .futures import Future
 
 if TYPE_CHECKING:
     from .gpuinfo import Device, GPUInfoSnapshot
+    from .pool import Pool
     from .resource import Resource
     from .worker import Worker
-    from .pool import Pool
 
 
 class Task:
@@ -86,13 +87,13 @@ class Task:
     @property
     def device(self)->Device:
         return self._device
-    
+
     @device.setter
     def device(self, device:Device)->None:
         if device is None:
             self._device = None
             return
-        
+
         self._device = copy.deepcopy(device)
 
     def can_use(self, device: Device)->bool:

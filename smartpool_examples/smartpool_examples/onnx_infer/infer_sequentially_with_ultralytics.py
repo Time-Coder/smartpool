@@ -1,9 +1,9 @@
-from typing import List
 import os
-import cv2
-from ultralytics import YOLO
+from typing import List
 
+import cv2
 from progress_info import ProgressInfo
+from ultralytics import YOLO
 
 
 def infer_sequentially_with_ultralytics(model_path: str, image_paths: List[str], output_dir: str, progress_info: ProgressInfo):

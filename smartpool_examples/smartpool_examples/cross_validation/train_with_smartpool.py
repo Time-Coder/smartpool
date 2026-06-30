@@ -1,9 +1,9 @@
 from collections import defaultdict
 
-from smartpool import DataSize, ProcessPool, Resource, ThreadPool
-
 from model_utils import train_single_fold
 from progress_info import ProgressInfo
+
+from smartpool import DataSize, ProcessPool, Resource, ThreadPool
 
 
 def train_with_smartpool(task_templates, max_workers, pool_type, progress_info: ProgressInfo):
@@ -19,7 +19,7 @@ def train_with_smartpool(task_templates, max_workers, pool_type, progress_info: 
         pool = ThreadPool(max_workers=max_workers, use_torch=True)
 
     futures_map = {}
-    for i, task_args in enumerate(tasks):
+    for task_args in tasks:
         future = pool.submit(
             train_single_fold,
             args=task_args,

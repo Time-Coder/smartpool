@@ -1,11 +1,13 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, List, Tuple, Any, Dict, Callable
-from .task import Task
+
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple
+
 from .resource import Resource
+from .task import Task
 
 if TYPE_CHECKING:
-    from .pool import Pool
     from .futures import Future
+    from .pool import Pool
 
 
 class ChunkTask(Task):
@@ -28,7 +30,7 @@ class ChunkTask(Task):
     def add_task(self, sub_task: Task)->None:
         if self.submitted:
             return
-        
+
         if sub_task.check_args or self.check_args:
             try:
                 self.pool._validate_resource_feasibility(self)
@@ -98,11 +100,11 @@ class ChunkTask(Task):
             results.append((success, result))
 
         return results
-    
+
     def _fan_out_batch_results(self, future: Future) -> None:
         try:
             results = future.result()
-        except Exception as e:                
+        except Exception:
             return
 
         for (success, result), task in zip(results, self._sub_tasks):

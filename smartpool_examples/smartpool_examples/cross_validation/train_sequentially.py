@@ -3,7 +3,6 @@ import threading
 from collections import defaultdict
 
 import torch
-
 from model_utils import train_single_fold
 from progress_info import ProgressInfo
 

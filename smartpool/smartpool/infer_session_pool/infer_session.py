@@ -1,13 +1,15 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, List, Union
-from collections import defaultdict
+
+import os
 import threading
 import time
-import os
+from collections import defaultdict
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
-    import onnxruntime as ort
     import numpy as np
+    import onnxruntime as ort
+
     from ..device import Device
 
 
@@ -39,6 +41,7 @@ class InferSession:
                 return
 
             import onnxruntime as ort
+
             from .infer_session_pool import InferSessionPool
 
             self._session = ort.InferenceSession(self.model_path, *self._session_args, **self._session_kwargs)
@@ -55,7 +58,7 @@ class InferSession:
             self.estimated_gpu_mem = file_size * gpu_mul
             self.last_use_time = time.time()
             self._take_session_resource()
-        
+
     def stop(self) -> None:
         with self._lock:
             if self._session is None:
@@ -96,7 +99,7 @@ class InferSession:
 
         if result == "tensorrt":
             result = "cuda"
-        
+
         return result
 
     def _take_session_resource(self)->None:
@@ -180,7 +183,7 @@ class InferSession:
 
         try:
             self.session.run_async(output_names, input_feed, _wrapped_callback, user_data, run_options)
-        except Exception as e:
+        except Exception:
             self._decrease_running_count()
             raise
 
@@ -191,7 +194,7 @@ class InferSession:
         if key not in self._input_ortvalues:
             for node in self.session.get_inputs():
                 input_value = input_feed[node.name]
-                
+
                 if input_value.__class__.__name__ == "Tensor":
                     input_value = input_value.detach().cpu().numpy()
 

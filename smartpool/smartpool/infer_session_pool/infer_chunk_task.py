@@ -1,14 +1,18 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union, Optional
+
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
-from .infer_session_task import InferSessionTask
+
 from ..resource import Resource
+from .infer_session_task import InferSessionTask
 
 if TYPE_CHECKING:
-    from .infer_session_pool import InferSessionPool
-    from ..futures import Future
-    from .model_info import ModelInfo
     import onnxruntime as ort
+
+    from ..futures import Future
+    from .infer_session_pool import InferSessionPool
+    from .model_info import ModelInfo
 
 
 class InferChunkTask(InferSessionTask):
@@ -58,7 +62,9 @@ class InferChunkTask(InferSessionTask):
 
     @staticmethod
     def _run_options_to_str(run_options: ort.RunOptions) -> str:
+        import contextlib
         import json
+
         result_dict = {}
 
         known_attrs = [
@@ -68,10 +74,8 @@ class InferChunkTask(InferSessionTask):
         ]
         for attr in known_attrs:
             if hasattr(run_options, attr):
-                try:
+                with contextlib.suppress(Exception):
                     result_dict[attr] = getattr(run_options, attr)
-                except Exception:
-                    pass
 
         return json.dumps(result_dict, sort_keys=True, separators=(", ", ":"))
 
@@ -105,7 +109,7 @@ class InferChunkTask(InferSessionTask):
 
                 if self._key in self.pool._chunk_tasks:
                     del self.pool._chunk_tasks[self._key]
-                    
+
                 return
 
         self.future.add_future(sub_task.future)
@@ -125,7 +129,7 @@ class InferChunkTask(InferSessionTask):
     def submit(self) -> None:
         if self.submitted:
             return
-        
+
         self.submitted = True
 
         if self._key in self.pool._chunk_tasks:
@@ -152,16 +156,16 @@ class InferChunkTask(InferSessionTask):
         cls = value.__class__.__name__
         if cls == "Tensor":
             return value.detach().cpu().numpy()
-        
+
         if cls == "OrtValue":
             return value.numpy()
-        
+
         return value
 
     def _fan_out_batch_results(self, future: Future) -> None:
         try:
             batch_result = future.result()
-        except Exception as e:
+        except Exception:
             return
 
         if batch_result.__class__.__name__ == "ndarray":

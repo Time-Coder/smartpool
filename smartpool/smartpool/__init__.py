@@ -1,11 +1,11 @@
-import psutil # must import for first fetch cpu percent
+import psutil  # must import for first fetch cpu percent
 
 __version__ = "0.1.7"
 
-from .futures import Future
 from .amd_gpuinfo import AMDGPUInfo
-from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .device import Device
+from .futures import Future
+from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .gpuinfos import GPUInfos
 from .infer_session_pool import InferSessionPool, ModelInfo
 from .intel_gpuinfo import IntelGPUInfo
@@ -14,8 +14,13 @@ from .nvidia_gpuinfo import NvidiaGPUInfo
 from .process_pool import ProcessPool
 from .resource import DataSize, Resource
 from .thread_pool import ThreadPool
-from .utils import best_device, best_stream, limit_num_single_thread, move_optimizer_to, TRT_CACHE_PATH
-
+from .utils import (
+    TRT_CACHE_PATH,
+    best_device,
+    best_stream,
+    limit_num_single_thread,
+    move_optimizer_to,
+)
 
 __all__ = [
     "Future",
@@ -38,5 +43,5 @@ __all__ = [
     "NvidiaGPUInfo",
     "IntelGPUInfo",
     "AMDGPUInfo",
-    "TRT_CACHE_FOLDER"
+    "TRT_CACHE_PATH"
 ]

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Protocol, TypeVar
 import os
+from typing import TYPE_CHECKING, Optional, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from torch.cuda import Stream
+
     from .device import Device
 
 TRT_CACHE_PATH: str = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/") + "/__trtcache__"

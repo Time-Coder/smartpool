@@ -1,18 +1,19 @@
 from __future__ import annotations
+
 import copy
-from typing import TYPE_CHECKING, Tuple, Any, Dict, Optional, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from ..task import Task
 
 if TYPE_CHECKING:
-    from ..device import Device
-    from .infer_session_pool import InferSessionPool
-    from .infer_session import InferSession
-    from .model_info import ModelInfo
-    from ..resource import Resource
-
-    import onnxruntime as ort
     import numpy as np
+    import onnxruntime as ort
+
+    from ..device import Device
+    from ..resource import Resource
+    from .infer_session import InferSession
+    from .infer_session_pool import InferSessionPool
+    from .model_info import ModelInfo
 
 
 class InferSessionTask(Task):
@@ -50,13 +51,13 @@ class InferSessionTask(Task):
     @property
     def device(self)->Device:
         return self._device
-    
+
     @device.setter
     def device(self, device:Device)->None:
         if device is None:
             self._device = None
             return
-        
+
         self._device = copy.deepcopy(device)
         self._device.select_provider(self.user_providers)
 
@@ -64,7 +65,7 @@ class InferSessionTask(Task):
     def provider(self)->Optional[Tuple[str, Dict[str, Any]]]:
         if self._device is None:
             return None
-        
+
         return self._device.ort_provider
 
     def can_use(self, device: Device)->bool:
@@ -83,7 +84,7 @@ class InferSessionTask(Task):
             success = False
 
         return success, result
-    
+
     def run_async(self) -> None:
         try:
             self.session.run_async(self.output_names, input_feed=self.kwargs, callback=self.callback, user_data=None, run_options=self.run_options)
@@ -92,7 +93,7 @@ class InferSessionTask(Task):
             infer_session_pool: InferSessionPool = self.pool
             infer_session_pool._remove_provider_running_device(self.provider)
             infer_session_pool._on_task_done(self.id, False, e)
-    
+
     def callback(self, results: np.ndarray, user_data: None, error_str: str) -> None:
         task_id = self.id
         if error_str:

@@ -1,7 +1,8 @@
-from .futures import Future
+import inspect
 from concurrent.futures import Future as _BaseFuture
 from typing import Callable
-import inspect
+
+from .futures import Future
 
 
 class TaskWrapper:
@@ -22,7 +23,7 @@ class TaskWrapper:
 
         for callback in self._done_callbacks:
             future.add_done_callback(callback)
-            
+
         return future
 
     def add_start_callback(self, fn: Callable[[], None])->None:
@@ -32,7 +33,7 @@ class TaskWrapper:
         except TypeError as e:
             formatted_msg = f"{fn.__name__}() {str(e)}"
             raise TypeError(formatted_msg) from None
-        
+
         self._start_callbacks.append(fn)
 
     def add_done_callback(self, fn: Callable[[_BaseFuture], None])->None:
@@ -42,5 +43,5 @@ class TaskWrapper:
         except TypeError as e:
             formatted_msg = f"{fn.__name__}() {str(e)}"
             raise TypeError(formatted_msg) from None
-        
+
         self._done_callbacks.append(fn)

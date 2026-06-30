@@ -1,7 +1,7 @@
-from rich.progress import TaskID
 from rich.progress import (
     BarColumn,
     Progress,
+    TaskID,
     TextColumn,
     TimeRemainingColumn,
 )
@@ -44,6 +44,6 @@ class ProgressInfo:
     def __enter__(self):
         self.progress.__enter__()
         return self
-    
+
     def __exit__(self, exc_type, exc, tb):
         return self.progress.__exit__(exc_type, exc, tb)

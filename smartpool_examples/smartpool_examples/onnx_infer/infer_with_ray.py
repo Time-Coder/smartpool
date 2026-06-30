@@ -1,11 +1,11 @@
-from typing import List
 import os
 import sys
+from typing import List
 
 import ray
-from smartpool import DataSize
-
 from progress_info import ProgressInfo
+
+from smartpool import DataSize
 
 
 @ray.remote(num_cpus=1, memory=300 * DataSize.MB)
@@ -14,7 +14,7 @@ def infer_one(model_path: str, image_path: str, output_dir: str, module_dir: str
         sys.path.insert(0, module_dir)
 
     import onnxruntime as ort
-    from inference import preprocess, postprocess
+    from inference import postprocess, preprocess
 
     session = ort.InferenceSession(model_path)
     input_name = session.get_inputs()[0].name

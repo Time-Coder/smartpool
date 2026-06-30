@@ -18,7 +18,7 @@ class ThreadWorker(Worker):
 
     def __init__(self, thread_pool:ThreadPool):
         from queue import SimpleQueue
-        
+
         Worker.__init__(
             self, thread_pool,
             task_queue_cls=SimpleQueue,

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
+
 from smartpool_examples.onnx_infer.config import COCO_CLASSES
 
 
@@ -93,7 +93,7 @@ def postprocess(
     mask = scores > conf_thresh
     if not mask.any():
         return
-    
+
     boxes = box_data[mask]
     scores = scores[mask]
     class_ids = class_ids[mask]

@@ -1,9 +1,8 @@
 from typing import Dict, Set
 
-from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
-
 from config import EPOCHS
-from model_utils import ErrorInfo as FoldError, ProgressInfo as FoldProgress
+from model_utils import ErrorInfo as FoldError
+from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 
 class ProgressInfo:
