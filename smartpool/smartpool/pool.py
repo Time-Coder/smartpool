@@ -314,8 +314,14 @@ class Pool(ABC):
             if task.worker is not None:
                 devices, cpu_to_evict, gpu_to_evicts = self._choose_task_device(task, "gpu")
                 if devices:
-                    for idle_worker in cpu_to_evict:
-                        idle_worker.stop()
+                    for idle_item in cpu_to_evict:
+                        idle_item.stop()
+
+                    for gpu_to_evict in gpu_to_evicts:
+                        for idle_item in gpu_to_evict:
+                            idle_item.stop()
+
+                        break
 
                     return True
 
@@ -327,8 +333,14 @@ class Pool(ABC):
         if task.worker is not None:
             devices, cpu_to_evict, gpu_to_evicts = self._choose_task_device(task, "cpu")
             if devices:
-                for idle_worker in reclaim_items:
-                    idle_worker.stop()
+                for idle_item in cpu_to_evict:
+                    idle_item.stop()
+
+                for gpu_to_evict in gpu_to_evicts:
+                    for idle_item in gpu_to_evict:
+                        idle_item.stop()
+
+                    break
                     
                 return True
 
@@ -602,7 +614,7 @@ class Pool(ABC):
 
             if mode == "cpu":
                 task.device = Device("cpu")
-                return [task.device], to_evict, []
+                return [task.device], cpu_to_evict, []
             
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             available_gpus: List[GPUInfoSnapshot] = []
@@ -615,8 +627,8 @@ class Pool(ABC):
 
                 available_gpus.append(gpu)
 
+            gpu_to_evicts = []
             if not available_gpus:
-                gpu_to_evicts = []
                 for gpu in gpus:
                     if res.gpu_cores > gpu.n_cores_free:
                         continue
@@ -630,11 +642,11 @@ class Pool(ABC):
                     gpu_to_evicts.append(to_evict)
                     available_gpus.append(gpu)
 
-                if available_gpus:
-                    available_gpus.sort(key=lambda gpu: gpu.n_cores_free, reverse=True)
-                    best_gpu = available_gpus[0]
-                    task.device = best_gpu.device
-                    return [gpu.device for gpu in available_gpus], cpu_to_evict, gpu_to_evicts
+            if available_gpus:
+                available_gpus.sort(key=lambda gpu: gpu.n_cores_free, reverse=True)
+                best_gpu = available_gpus[0]
+                task.device = best_gpu.device
+                return [gpu.device for gpu in available_gpus], cpu_to_evict, gpu_to_evicts
 
             task.device = None
             return [], [], []

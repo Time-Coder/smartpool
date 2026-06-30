@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from itertools import zip_longest
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from ..pool import Pool
@@ -310,8 +311,9 @@ class InferSessionPool(Pool):
                     continue
 
             success = False
-            devices, reclaim_sessions = self._choose_task_device(task, mode)
-            for device in devices:
+            devices, cpu_to_evict, gpu_to_evicts = self._choose_task_device(task, mode)
+            gpu_to_evict = None
+            for device, to_evict in zip_longest(devices, gpu_to_evicts):
                 task.device = device
 
                 if self._choose_task_session(task) is None:
@@ -322,12 +324,17 @@ class InferSessionPool(Pool):
                     task.device = None
                     continue
 
+                gpu_to_evict = to_evict
                 success = True
                 break
 
             if success:
-                for session in reclaim_sessions:
+                for session in cpu_to_evict:
                     session.stop()
+
+                if gpu_to_evict:
+                    for session in gpu_to_evict:
+                        session.stop()
 
                 return True
 
@@ -335,10 +342,10 @@ class InferSessionPool(Pool):
 
     def _reclaim_cpu_memory(self, task: InferSessionTask, res: Resource) -> List[InferSession]:
         idle_sessions = [session for session in self._sessions.values() if (session._session is not None and session.running_count == 0)]
-        if not idle_sessions or (len(idle_sessions) == 1 and idle_sessions[0][1].model_path == task.model_info.model_path):
+        if not idle_sessions or (len(idle_sessions) == 1 and idle_sessions[0].model_path == task.model_info.model_path):
             return []
         
-        idle_sessions.sort(key=lambda x: x[1].last_use_time)
+        idle_sessions.sort(key=lambda x: x.last_use_time)
         to_evict = []
         freed_cpu_mem = 0
         for session in idle_sessions:
@@ -355,10 +362,10 @@ class InferSessionPool(Pool):
 
     def _reclaim_gpu_memory(self, task: InferSessionTask, res: Resource, gpu: GPUInfoSnapshot, reclaim_items: List[InferSession]) -> List[InferSession]:
         idle_sessions = [session for session in self._sessions.values() if (session._session is not None and session.running_count == 0 and session not in reclaim_items and session.device == gpu.device)]
-        if not idle_sessions or (len(idle_sessions) == 1 and idle_sessions[0][1].model_path == task.model_info.model_path):
+        if not idle_sessions or (len(idle_sessions) == 1 and idle_sessions[0].model_path == task.model_info.model_path):
             return []
         
-        idle_sessions.sort(key=lambda x: x[1].last_use_time)
+        idle_sessions.sort(key=lambda x: x.last_use_time)
         to_evict = []
         freed_gpu_mem = 0
         for session in idle_sessions:

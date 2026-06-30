@@ -1,6 +1,6 @@
 from __future__ import annotations
 import copy
-from typing import TYPE_CHECKING, Tuple, Any, Dict, Optional, List, Union, Iterable
+from typing import TYPE_CHECKING, Tuple, Any, Dict, Optional, List, Union
 
 from ..task import Task
 
@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from .infer_session_pool import InferSessionPool
     from .infer_session import InferSession
     from .model_info import ModelInfo
-    from ..gpuinfo import GPUInfoSnapshot
     from ..resource import Resource
 
     import onnxruntime as ort

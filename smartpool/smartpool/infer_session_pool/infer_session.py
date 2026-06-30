@@ -41,7 +41,7 @@ class InferSession:
             import onnxruntime as ort
             from .infer_session_pool import InferSessionPool
 
-            self._session = ort.InferenceSession(*self._session_args, **self._session_kwargs)
+            self._session = ort.InferenceSession(self.model_path, *self._session_args, **self._session_kwargs)
             self.provider_name: str = self._session.get_providers()[0]
             self.provider_options: Dict[str, Any] = self._session.get_provider_options().get(self.provider_name, {})
             self.device_id = self.provider_options.get("device_id", 0)

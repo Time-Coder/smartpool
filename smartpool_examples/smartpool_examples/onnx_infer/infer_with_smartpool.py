@@ -48,17 +48,20 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         preprocess_future = preprocess(image_path)
         preprocess_future.add_start_callback(progress_info.start_one_preprocess)
         preprocess_future.add_done_callback(progress_info.finish_one_preprocess)
+        # preprocess_future.result()
 
         img, blob, scale, pad = preprocess_future.unpack(4)
-        infer_future = infer_session_pool.submit(model_path, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res, use_io_binding=False, check_args=False, chunksize=2)
+        infer_future = infer_session_pool.submit(model_path, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res, use_io_binding=False, check_args=False, chunksize=1)
         infer_future.add_start_callback(progress_info.start_one_infer)
         infer_future.add_done_callback(progress_info.finish_one_infer)
+        # infer_future.result()
 
         outputs = infer_future[0]
         output_path = output_dir + "/" + os.path.basename(image_path)
         postprocess_future = postprocess(img, outputs, output_path, scale, pad)
         postprocess_future.add_start_callback(progress_info.start_one_postprocess)
         postprocess_future.add_done_callback(progress_info.finish_one_postprocess)
+        # postprocess_future.result()
         
         futures.append(postprocess_future)
 
