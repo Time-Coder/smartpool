@@ -37,7 +37,7 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         cpu_cores_out_of_python=1,
         cpu_mem=128*DataSize.MB,
         gpu_cores=100,
-        gpu_mem=100*DataSize.MB
+        gpu_mem=10*DataSize.MB
     )
 
     # ThreadPool.config(pool_name="pre_post", max_workers=4)

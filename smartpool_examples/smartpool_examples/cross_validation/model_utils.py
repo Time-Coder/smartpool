@@ -49,7 +49,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
 
     device = user_device
     if user_device is None:
-        device = best_device()
+        device = best_device().torch_device
 
     old_device = device
     model.to(device, non_blocking=True)
@@ -76,7 +76,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
             if user_device is None:
-                device = best_device()
+                device = best_device().torch_device
 
             data = data.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
@@ -114,7 +114,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
         with torch.no_grad():
             for data, target in val_loader:
                 if user_device is None:
-                    device = best_device()
+                    device = best_device().torch_device
 
                 data = data.to(device, non_blocking=True)
                 target = target.to(device, non_blocking=True)
@@ -152,7 +152,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
     with torch.no_grad():
         for data, target in val_loader:
             if user_device is None:
-                device = best_device()
+                device = best_device().torch_device
 
             data = data.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)

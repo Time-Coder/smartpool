@@ -291,13 +291,14 @@ class InferSessionPool(Pool):
         return task.future
 
     def _try_assign_task(self, task: InferSessionTask) -> bool:
-        if not task.ready_to_run or self._workers_working_count >= self._max_workers:
+        if self._workers_working_count >= self._max_workers:
             return False
 
         gpu_res = task.gpu_mode_res
         modes = []
         if gpu_res.gpu_cores > 0 or gpu_res.gpu_mem > 0:
             modes.append("gpu")
+            
         modes.append("cpu")
 
         for mode in modes:
