@@ -54,12 +54,6 @@ class Device:
     def __hash__(self) -> int:
         return hash(self.torch_device)
 
-    def __repr__(self):
-        return f"Device(torch_device='{self.torch_device}')"
-
-    def startswith(self, prefix: str) -> bool:
-        return self.torch_device.startswith(prefix)
-
     @property
     def supported_ort_providers(self) -> List[str]:
         _init_ort_providers_cache()
