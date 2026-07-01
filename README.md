@@ -11,10 +11,12 @@ SmartPool is a Python library that provides intelligent resource-aware pooling m
 - **PyTorch Integration**: Support for PyTorch multiprocessing with tensor sharing to avoid serialization
 - **Training Hot Migration**: Automatically moves CPU training tasks to GPU when `best_device()` changes
 - **InferSessionPool**: Thread-safe ONNX Runtime session pool for concurrent inference
-- **Future Dependency Resolution**: Submit tasks with `Future` objects as arguments; automatically waits for dependencies to complete before execution
-- **`@pool.task` Decorator**: Write concurrent code like synchronous code using the task decorator pattern
-- **Enhanced Future API**: Tuple unpacking (`future.unpack(n)`) and index/key access (`future[key]`) for easy pipeline composition
+- **ONNX Inference Batching**: `InferSessionPool` transparently batches inference calls across the batch dimension
 - **InferSessionPool IO Binding**: Zero-copy ONNX inference with `IOBinding` support for GPU-resident data
+- **`@Pool.task` Decorator**: Write concurrent code like synchronous code using the task decorator pattern
+- **Future Dependency Resolution**: Submit tasks with `Future` objects as arguments; automatically waits for dependencies to complete before execution
+- **Enhanced Future API**: Tuple unpacking (`future.unpack(n)`) and index/key access (`future[key]`) for easy pipeline composition
+- **Chunked Task Batching**: Aggregate multiple `submit()` calls with the same function into a single batch execution for better throughput
 
 ## Installation
 
@@ -89,12 +91,12 @@ limit_num_single_thread()
 import torch
 
 def training_task():
-    device = best_device() # <-- get best suitable device at init time
+    device = best_device().torch_device # <-- get best suitable device at init time
     old_device = device
 
     for epoch in range(epochs):
         for x, y in data_loader:
-            device = best_device() # <-- get best suitable device at each batch
+            device = best_device().torch_device # <-- get best suitable device at each batch
             x, y = x.to(device), y.to(device)
 
             if old_device != device:
@@ -112,6 +114,52 @@ if __name__ == "__main__":
             args=(model, optimizer, data),
             device_changeable=True # <-- turn on device hot migration
         )
+```
+
+### InferSessionPool — ONNX Runtime Concurrent Inference
+
+`InferSessionPool` manages a pool of ONNX Runtime sessions for concurrent inference with auto device placement and optional IO binding.
+
+```python
+from smartpool import InferSessionPool, Device
+
+
+def run_inference():
+    infer_pool = InferSessionPool(max_workers=4)
+
+    model_path = "yolov8n.onnx"
+    images = [preprocess(img) for img in image_paths]
+
+    futures = []
+    for img in images:
+        future = infer_pool.submit(
+            model_path,
+            args=(img,)
+        )
+        futures.append(future)
+
+    results = [f.result() for f in futures]
+
+
+# Use IO binding for zero-copy GPU inference
+def run_inference_io_binding():
+    import numpy as np
+    import onnxruntime as ort
+
+    infer_pool = InferSessionPool(max_workers=2)
+
+    # Create OrtValue on GPU
+    ort_value = ort.OrtValue.ort_value_from_numpy(
+        np.random.randn(1, 3, 640, 640).astype(np.float32)
+    )
+
+    future = infer_pool.submit(
+        "model.onnx",
+        args=(ort_value,),
+        use_io_binding=True,
+        copy_outputs_to_cpu=False,  # keep results on GPU as OrtValue
+    )
+    result = future.result()  # returns OrtValue on device
 ```
 
 ### Task Decorator (`@pool.task`)
@@ -168,7 +216,7 @@ future = my_task(42)
 
 Use `Pool.config(pool_name, *args, **kwargs)` to pre-configure a named pool instance, and `Pool.instance(pool_name)` to retrieve it. The decorator automatically calls `Pool.instance(pool_name).submit(...)` at call time.
 
-See full examples in `smartpool_examples/onnx_infer/` and `smartpool_examples/onnx_chain_infer/`.
+See full examples in `smartpool_examples/onnx_infer/` (YOLOv8 ONNX inference pipeline) and `smartpool_examples/optimize_cec2022/` (parallel optimization benchmark).
 
 ## API
 
@@ -216,7 +264,9 @@ class ProcessPool:
         kwargs:Optional[Dict[str, Any]]=None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
-        use_torch: Optional[bool] = None
+        use_torch: Optional[bool] = None,
+        chunksize: Optional[int] = None,
+        chunk_timeout: Optional[float] = 0.1,
     )->concurrent.futures.Future: ...
         """
         Submits a callable to be executed with the given arguments.
@@ -231,6 +281,9 @@ class ProcessPool:
             cpu_mode_res: Resource requirements when running on CPU.
             gpu_mode_res: Resource requirements when running on GPU.
             use_torch: Whether to enable PyTorch tensor sharing and device migration.
+            chunksize: If set, tasks with the same function are aggregated into
+                      a batch and executed as a single call with concatenated args.
+            chunk_timeout: Max seconds to wait before flushing a pending batch.
         
         Returns:
             A concurrent.futures.Future representing the given call.
@@ -312,10 +365,27 @@ class ProcessPool:
         `func` and (a, b) becomes func(a, b).
         """
 
+    def flush(self) -> None: ...
+        """
+        Force-flush any pending chunked tasks immediately.
+        Tasks submitted with `chunksize` that have not yet filled a full batch
+        are submitted immediately.
+        """
+
+    @property
+    def chunk_timeout(self) -> float: ...
+
+    @chunk_timeout.setter
+    def chunk_timeout(self, value: float) -> None: ...
+        """
+        Get/set the flush timeout for chunked task batching (default 0.1s).
+        When a batch hasn't filled within this timeout, it is flushed automatically.
+        """
+
     def shutdown(self, wait:bool=True, *, cancel_futures:bool=False)->None: ...
         """
         Clean-up the resources associated with the Executor.
- 
+  
         It is safe to call this method several times. Otherwise, no other
         methods can be called after this one.
         
@@ -335,7 +405,9 @@ class ProcessPool:
 
 ### ThreadPool
 
-Each worker run as a thread. Suitable for IO-intensive tasks. 
+Each worker run as a thread. Suitable for IO-intensive tasks.
+
+Note: Unlike `ProcessPool`, `ThreadPool` does **not** support chunked task batching (`chunksize` is not accepted in `submit()`).
 
 ```python
 class ThreadPool:
@@ -353,17 +425,31 @@ class ThreadPool:
         """
         Initializes a new ThreadPool instance.
 
-        Same as ProcessPool
+        Args: Same as ProcessPool
         """
 
-    def submit(self, ...): ...
+    def submit(
+        self, func:Callable[..., Any],
+        args:Optional[Tuple[Any, ...]]=None,
+        kwargs:Optional[Dict[str, Any]]=None,
+        cpu_mode_res:Optional[Resource]=None,
+        gpu_mode_res:Optional[Resource]=None,
+        use_torch:Optional[bool]=None,
+        device_changeable:bool=False
+    )->Future: ...
+        """
+        Submits a callable to be executed with the given arguments.
+
+        Args: Same as ProcessPool (without chunksize/chunk_timeout).
+        """
+
     def map(self, ...): ...
     def starmap(self, ...): ...
     def shutdown(self, ...): ...
     def __enter__(self): ...
     def __exit__(self, exc_type, exc_val, exc_tb): ...
         """
-        All same as ProcessPool
+        All same as ProcessPool (without chunksize support).
         """
 ```
 
@@ -405,19 +491,21 @@ class InterpreterPool:
 ### InferSessionPool
 
 Each worker runs as a thread with a dedicated ONNX Runtime `InferenceSession`.
-Suitable for concurrent inference on CPU, CUDA, or DML devices.
+Supports CPU, CUDA, DML, TensorRT, and other ONNX Runtime providers.
+Transparently batches inference calls across the batch dimension for high throughput.
 
 ```python
 class InferSessionPool(ThreadPool):
 
     def __init__(
-        self, max_workers:int=0,
-        thread_name_prefix:str="InferSessionPool.worker:",
-        initializer:Optional[Callable[..., Any]]=None,
-        initargs:Tuple[Any, ...]=(),
-        initkwargs:Optional[Dict[str, Any]]=None,
+        self, max_workers: int = 0,
+        thread_name_prefix: str = "InferSessionPool.worker:",
+        initializer: Optional[Callable[..., Any]] = None,
+        initargs: Tuple[Any, ...] = (),
+        initkwargs: Optional[Dict[str, Any]] = None,
         *,
-        max_tasks_per_child:Optional[int]=None,
+        max_tasks_per_child: Optional[int] = None,
+        print_info: bool = False,
     ): ...
         """
         Initializes a new InferSessionPool instance.
@@ -426,16 +514,17 @@ class InferSessionPool(ThreadPool):
         """
 
     def submit(
-        self, model_path:str,
-        args:Optional[Tuple[Any]]=None,
-        kwargs:Optional[Dict[str, Any]]=None,
-        output_names:Optional[Union[List[str], None]]=None,
+        self, model_path: str,
+        args: Optional[Tuple[Any]] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
+        output_names: Optional[Union[List[str], None]] = None,
         cpu_mode_res: Optional[Resource] = None,
         gpu_mode_res: Optional[Resource] = None,
-        providers:Optional[List[Union[str, Tuple[str, Dict]]]]=None,
-        run_options:Optional[ort.RunOptions]=None,
-        use_io_binding:bool=False,
-        copy_outputs_to_cpu:bool=True,
+        providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
+        run_options: Optional[ort.RunOptions] = None,
+        use_io_binding: bool = False,
+        copy_outputs_to_cpu: bool = True,
+        chunksize: Optional[int] = None
     )->Future: ...
         """
         Submits an ONNX model for inference with the given input tensors.
@@ -451,6 +540,8 @@ class InferSessionPool(ThreadPool):
             run_options: Optional ONNX Runtime RunOptions.
             use_io_binding: Enable zero-copy IO binding. Auto-enabled when any input is an `OrtValue` or when `copy_outputs_to_cpu=False`.
             copy_outputs_to_cpu: If True, results are copied to CPU as numpy arrays. If False, results remain as `OrtValue` objects on the device.
+            chunksize: Max batch size for input concatenation along the batch dimension.
+                      Multiple submit() calls with the same model_path are batched together.
 
         Returns:
             A concurrent.futures.Future representing the inference result.
@@ -464,6 +555,79 @@ class InferSessionPool(ThreadPool):
         """
         All same as ThreadPool
         """
+```
+
+### Device
+
+A unified compute device abstraction that maps to PyTorch devices and ONNX Runtime providers.
+
+```python
+class Device:
+    def __init__(self, device_type: str, device_id: int = 0, dml_id: Optional[int] = None): ...
+        """
+        Args:
+            device_type: Device type string (e.g. "cuda", "cpu", "dml").
+            device_id: Device index.
+            dml_id: DirectML adapter ID (Windows only).
+        """
+
+    @property
+    def supported_ort_providers(self) -> List[str]: ...
+        """
+        Get all ONNX Runtime providers supported by this device.
+        For CUDA devices: includes CUDA, TensorRT, CPU.
+        For DML devices: includes DML, CPU.
+        For CPU: includes CPU, OpenVINO, CoreML (platform-dependent).
+        """
+
+    def select_provider(
+        self, provider_type: str,
+        device_id: Optional[int] = None,
+        trt_cache_path: Optional[str] = None,
+        **kwargs
+    ) -> Tuple[str, Dict]: ...
+        """
+        Select a specific ONNX Runtime provider with appropriate options.
+        Returns (provider_name, provider_options) tuple.
+
+        Args:
+            provider_type: One of "cuda", "tensorrt", "dml", "cpu", "openvino", "rocm", "migraphx".
+            device_id: Override device ID (defaults to self.device_id).
+            trt_cache_path: TensorRT engine cache directory.
+        """
+```
+
+### ModelInfo
+
+Inspect ONNX model metadata — inputs, outputs, shapes, data types, and signature.
+
+```python
+class ModelInfo:
+    def __init__(self, model_path: str, hot_reload: bool = True): ...
+        """
+        Args:
+            model_path: Path to the .onnx model file.
+            hot_reload: If True, check file modification time on each access.
+        """
+
+    @property
+    def inputs(self) -> List[NodeInfo]: ...
+        """List of input nodes with name, shape, dtype properties."""
+
+    @property
+    def outputs(self) -> List[NodeInfo]: ...
+        """List of output nodes with name, shape, dtype properties."""
+
+    def print_info(self) -> None: ...
+        """Print a formatted summary of the model's inputs and outputs."""
+
+    def check_for_updates(self) -> bool: ...
+        """Check if the model file has changed and reload if necessary. Returns True if reloaded."""
+
+class NodeInfo:
+    name: str
+    shape: List[Optional[int]]
+    dtype: str
 ```
 
 ### Future Enhancements
@@ -558,6 +722,7 @@ class DataSize:
     MB = 1024 * KB
     GB = 1024 * MB
     TB = 1024 * GB
+    PB = 1024 * TB
 ```
 
 Example:
