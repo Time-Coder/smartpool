@@ -27,7 +27,7 @@ class ProgressInfo:
             task_key = f"{info.model_name}_fold_{info.fold_idx}"
 
             if task_key not in self.task_progress_bars:
-                desc = f"train {info.model_name} on {info.device} for fold {info.fold_idx+1}/5"
+                desc = f"train {info.model_name} on {info.device} in process {info.pid} for fold {info.fold_idx+1}/5"
                 self.task_progress_bars[task_key] = self.progress.add_task(desc, total=100)
 
             if task_key in self.task_progress_bars:
@@ -41,7 +41,8 @@ class ProgressInfo:
 
                 desc = (
                     f"train {info.model_name} on {info.device} "
-                    f"for fold {info.fold_idx+1}/5 - Epoch {info.epoch}/{EPOCHS} "
+                    f"in process {info.pid} for fold {info.fold_idx+1}/5 - "
+                    f"Epoch {info.epoch}/{EPOCHS} "
                     f"Loss: {info.avg_loss:.4f} Val Acc: {info.val_accuracy*100:.2f}%"
                 )
                 if info.device.startswith("cuda"):

@@ -37,7 +37,7 @@ class ProcessPool(Pool):
 
         if max_workers <= 0:
             import os
-            max_workers = os.cpu_count()
+            max_workers = os.cpu_count() // 2
 
         self._ctx = mp.get_context(mp_context)
         Pool.__init__(
@@ -73,7 +73,7 @@ class ProcessPool(Pool):
             task.estimated_need_cpu_mem = max(0, res.cpu_mem - task.modules_overlap_ratio * worker.cached_rss)
             self._sys_info.cpu_mem_free -= task.estimated_need_cpu_mem
 
-            if task.device is not None and task.device.gpu_index != -1:
+            if task.device.gpu_index != -1:
                 gpu_index = task.device.gpu_index
                 self._sys_info.gpu_infos[gpu_index].n_cores_free -= res.gpu_cores
                 self._sys_info.gpu_infos[gpu_index].mem_free -= res.gpu_mem
@@ -88,7 +88,7 @@ class ProcessPool(Pool):
             released_cpu_mem = task.estimated_need_cpu_mem - hold_cpu_mem
             self._sys_info.cpu_mem_free += released_cpu_mem
 
-            if task.device is not None and task.device.gpu_index != -1:
+            if task.device.gpu_index != -1:
                 gpu_index = task.device.gpu_index
                 self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
                 self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem

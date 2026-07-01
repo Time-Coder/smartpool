@@ -23,7 +23,7 @@ def train_with_smartpool(task_templates, max_workers, pool_type, progress_info: 
         future = pool.submit(
             train_single_fold,
             args=task_args,
-            cpu_mode_res=Resource(cpu_cores=1, cpu_mem=1.1 * DataSize.GB),
+            cpu_mode_res=Resource(cpu_cores=1, cpu_mem=500 * DataSize.MB),
             gpu_mode_res=Resource(cpu_cores=1, cpu_mem=1.1 * DataSize.GB, gpu_cores=1000, gpu_mem=0.2 * DataSize.GB),
             device_changeable=True
         )

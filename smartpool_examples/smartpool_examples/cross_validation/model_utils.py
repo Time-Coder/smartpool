@@ -1,3 +1,4 @@
+import os
 import traceback
 from dataclasses import dataclass
 
@@ -27,6 +28,7 @@ class ProgressInfo:
     device:str
     avg_loss:float
     val_accuracy:float
+    pid:int
 
 
 @dataclass
@@ -65,12 +67,12 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
         total_batches=num_batches,
         device=device,
         avg_loss=0.0,
-        val_accuracy=0.0
+        val_accuracy=0.0,
+        pid=os.getpid()
     )
     progress_queue.put(initial_progress)
 
     last_val_accuracy = 0.0
-
     for epoch in range(EPOCHS):
         epoch_loss = 0.0
         model.train()
@@ -102,7 +104,8 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
                 total_batches=num_batches,
                 device=device,
                 avg_loss=epoch_loss / (batch_idx + 1),
-                val_accuracy=last_val_accuracy
+                val_accuracy=last_val_accuracy,
+                pid=os.getpid()
             )
             progress_queue.put(progress_info)
 
@@ -141,7 +144,8 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
             total_batches=num_batches,
             device=device,
             avg_loss=epoch_loss / num_batches,
-            val_accuracy=val_accuracy
+            val_accuracy=val_accuracy,
+            pid=os.getpid()
         )
         progress_queue.put(final_progress)
 

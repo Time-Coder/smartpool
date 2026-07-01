@@ -52,7 +52,7 @@ class InferSessionPool(Pool):
     ):
         if max_workers <= 0:
             import os
-            max_workers = os.cpu_count()
+            max_workers = os.cpu_count() // 2
 
         Pool.__init__(
             self, max_workers=max_workers,
