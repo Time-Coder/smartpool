@@ -25,7 +25,7 @@ def train_with_smartpool(task_templates, max_workers, pool_type, progress_info: 
             args=task_args,
             cpu_mode_res=Resource(cpu_cores=1, cpu_mem=1.1 * DataSize.GB),
             gpu_mode_res=Resource(cpu_cores=1, cpu_mem=1.1 * DataSize.GB, gpu_cores=1000, gpu_mem=0.2 * DataSize.GB),
-            device_changable=True
+            device_changeable=True
         )
         fold_idx = task_args[0]
         model_class = task_args[1]
