@@ -63,7 +63,7 @@ def main(
     print()
 
     if max_workers == 0:
-        max_workers = os.cpu_count() // 2
+        max_workers = os.cpu_count()
 
     task_templates = []
     for func_idx in range(n_funcs):

@@ -78,7 +78,7 @@ def main(
     from visualization import plot_results, print_results_table
 
     if max_workers == 0:
-        max_workers = os.cpu_count() // 2
+        max_workers = os.cpu_count()
 
     model_classes = [
         cls for cls in models.__dict__.values()
