@@ -8,7 +8,7 @@ from progress_info import ProgressInfo
 from smartpool import DataSize
 
 
-def optimize_with_ray(task_templates, max_workers, progress_info: ProgressInfo):
+def optimize_with_ray(task_templates, progress_info: ProgressInfo):
     progress_queue = ray.util.queue.Queue()
     tasks = [(*t, progress_queue) for t in task_templates]
 
@@ -18,7 +18,7 @@ def optimize_with_ray(task_templates, max_workers, progress_info: ProgressInfo):
         future = ray.remote(
             num_cpus=1,
             memory=200 * DataSize.MB,
-        )(optimize_single).remote(*task_args, 'cpu')
+        )(optimize_single).remote(*task_args)
         task_key = f"{task_args[0]}_{task_args[1]}_run_{task_args[2]}"
         futures_map[task_key] = future
         futures.append(future)

@@ -17,12 +17,10 @@ import typer
 app = typer.Typer(help="Use different parallel backends to optimize CEC2022 benchmark functions via opfunu + mealpy.")
 
 PoolChoice: TypeAlias = Literal[
-    "smartpool.ProcessPool",
-    "multiprocessing.Pool",
-    "concurrent.futures.ProcessPoolExecutor",
-    "concurrent.futures.ThreadPoolExecutor",
-    "joblib.Parallel(backend='loky')",
-    "joblib.Parallel(backend='threading')",
+    "smartpool",
+    "multiprocessing",
+    "concurrent",
+    "joblib",
     "ray",
     "sequentially"
 ]
@@ -31,7 +29,7 @@ PoolChoice: TypeAlias = Literal[
 @app.command()
 def main(
     pool: PoolChoice = typer.Option(
-        "smartpool.ProcessPool",
+        "smartpool",
         "--pool",
         help="choose parallel backend"
     ),
@@ -75,24 +73,24 @@ def main(
     progress_info = ProgressInfo(len(task_templates))
 
     with progress_info:
-        if pool.startswith("smartpool."):
+        if pool == "smartpool":
             from optimize_with_smartpool import optimize_with_smartpool
-            results = optimize_with_smartpool(task_templates, max_workers, pool, progress_info)
-        elif pool.startswith("concurrent.futures."):
+            results = optimize_with_smartpool(task_templates, max_workers, progress_info)
+        elif pool == "concurrent":
             from optimize_with_concurrent import optimize_with_concurrent
-            results = optimize_with_concurrent(task_templates, max_workers, pool, progress_info)
-        elif pool == "multiprocessing.Pool":
+            results = optimize_with_concurrent(task_templates, max_workers, progress_info)
+        elif pool == "multiprocessing":
             from optimize_with_multiprocessing import optimize_with_multiprocessing
             results = optimize_with_multiprocessing(task_templates, max_workers, progress_info)
-        elif pool.startswith("joblib"):
+        elif pool == "joblib":
             from optimize_with_joblib import optimize_with_joblib
-            results = optimize_with_joblib(task_templates, max_workers, pool, progress_info)
+            results = optimize_with_joblib(task_templates, max_workers, progress_info)
         elif pool == "ray":
             from optimize_with_ray import optimize_with_ray
-            results = optimize_with_ray(task_templates, max_workers, progress_info)
+            results = optimize_with_ray(task_templates, progress_info)
         elif pool == "sequentially":
             from optimize_sequentially import optimize_sequentially
-            results = optimize_sequentially(task_templates, max_workers, progress_info)
+            results = optimize_sequentially(task_templates, progress_info)
 
     elapsed = time.perf_counter() - start_time
     print(f"\noptimization completed in {elapsed:.2f} seconds")

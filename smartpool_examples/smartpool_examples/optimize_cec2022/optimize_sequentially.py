@@ -6,7 +6,7 @@ from optimizer import optimize_single
 from progress_info import ProgressInfo
 
 
-def optimize_sequentially(task_templates, max_workers, progress_info: ProgressInfo):
+def optimize_sequentially(task_templates, progress_info: ProgressInfo):
     progress_queue = queue.Queue()
     tasks = [(*t, progress_queue) for t in task_templates]
 
@@ -15,7 +15,7 @@ def optimize_sequentially(task_templates, max_workers, progress_info: ProgressIn
 
     results = defaultdict(lambda: defaultdict(list))
     for task_args in tasks:
-        r = optimize_single(*task_args, 'cpu')
+        r = optimize_single(*task_args)
         results[r.func_name][r.algo_name].append(r)
 
     tracker.join()

@@ -17,13 +17,10 @@ import typer
 app = typer.Typer(help="Use smartpool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
 
 PoolChoice: TypeAlias = Literal[
-    "smartpool.ProcessPool",
-    "smartpool.ThreadPool",
-    "multiprocessing.Pool",
-    "concurrent.futures.ProcessPoolExecutor",
-    "concurrent.futures.ThreadPoolExecutor",
-    "joblib.Parallel(backend='loky')",
-    "joblib.Parallel(backend='threading')",
+    "smartpool",
+    "multiprocessing",
+    "concurrent",
+    "joblib",
     "ray",
     "sequentially"
 ]
@@ -32,7 +29,7 @@ PoolChoice: TypeAlias = Literal[
 @app.command()
 def main(
     pool: PoolChoice = typer.Option(
-        "smartpool.ProcessPool",
+        "smartpool",
         "--pool",
         help="choose process pool implementations"
     ),
@@ -78,7 +75,7 @@ def main(
     from visualization import plot_results, print_results_table
 
     if max_workers == 0:
-        max_workers = os.cpu_count()
+        max_workers = os.cpu_count() // 2
 
     model_classes = [
         cls for cls in models.__dict__.values()
@@ -97,18 +94,18 @@ def main(
     progress_info = ProgressInfo(len(task_templates))
 
     with progress_info:
-        if pool.startswith("smartpool."):
+        if pool == "smartpool":
             from train_with_smartpool import train_with_smartpool
-            model_results = train_with_smartpool(task_templates, max_workers, pool, progress_info)
-        elif pool.startswith("concurrent.futures."):
+            model_results = train_with_smartpool(task_templates, max_workers, progress_info)
+        elif pool == "concurrent":
             from train_with_concurrent import train_with_concurrent
-            model_results = train_with_concurrent(task_templates, max_workers, pool, progress_info)
-        elif pool == "multiprocessing.Pool":
+            model_results = train_with_concurrent(task_templates, max_workers, progress_info)
+        elif pool == "multiprocessing":
             from train_with_multiprocessing import train_with_multiprocessing
             model_results = train_with_multiprocessing(task_templates, max_workers, progress_info)
-        elif pool.startswith("joblib"):
+        elif pool == "joblib":
             from train_with_joblib import train_with_joblib
-            model_results = train_with_joblib(task_templates, max_workers, pool, progress_info)
+            model_results = train_with_joblib(task_templates, max_workers, progress_info)
         elif pool == "ray":
             from train_with_ray import train_with_ray
             model_results = train_with_ray(task_templates, max_workers, progress_info)

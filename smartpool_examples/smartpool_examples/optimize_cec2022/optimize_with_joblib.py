@@ -1,24 +1,22 @@
 from collections import defaultdict
 
+from joblib import Parallel, delayed
 from optimizer import optimize_single
 from progress_info import ProgressInfo
 
 
-def optimize_with_joblib(task_templates, max_workers, pool_type, progress_info: ProgressInfo):
+def optimize_with_joblib(task_templates, max_workers, progress_info: ProgressInfo):
     import multiprocessing as mp
     manager = mp.Manager()
     progress_queue = manager.Queue()
     tasks = [(*t, progress_queue) for t in task_templates]
 
-    from joblib import Parallel, delayed
-
-    backend = 'loky' if 'loky' in pool_type else 'threading'
-    pool = Parallel(n_jobs=max_workers, backend=backend, return_as="generator")
+    pool = Parallel(n_jobs=max_workers, backend='loky', return_as="generator")
 
     futures_map = {}
     futures = []
     for task_args in tasks:
-        future = delayed(optimize_single)(*task_args, 'cpu')
+        future = delayed(optimize_single)(*task_args)
         task_key = f"{task_args[0]}_{task_args[1]}_run_{task_args[2]}"
         futures_map[task_key] = future
         futures.append(future)

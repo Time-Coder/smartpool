@@ -64,7 +64,7 @@ class _ObservablePSO(PSO.OriginalPSO):
             self._progress_callback(epoch, self.g_best.target.fitness)
 
 
-def optimize_single(algo_name, func_idx, run_idx, progress_queue, device=None):
+def optimize_single(algo_name, func_idx, run_idx, progress_queue):
     try:
         return _optimize_single(algo_name, func_idx, run_idx, progress_queue)
     except Exception as e:

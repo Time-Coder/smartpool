@@ -560,6 +560,9 @@ class Pool(ABC):
             self._on_task_done(task_id, success, result)
 
     def _postprocess_after_task_done(self)->None:
+        for task in self._tasks.values():
+            self._try_move_to_gpu(task)
+
         if self._delayed_tasks:
             for task_id in list(self._delayed_tasks):
                 delayed_task = self._delayed_tasks.get(task_id)
@@ -577,9 +580,6 @@ class Pool(ABC):
 
                 del self._delayed_tasks[task_id]
                 self._put_task(delayed_task)
-
-        for task in self._tasks.values():
-            self._try_move_to_gpu(task)
 
     def _sorted_idle_workers(self, exclude: Worker) -> Tuple[List[Worker], int]:
         workers: List[Worker] = []

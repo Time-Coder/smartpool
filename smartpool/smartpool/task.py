@@ -109,7 +109,7 @@ class Task:
                 Task._torch_gpu_backend = "hip"
             elif getattr(torch, "xpu", None) and torch.xpu.is_available():
                 Task._torch_gpu_backend = "xpu"
-            else:
+            elif Task._torch_gpu_backend is None:
                 Task._torch_gpu_backend = ""
 
         if Task._torch_gpu_backend == "":
