@@ -90,8 +90,9 @@ class ProcessPool(Pool):
 
             if task.device.gpu_index != -1:
                 gpu_index = task.device.gpu_index
-                self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
-                self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem
+                gpu_info = self._sys_info.gpu_infos[gpu_index]
+                gpu_info.n_cores_free += res.gpu_cores
+                gpu_info.mem_free += res.gpu_mem
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)

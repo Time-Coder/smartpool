@@ -526,22 +526,21 @@ class Pool(ABC):
     def _on_task_done(self, task_id:str, success:bool, result:Any)->None:
         with self._lock:
             task = self._tasks.pop(task_id)
-            worker: Worker = task.worker
-            worker.is_working = False
-            worker.n_finished_tasks += 1
-            if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
-                worker.stop(wait=False, clear=True)
 
+        if success:
+            task.future.set_result(result)
+        else:
+            task.future.set_exception(result)
+
+        worker: Worker = task.worker
+        worker.is_working = False
+        worker.n_finished_tasks += 1
+        if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
+            worker.stop(wait=False, clear=True)
+
+        with self._lock:
             self._release_resource(task)
             self._postprocess_after_task_done()
-
-        try:
-            if success:
-                task.future.set_result(result)
-            else:
-                task.future.set_exception(result)
-        except Exception:
-            pass
 
         for pool in Pool._instances:
             if pool._shutdown or pool is self or pool._workers_working_count > 0 or not pool._delayed_tasks:
@@ -573,6 +572,7 @@ class Pool(ABC):
                     del self._delayed_tasks[task_id]
                     if task_id in self._tasks:
                         del self._tasks[task_id]
+
                     continue
 
                 if not self._try_assign_task(delayed_task):
@@ -762,7 +762,7 @@ class Pool(ABC):
 
                 if gpu.n_cores_free < gpu_res.gpu_cores:
                     continue
-
+                
                 if best_gpu is None or gpu.n_cores_free > best_gpu.n_cores_free:
                     best_gpu = gpu
 
@@ -772,6 +772,7 @@ class Pool(ABC):
             worker:Worker = task.worker
             worker.change_device(best_gpu.device)
             task.device = best_gpu.device
+            task.estimated_need_cpu_mem += extra_cpu_mem_needed
             best_gpu.n_cores_free -= gpu_res.gpu_cores
             best_gpu.mem_free -= gpu_res.gpu_mem
             self._sys_info.cpu_cores_free -= extra_cpu_cores_needed
