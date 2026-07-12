@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Optional
 
 from ..utils import _set_best_device, _set_best_stream
 from ..worker import Worker
@@ -21,7 +21,8 @@ class ThreadWorker(Worker):
             self, thread_pool,
             task_queue_cls=thread_pool._get_task_queue
         )
-        self._streams:Dict[str, Stream] = {}
+        self._streams: Dict[str, Stream] = {}
+        self._active_task: Optional[Task] = None
 
     @property
     def thread(self)->threading.Thread:
@@ -33,7 +34,6 @@ class ThreadWorker(Worker):
 
     def add_task(self, task:Task)->None:
         self.start()
-        self.active_task = task
         task.future.set_running_or_notify_cancel()
         self.task_queue.put(task)
 
@@ -42,7 +42,7 @@ class ThreadWorker(Worker):
         self._set_stream(device)
 
     def _set_stream(self, device:Device):
-        if not self.active_task.use_torch:
+        if not self._active_task.use_torch:
             return
 
         if device not in self._streams:
@@ -84,6 +84,7 @@ class ThreadWorker(Worker):
 
         while True:
             task:Task = self.task_queue.get()
+            self._active_task = task
             if task is None:
                 break
 
@@ -92,3 +93,4 @@ class ThreadWorker(Worker):
             success, result = task.exec()
 
             thread_pool._on_task_done(task.id, success, result)
+            self._active_task = None

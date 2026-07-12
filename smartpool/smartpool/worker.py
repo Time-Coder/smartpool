@@ -34,7 +34,6 @@ class Worker(ABC):
         self.task_queue_kwargs: Optional[Dict[str, Any]] = task_queue_kwargs
         self._task_queue: Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]] = None
         self.executor: Optional[Union[mp.Process, threading.Thread]] = None
-        self.active_task: Optional[Task] = None
         self._memory_taken: bool = False
 
     @property
@@ -55,7 +54,6 @@ class Worker(ABC):
 
     def add_task(self, task: Task)->None:
         self.start()
-        self.active_task = task
         task.future.set_running_or_notify_cancel()
         self.task_queue.put(task.info())
 

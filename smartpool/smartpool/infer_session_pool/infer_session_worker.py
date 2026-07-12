@@ -31,7 +31,6 @@ class InferSessionWorker(Worker):
         if task.use_io_binding:
             self.start()
 
-        self.active_task = task
         infer_session_pool: InferSessionPool = self.infer_session_pool
 
         if infer_session_pool.print_info:
