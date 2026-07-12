@@ -18,9 +18,7 @@ class InterpreterWorker(Worker):
 
         Worker.__init__(
             self, interpreter_pool,
-            task_queue_cls=interpreters.create_queue,
-            task_queue_args=(),
-            task_queue_kwargs={}
+            task_queue_cls=interpreters.create_queue
         )
 
         if interpreter_pool._torch_gpu_available:

@@ -71,7 +71,7 @@ class InferSessionTask(Task):
     def can_use(self, device: Device)->bool:
         return bool(device.select_provider(self.user_providers))
 
-    def _callback_hook(self, result: Any):
+    def _future_done_callback_hook(self, result: Any):
         if result.__class__.__name__ == "OrtValue":
             self.use_io_binding = True
 

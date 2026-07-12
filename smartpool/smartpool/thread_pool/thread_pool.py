@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ..resource import Resource
     from ..task import Task
     from .thread_worker import ThreadWorker
+    from queue import SimpleQueue
 
 
 class ThreadPool(Pool):
@@ -30,14 +31,18 @@ class ThreadPool(Pool):
         initargs:Tuple[Any, ...]=(),
         initkwargs:Optional[Dict[str, Any]]=None,
         *,
-        max_tasks_per_child:Optional[int]=None,
         use_torch:bool=False
     ):
         from .thread_worker import ThreadWorker
+        from queue import SimpleQueue
 
         if max_workers <= 0:
             import os
             max_workers = min(32, (os.cpu_count() or 1) + 4)
+
+        self._thread_name_prefix:str = thread_name_prefix
+        self.__max_used_cpu_cores_in_python = None
+        self._task_queue: SimpleQueue = SimpleQueue()
 
         Pool.__init__(
             self, max_workers=max_workers,
@@ -48,14 +53,10 @@ class ThreadPool(Pool):
 
             result_queue_cls=None,
 
-            max_tasks_per_child=max_tasks_per_child,
             use_torch=use_torch,
             worker_cls=ThreadWorker,
             need_module_deps=False
         )
-
-        self._thread_name_prefix:str = thread_name_prefix
-        self.__max_used_cpu_cores_in_python = None
 
     def submit(
         self, func:Callable[..., Any],
@@ -132,6 +133,9 @@ class ThreadPool(Pool):
     def _has_gil(self)->bool:
         from ..utils import has_gil
         return has_gil()
+    
+    def _get_task_queue(self)->SimpleQueue:
+        return self._task_queue
 
     def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:
@@ -185,3 +189,6 @@ class ThreadPool(Pool):
         worker:ThreadWorker = task.worker
         worker.is_working = True
         worker.add_task(task)
+
+    def _reclaim_cpu_memory(self, task: Task, res: Resource) -> List:
+        return []

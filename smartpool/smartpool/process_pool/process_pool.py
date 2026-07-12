@@ -40,6 +40,12 @@ class ProcessPool(Pool):
             max_workers = os.cpu_count()
 
         self._ctx = mp.get_context(mp_context)
+        self._process_name_prefix:str = process_name_prefix
+
+        self._feeding_queue:queue.SimpleQueue[Task] = queue.SimpleQueue()
+        self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
+        self._feeding_thread.start()
+
         Pool.__init__(
             self, max_workers=max_workers,
 
@@ -56,12 +62,6 @@ class ProcessPool(Pool):
             chunk_timeout=chunk_timeout,
             need_module_deps=True
         )
-
-        self._process_name_prefix:str = process_name_prefix
-
-        self._feeding_queue:queue.SimpleQueue[Task] = queue.SimpleQueue()
-        self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
-        self._feeding_thread.start()
 
     def _take_resource(self, task:Task)->None:
         with self._sys_info_lock:

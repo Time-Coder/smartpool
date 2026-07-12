@@ -14,13 +14,9 @@ if TYPE_CHECKING:
 class InferSessionWorker(Worker):
 
     def __init__(self, infer_session_pool:InferSessionPool):
-        from queue import SimpleQueue
-
         Worker.__init__(
             self, infer_session_pool,
-            task_queue_cls=SimpleQueue,
-            task_queue_args=(),
-            task_queue_kwargs={},
+            task_queue_cls=infer_session_pool._get_task_queue
         )
 
     @property

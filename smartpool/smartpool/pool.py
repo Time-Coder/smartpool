@@ -39,6 +39,7 @@ class Pool(ABC):
     _instances: weakref.WeakSet[Pool] = weakref.WeakSet()
     _instance_config: Dict[Type[Pool], Dict[str, Tuple[Tuple[Any, ...], Dict[str, Any]]]] = defaultdict(dict)
     _instance_dict: Dict[Type[Pool], Dict[str, Pool]] = defaultdict(dict)
+    __torch_best_backend: Optional[str] = None
 
     def __init__(
         self, max_workers: int,
@@ -64,10 +65,7 @@ class Pool(ABC):
         import threading
 
         if use_torch:
-            import torch
-            self._torch_gpu_available = False
-            if torch.cuda.is_available() or getattr(torch, "hip", None) and torch.hip.is_available() or getattr(torch, "xpu", None) and torch.xpu.is_available():
-                self._torch_gpu_available = True
+            self._torch_gpu_available = (Pool._torch_best_backend() != "cpu")
         else:
             self._torch_gpu_available = False
 
@@ -164,6 +162,22 @@ class Pool(ABC):
     def flush(self) -> None:
         with self._lock:
             self._flush()
+
+    @staticmethod
+    def _torch_best_backend():
+        if Pool.__torch_best_backend is None:
+            import torch
+            if torch.cuda.is_available():
+                if torch.version.cuda:
+                    Pool.__torch_best_backend = "cuda"
+                elif torch.version.hip or torch.version.rocm:
+                    Pool.__torch_best_backend = "hip"
+            elif torch.xpu.is_available():
+                Pool.__torch_best_backend = "xpu"
+            else:
+                Pool.__torch_best_backend = "cpu"
+
+        return Pool.__torch_best_backend
 
     def _flush(self) -> None:
         for chunk_task in list(self._chunk_tasks.values()):
@@ -377,7 +391,8 @@ class Pool(ABC):
 
             raise ValueError("task resources needed exceed system capacity")
 
-    def _init_sys_info(self)->None:
+    @staticmethod
+    def _init_sys_info()->None:
         if Pool._sys_info is not None:
             return
 
@@ -654,9 +669,6 @@ class Pool(ABC):
             return [], [], []
 
     def _reclaim_cpu_memory(self, task: Task, res: Resource) -> List:
-        if not hasattr(task.worker, "cached_rss"):
-            return []
-
         idle_workers, total_hold_mem = self._sorted_idle_workers(exclude=task.worker)
         if res.cpu_mem > self._sys_info.cpu_mem_free + total_hold_mem:
             return []
@@ -693,7 +705,7 @@ class Pool(ABC):
                 return worker
 
             current_overlap_ratio = worker.overlap_modules_ratio(task)
-            if hasattr(task.worker, "cached_rss"):
+            if hasattr(worker, "cached_rss"):
                 current_overlap_size = current_overlap_ratio * worker.cached_rss
                 if best_worker is None or current_overlap_size > max_overlap_size:
                     task.modules_overlap_ratio = current_overlap_ratio

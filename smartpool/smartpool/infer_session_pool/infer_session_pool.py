@@ -10,6 +10,7 @@ from .infer_session_worker import InferSessionWorker
 
 if TYPE_CHECKING:
     import onnxruntime as ort
+    from queue import SimpleQueue
 
     from ..futures import Future
     from ..gpuinfo import GPUInfoSnapshot
@@ -50,9 +51,17 @@ class InferSessionPool(Pool):
         session_options: Optional[ort.SessionOptions] = None,
         chunk_timeout: float = 0.1
     ):
+        from queue import SimpleQueue
+
         if max_workers <= 0:
             import os
             max_workers = os.cpu_count()
+
+        self._thread_name_prefix: str = thread_name_prefix
+        self._task_queue: SimpleQueue = SimpleQueue()
+        self._session_options: Optional[ort.SessionOptions] = session_options
+        self._sessions: Dict[Tuple[str, str, str], InferSession] = {}
+        self.print_info: bool = False
 
         Pool.__init__(
             self, max_workers=max_workers,
@@ -61,10 +70,6 @@ class InferSessionPool(Pool):
             worker_cls=InferSessionWorker,
             chunk_timeout=chunk_timeout
         )
-        self._thread_name_prefix: str = thread_name_prefix
-        self._session_options: Optional[ort.SessionOptions] = session_options
-        self._sessions: Dict[Tuple[str, str, str], InferSession] = {}
-        self.print_info: bool = False
 
     @staticmethod
     def model_info(model_path:str)->ModelInfo:
@@ -84,6 +89,9 @@ class InferSessionPool(Pool):
             self._session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         return self._session_options
+
+    def _get_task_queue(self)->SimpleQueue:
+        return self._task_queue
 
     @staticmethod
     def _provider_key(model_path:str, provider: Tuple[str, Dict[str, Any]])->Tuple[str, str, str]:

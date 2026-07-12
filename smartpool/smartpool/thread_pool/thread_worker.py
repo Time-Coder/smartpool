@@ -17,13 +17,9 @@ if TYPE_CHECKING:
 class ThreadWorker(Worker):
 
     def __init__(self, thread_pool:ThreadPool):
-        from queue import SimpleQueue
-
         Worker.__init__(
             self, thread_pool,
-            task_queue_cls=SimpleQueue,
-            task_queue_args=(),
-            task_queue_kwargs={},
+            task_queue_cls=thread_pool._get_task_queue
         )
         self._streams:Dict[str, Stream] = {}
 
@@ -50,7 +46,7 @@ class ThreadWorker(Worker):
             return
 
         if device not in self._streams:
-            if device.startswith("cuda") or device.startswith("hip"):
+            if device.torch_device.startswith("cuda") or device.torch_device.startswith("hip"):
                 from torch.cuda import Stream
                 self._streams[device] = Stream(device=device.torch_device)
             else:

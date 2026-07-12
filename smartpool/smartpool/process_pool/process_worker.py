@@ -23,7 +23,6 @@ class ProcessWorker(Worker):
         Worker.__init__(
             self, process_pool,
             task_queue_cls=SimpleQueue,
-            task_queue_args=(),
             task_queue_kwargs={"ctx": process_pool._ctx}
         )
 
@@ -62,22 +61,8 @@ class ProcessWorker(Worker):
         except Exception:
             return 0
 
-    @property
-    def is_working(self)->bool:
-        return self._is_working
-
-    @is_working.setter
-    def is_working(self, is_working:bool)->None:
-        if self._is_working == is_working:
-            return
-
-        self._is_working = is_working
+    def _working_changed_hook(self):
         self._is_rss_dirty = True
-
-        if is_working:
-            Worker._total_working_count += 1
-        else:
-            Worker._total_working_count -= 1
 
     def change_device(self, device:str)->None:
         if self.change_device_cmd_queue is not None:

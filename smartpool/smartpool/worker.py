@@ -13,9 +13,6 @@ if TYPE_CHECKING:
     from .utils import QueueLike
 
 
-WORKER_DEFAULT_MEMORY: int = 52428800
-
-
 class Worker(ABC):
 
     _total_working_count_lock:threading.Lock = threading.Lock()
@@ -62,6 +59,9 @@ class Worker(ABC):
         task.future.set_running_or_notify_cancel()
         self.task_queue.put(task.info())
 
+    def _working_changed_hook(self):
+        pass
+
     @property
     def is_working(self)->bool:
         return self._is_working
@@ -72,6 +72,7 @@ class Worker(ABC):
             return
 
         self._is_working = is_working
+        self._working_changed_hook()
 
         if is_working:
             with Worker._total_working_count_lock:
@@ -96,7 +97,7 @@ class Worker(ABC):
 
     @property
     def memory(self) -> int:
-        return WORKER_DEFAULT_MEMORY
+        return 0
 
     def _take_worker_memory(self) -> None:
         if self._memory_taken:

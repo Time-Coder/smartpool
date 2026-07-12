@@ -29,8 +29,6 @@ if TYPE_CHECKING:
 
 class Task:
 
-    _torch_gpu_backend: Optional[str] = None
-
     def __init__(
         self, pool: Pool, func: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any],
         cpu_mode_res: Resource, gpu_mode_res: Resource, check_args: bool, chunksize: int,
@@ -97,27 +95,12 @@ class Task:
         self._device = copy.deepcopy(device)
 
     def can_use(self, device: Device)->bool:
-        if not self.use_torch:
+        if not self.use_torch or device.torch_device == "cpu":
             return True
 
-        if Task._torch_gpu_backend is None:
-            import torch
-            if torch.cuda.is_available():
-                Task._torch_gpu_backend = "cuda"
+        return device.torch_device.startswith(Pool._torch_best_backend())
 
-            if getattr(torch, "hip", None) and torch.hip.is_available():
-                Task._torch_gpu_backend = "hip"
-            elif getattr(torch, "xpu", None) and torch.xpu.is_available():
-                Task._torch_gpu_backend = "xpu"
-            elif Task._torch_gpu_backend is None:
-                Task._torch_gpu_backend = ""
-
-        if Task._torch_gpu_backend == "":
-            return (device.torch_device == "cpu")
-        else:
-            return device.torch_device.startswith(Task._torch_gpu_backend)
-
-    def _callback_hook(self, result: Any)->None:
+    def _future_done_callback_hook(self, result: Any)->None:
         pass
 
     def _dep_future_done_callback(self, future: Future) -> None:
@@ -132,7 +115,7 @@ class Task:
                 else:
                     self.kwargs[future_key] = result
 
-                self._callback_hook(result)
+                self._future_done_callback_hook(result)
 
                 if self.finished_dep_futures_count == len(self.dep_futures):
                     self.ready_to_run = True
