@@ -71,6 +71,7 @@ class InterpreterPool(Pool):
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)
+        self._register_gpu_candidate(task)
         worker:InterpreterWorker = task.worker
         worker.is_working = True
         worker.imported_modules.update(task.module_deps)

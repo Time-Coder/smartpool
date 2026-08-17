@@ -186,6 +186,7 @@ class ThreadPool(Pool):
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)
+        self._register_gpu_candidate(task)
         worker:ThreadWorker = task.worker
         worker.is_working = True
         worker.add_task(task)

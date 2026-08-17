@@ -404,20 +404,21 @@ class InferSessionPool(Pool):
         return task.session
 
     def _choose_task_worker(self, task: InferSessionTask, res: Resource) -> Optional[Worker]:
-        for worker in self._workers:
-            if worker.is_working:
-                continue
+        if self._workers_working_count < len(self._workers):
+            for worker in self._workers:
+                if worker.is_working:
+                    continue
 
-            if (worker.executor is not None) == task.use_io_binding:
+                if (worker.executor is not None) == task.use_io_binding:
+                    task.worker = worker
+                    return worker
+
+            for worker in self._workers:
+                if worker.is_working:
+                    continue
+
                 task.worker = worker
                 return worker
-
-        for worker in self._workers:
-            if worker.is_working:
-                continue
-
-            task.worker = worker
-            return worker
 
         if len(self._workers) < self._max_workers:
             task.worker = self._add_worker()
@@ -428,6 +429,7 @@ class InferSessionPool(Pool):
 
     def _put_task(self, task: InferSessionTask) -> None:
         self._take_resource(task)
+        self._register_gpu_candidate(task)
         worker: InferSessionWorker = task.worker
         worker.is_working = True
         worker.add_task(task)

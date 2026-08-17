@@ -132,6 +132,9 @@ class Task:
                 if self.id in self.pool._not_ready_tasks:
                     del self.pool._not_ready_tasks[self.id]
 
+                if self.id in self.pool._can_move_to_gpu_tasks:
+                    del self.pool._can_move_to_gpu_tasks[self.id]
+
     @property
     def future(self)->Future:
         if self._future is None:

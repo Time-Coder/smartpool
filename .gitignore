@@ -4,7 +4,7 @@ dist
 *.egg-info
 .lingma
 test_*
-result.json
+result*.json
 data
 *.png
 .vscode

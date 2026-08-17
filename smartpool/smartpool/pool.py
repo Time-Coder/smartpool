@@ -80,6 +80,7 @@ class Pool(ABC):
         self._worker_cls: Type[Worker] = worker_cls
         self._workers: List[Worker] = []
         self._tasks: Dict[str, Task] = {}
+        self._can_move_to_gpu_tasks: Dict[str, Task] = {}
         self._not_ready_tasks: Dict[str, Task] = {}
         self._delayed_tasks: Dict[str, Task] = {}
         self._lock: threading.RLock = threading.RLock()
@@ -237,6 +238,9 @@ class Pool(ABC):
 
             if task.id in self._delayed_tasks:
                 del self._delayed_tasks[task.id]
+
+            if task.id in self._can_move_to_gpu_tasks:
+                del self._can_move_to_gpu_tasks[task.id]
 
             return task.future
 
@@ -541,6 +545,8 @@ class Pool(ABC):
     def _on_task_done(self, task_id:str, success:bool, result:Any)->None:
         with self._lock:
             task = self._tasks.pop(task_id)
+            if task_id in self._can_move_to_gpu_tasks:
+                del self._can_move_to_gpu_tasks[task_id]
 
         if success:
             task.future.set_result(result)
@@ -564,6 +570,32 @@ class Pool(ABC):
             with pool._lock:
                 pool._postprocess_after_task_done()
 
+    def _on_task_cancelled(self, task: Task) -> None:
+        with self._lock:
+            if task.id in self._tasks:
+                del self._tasks[task.id]
+
+            if task.id in self._can_move_to_gpu_tasks:
+                del self._can_move_to_gpu_tasks[task.id]
+
+            if task.id in self._delayed_tasks:
+                del self._delayed_tasks[task.id]
+
+        worker: Worker = task.worker
+        if worker is not None and worker.is_working:
+            worker.is_working = False
+
+        with self._lock:
+            self._release_resource(task)
+            self._postprocess_after_task_done()
+
+        for pool in Pool._instances:
+            if pool._shutdown or pool is self or pool._workers_working_count > 0 or not pool._delayed_tasks:
+                continue
+
+            with pool._lock:
+                pool._postprocess_after_task_done()
+
     def _collecting_result(self)->None:
         while True:
             result_tuple = self._result_queue.get()
@@ -574,27 +606,40 @@ class Pool(ABC):
             self._on_task_done(task_id, success, result)
 
     def _postprocess_after_task_done(self)->None:
-        for task in self._tasks.values():
-            self._try_move_to_gpu(task)
+        moved_tasks = []
+        for task_id, task in self._can_move_to_gpu_tasks.items():
+            if self._try_move_to_gpu(task):
+                moved_tasks.append(task_id)
 
-        if self._delayed_tasks:
-            for task_id in list(self._delayed_tasks):
-                delayed_task = self._delayed_tasks.get(task_id)
-                if delayed_task is None:
-                    continue
+        for task_id in moved_tasks:
+            del self._can_move_to_gpu_tasks[task_id]
 
-                if delayed_task.future.cancelled():
-                    del self._delayed_tasks[task_id]
-                    if task_id in self._tasks:
-                        del self._tasks[task_id]
+        should_remove_from_delayed = []
+        for task_id, delayed_task in self._delayed_tasks.items():
+            if (
+                self._workers_working_count >= self._max_workers or
+                self._sys_info.cpu_cores_free < 1
+            ):
+                break
 
-                    continue
+            if delayed_task.future.cancelled():
+                should_remove_from_delayed.append(task_id)
+                if task_id in self._tasks:
+                    del self._tasks[task_id]
 
-                if not self._try_assign_task(delayed_task):
-                    continue
+                if task_id in self._can_move_to_gpu_tasks:
+                    del self._can_move_to_gpu_tasks[task_id]
 
-                del self._delayed_tasks[task_id]
-                self._put_task(delayed_task)
+                continue
+
+            if not self._try_assign_task(delayed_task):
+                continue
+
+            should_remove_from_delayed.append(task_id)
+            self._put_task(delayed_task)
+
+        for task_id in should_remove_from_delayed:
+            del self._delayed_tasks[task_id] 
 
     def _sorted_idle_workers(self, exclude: Worker) -> Tuple[List[Worker], int]:
         workers: List[Worker] = []
@@ -691,30 +736,34 @@ class Pool(ABC):
         best_worker:Optional[Worker] = None
         task.modules_overlap_ratio = 0.0
         max_overlap_size = 0.0
-        for worker in self._workers:
-            if worker.is_working:
-                continue
+        if self._workers_working_count < len(self._workers):
+            for worker in self._workers:
+                if worker.is_working:
+                    continue
 
-            if not self._need_module_deps:
-                task.worker = worker
-                return worker
+                if not self._need_module_deps:
+                    task.worker = worker
+                    return worker
 
-            if res.cpu_mem == 0:
-                task.modules_overlap_ratio = 1.0
-                task.worker = worker
-                return worker
+                if res.cpu_mem == 0:
+                    task.modules_overlap_ratio = 1.0
+                    task.worker = worker
+                    return worker
 
-            current_overlap_ratio = worker.overlap_modules_ratio(task)
-            if hasattr(worker, "cached_rss"):
-                current_overlap_size = current_overlap_ratio * worker.cached_rss
-                if best_worker is None or current_overlap_size > max_overlap_size:
-                    task.modules_overlap_ratio = current_overlap_ratio
-                    max_overlap_size = current_overlap_size
-                    best_worker = worker
-            else:
-                if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
-                    task.modules_overlap_ratio = current_overlap_ratio
-                    best_worker = worker
+                current_overlap_ratio = worker.overlap_modules_ratio(task)
+                if hasattr(worker, "cached_rss"):
+                    current_overlap_size = current_overlap_ratio * worker.cached_rss
+                    if best_worker is None or current_overlap_size > max_overlap_size:
+                        task.modules_overlap_ratio = current_overlap_ratio
+                        max_overlap_size = current_overlap_size
+                        best_worker = worker
+                else:
+                    if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
+                        task.modules_overlap_ratio = current_overlap_ratio
+                        best_worker = worker
+
+                if task.modules_overlap_ratio == 1:
+                    break
 
         if best_worker is not None:
             task.worker = best_worker
@@ -743,7 +792,16 @@ class Pool(ABC):
     def _put_task(self, task:Task)->None:
         pass
 
-    def _try_move_to_gpu(self, task:Task)->None:
+    def _register_gpu_candidate(self, task: Task) -> None:
+        if (
+            task.device_changeable
+            and task.gpu_mode_res.gpu_cores > 0
+            and task.device == "cpu"
+            and task.worker is not None
+        ):
+            self._can_move_to_gpu_tasks[task.id] = task
+
+    def _try_move_to_gpu(self, task: Task) -> bool:
         gpu_res = task.gpu_mode_res
         cpu_res = task.cpu_mode_res
         if (
@@ -754,17 +812,17 @@ class Pool(ABC):
             task.worker is None or
             not task.worker.is_working
         ):
-            return
+            return False
 
         extra_cpu_cores_needed = gpu_res.cpu_cores - cpu_res.cpu_cores
         extra_cpu_mem_needed = gpu_res.cpu_mem - cpu_res.cpu_mem
         with self._sys_info_lock:
 
             if extra_cpu_cores_needed > 0 and self._sys_info.cpu_cores_free < extra_cpu_cores_needed:
-                return
+                return False
 
             if extra_cpu_mem_needed > 0 and self._sys_info.cpu_mem_free < extra_cpu_mem_needed:
-                return
+                return False
 
             gpus = task.filter_gpu_infos(self._sys_info.gpu_infos)
             best_gpu = None
@@ -779,7 +837,7 @@ class Pool(ABC):
                     best_gpu = gpu
 
             if best_gpu is None:
-                return
+                return False
 
             worker:Worker = task.worker
             worker.change_device(best_gpu.device)
@@ -789,6 +847,7 @@ class Pool(ABC):
             best_gpu.mem_free -= gpu_res.gpu_mem
             self._sys_info.cpu_cores_free -= extra_cpu_cores_needed
             self._sys_info.cpu_mem_free -= extra_cpu_mem_needed
+            return True
 
     def _add_worker(self)->Worker:
         worker = self._worker_cls(self)

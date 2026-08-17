@@ -96,9 +96,9 @@ class ProcessPool(Pool):
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)
+        self._register_gpu_candidate(task)
         worker:ProcessWorker = task.worker
         worker.is_working = True
-        worker.imported_modules.update(task.module_deps)
         self._feeding_queue.put(task)
 
     def _feeding(self)->None:
@@ -108,11 +108,14 @@ class ProcessPool(Pool):
                 break
 
             if task.future.cancelled():
+                self._on_task_cancelled(task)
                 continue
 
             try:
+                task.worker.imported_modules.update(task.module_deps)
                 task.worker.add_task(task)
             except Exception as e:
+                self._on_task_cancelled(task)
                 task.future.set_exception(e)
 
     def _stop_feeding(self) -> None:
