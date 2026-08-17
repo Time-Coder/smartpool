@@ -9,7 +9,8 @@ data
 *.png
 .vscode
 .venv*
-doc
+smartpool-doc
+smartpool-experiments
 dataset
 *.onnx
 *.jpg
