@@ -7,6 +7,7 @@ from ..pool import Pool
 if TYPE_CHECKING:
     from ..task import Task
     from .process_worker import ProcessWorker
+    from ..resource import Resource
 
 
 class ProcessPool(Pool):
@@ -61,6 +62,54 @@ class ProcessPool(Pool):
             worker_cls=ProcessWorker,
             chunk_timeout=chunk_timeout,
             need_module_deps=True
+        )
+
+    @classmethod
+    def config(
+        cls, pool_name: str="default", *,
+        max_workers:int=0,
+        process_name_prefix:str="ProcessPool.worker:",
+        mp_context:str="spawn",
+        initializer:Optional[Callable[..., Any]]=None,
+        initargs:Tuple[Any, ...]=(),
+        initkwargs:Optional[Dict[str, Any]]=None,
+        max_tasks_per_child:Optional[int]=None,
+        chunk_timeout:float=0.1,
+        use_torch:bool=False
+    ) -> None:
+        Pool.config(
+            cls, pool_name,
+            max_workers=max_workers,
+            process_name_prefix=process_name_prefix,
+            mp_context=mp_context,
+            initializer=initializer,
+            initargs=initargs,
+            initkwargs=initkwargs,
+            max_tasks_per_child=max_tasks_per_child,
+            chunk_timeout=chunk_timeout,
+            use_torch=use_torch
+        )
+
+    @classmethod
+    def task(
+        cls, func:Callable=None, *,
+        pool_name:str="default",
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+        check_args: bool = True,
+        chunksize: int = 1,
+        use_torch: Optional[bool] = None,
+        device_changeable: bool = False
+    ):
+        return Pool.task(
+            cls, func,
+            pool_name=pool_name,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            check_args=check_args,
+            chunksize=chunksize,
+            use_torch=use_torch,
+            device_changeable=device_changeable
         )
 
     def _take_resource(self, task:Task)->None:

@@ -7,7 +7,7 @@ from .device import Device
 from .futures import Future
 from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .gpuinfos import GPUInfos
-from .infer_session_pool import InferSessionPool, ModelInfo
+from .infer_session_pool import InferSessionPool, InferModel, ModelInfo
 from .intel_gpuinfo import IntelGPUInfo
 from .interpreter_pool import InterpreterPool
 from .nvidia_gpuinfo import NvidiaGPUInfo
@@ -29,6 +29,7 @@ __all__ = [
     "ThreadPool",
     "InterpreterPool",
     "InferSessionPool",
+    "InferModel",
     "ModelInfo",
     "DataSize",
     "Resource",

@@ -40,7 +40,7 @@ class ModelInfo:
         self._outputs: Optional[Dict[str, NodeInfo]] = None
         self._signature: Optional[inspect.Signature] = None
         self._support_batch_input: Optional[bool] = None
-        self.load()
+        self._load()
 
     @property
     def model_path(self)->str:
@@ -52,35 +52,35 @@ class ModelInfo:
 
     @property
     def file_size(self)->int:
-        self.load()
+        self._load()
         return self._file_size
 
     @property
     def file_mtime(self)->float:
-        self.load()
+        self._load()
         return self._file_mtime
 
     @property
     def inputs(self)->Dict[str, NodeInfo]:
-        self.load()
+        self._load()
         return self._inputs
 
     @property
     def outputs(self)->Dict[str, NodeInfo]:
-        self.load()
+        self._load()
         return self._outputs
 
     @property
     def signature(self)->inspect.Signature:
-        self.load()
+        self._load()
         return self._signature
 
     @property
     def support_batch_input(self)->bool:
-        self.load()
+        self._load()
         return self._support_batch_input
 
-    def load(self):
+    def _load(self):
         if (
             self._file_size is not None and
             self._file_mtime is not None and
@@ -144,7 +144,7 @@ class ModelInfo:
         self._signature = inspect.Signature(params)
 
     @staticmethod
-    def get_dtype(value: Any) -> np.dtype:
+    def _get_dtype(value: Any) -> np.dtype:
         cls_name = value.__class__.__name__
 
         if cls_name == "Tensor":
@@ -158,7 +158,7 @@ class ModelInfo:
         return value.dtype
 
     @staticmethod
-    def get_shape(value: Any) -> Tuple[int, ...]:
+    def _get_shape(value: Any) -> Tuple[int, ...]:
         cls_name = value.__class__.__name__
 
         if cls_name == "OrtValue":
@@ -169,7 +169,7 @@ class ModelInfo:
 
         return value.shape
 
-    def merge_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None, check: bool = True) -> Tuple[Dict[str, Any], bool]:
+    def _merge_args(self, args: Tuple[Any] = (), kwargs: Optional[Dict[str, Any]] = None, check: bool = True) -> Tuple[Dict[str, Any], bool]:
         if args is None:
             args = ()
 
@@ -202,12 +202,12 @@ class ModelInfo:
                 node = self.inputs[name]
 
                 expected_type = node.dtype
-                actual_type = self.get_dtype(value)
+                actual_type = self._get_dtype(value)
                 if actual_type != expected_type:
                     raise TypeError(f"model '{self.model_name}' input node '{name}' need dtype {expected_type}, {actual_type} were given")
 
                 expected_shape = node.shape
-                actual_shape = self.get_shape(value)
+                actual_shape = self._get_shape(value)
                 if len(expected_shape) != len(actual_shape):
                     raise ValueError(f"model '{self.model_name}' input node '{name}' need shape {expected_shape}, {actual_shape} were given")
 
@@ -220,7 +220,7 @@ class ModelInfo:
 
         return kwargs, has_ortvalue
 
-    def check_outputs(self, output_names):
+    def _check_outputs(self, output_names):
         if output_names is None:
             return
 

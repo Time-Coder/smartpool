@@ -50,7 +50,7 @@ def main(
     download_model()
     download_dataset()
 
-    image_paths = glob.glob(DATASET_FOLDER + "/*.jpg")
+    image_paths = glob.glob(DATASET_FOLDER + "/*.jpg")[:5000]
     n_tasks = len(image_paths)
 
     progress_info = ProgressInfo(n_tasks)

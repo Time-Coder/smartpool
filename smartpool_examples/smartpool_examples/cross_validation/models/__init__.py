@@ -1,9 +1,6 @@
-from .LeNet5 import LeNet5
-from .MLP import MLP
-from .ModernCNN import ModernCNN
-from .ResNet import ResNet
-from .ResNetV2 import ResNetV2
-from .ResNeXt import ResNeXt
-from .ResNeXtV2 import ResNeXtV2
+from .ResNet32 import ResNet32
+from .ResNeXt29 import ResNeXt29
+from .VGG16BN import VGG16BN
+from .WideResNet2810 import WideResNet2810
 
-__all__ = ['LeNet5', 'MLP', 'ModernCNN', 'ResNet', 'ResNetV2', 'ResNeXt', 'ResNeXtV2']
+__all__ = ['VGG16BN', 'ResNet32', 'WideResNet2810', 'ResNeXt29']

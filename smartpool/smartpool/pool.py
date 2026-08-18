@@ -14,6 +14,7 @@ from typing import (
     Tuple,
     Type,
     Union,
+    TypeVar
 )
 
 from .device import Device
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
     from .task import Task
     from .utils import QueueLike
     from .worker import Worker
+
+PoolType = TypeVar('PoolType', bound='Pool')
 
 class Pool(ABC):
 
@@ -276,12 +279,12 @@ class Pool(ABC):
             else:
                 return self._put_in_chunk(task)
 
-    @classmethod
-    def config(cls, pool_name:str, *args, **kwargs):
+    @staticmethod
+    def config(cls, pool_name:str="default", *args, **kwargs) -> None:
         Pool._instance_config[cls][pool_name] = (args, kwargs)
 
     @classmethod
-    def instance(cls, pool_name: str):
+    def instance(cls: Type[PoolType], pool_name: str = "default") -> PoolType:
         if pool_name in Pool._instance_dict[cls]:
             return Pool._instance_dict[cls][pool_name]
 
@@ -294,7 +297,7 @@ class Pool(ABC):
         Pool._instance_dict[cls][pool_name] = cls(*args, **kwargs)
         return Pool._instance_dict[cls][pool_name]
 
-    @classmethod
+    @staticmethod
     def task(cls, func:Callable=None, *, pool_name:str="default", **submit_kwargs):
 
         def decorator(func):

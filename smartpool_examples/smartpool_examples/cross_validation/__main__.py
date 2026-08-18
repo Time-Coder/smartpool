@@ -14,7 +14,7 @@ from typing import Literal, TypeAlias
 
 import typer
 
-app = typer.Typer(help="Use smartpool to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
+app = typer.Typer(help="Use smartpool to do 5-fold cross validation for 4 deep learning models for CIFAR-10 image classification task.")
 
 PoolChoice: TypeAlias = Literal[
     "smartpool",
@@ -43,7 +43,7 @@ def main(
     import os
     os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 
-    print(f"Use {pool} to do 5-fold cross validatation for 7 deep learning models for handwritten digit recognition task.")
+    print(f"Use {pool} to do 5-fold cross validation for 4 deep learning models for CIFAR-10 image classification task.")
     print("Use `python -m smartpool_examples.cross_validation --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     print("\npreparing data...")
@@ -64,6 +64,7 @@ def main(
     import time
 
     import numpy as np
+    from config import N_FOLDS
     from sklearn.model_selection import KFold
 
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
@@ -83,7 +84,7 @@ def main(
     ]
 
     dataset = prepare_data()
-    kfold = KFold(n_splits=5, shuffle=True, random_state=42)
+    kfold = KFold(n_splits=N_FOLDS, shuffle=True, random_state=42)
 
     task_templates = []
     for fold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset)):

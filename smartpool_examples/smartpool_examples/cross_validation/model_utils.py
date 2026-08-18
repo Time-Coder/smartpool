@@ -1,6 +1,7 @@
 import os
 import traceback
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -32,20 +33,56 @@ class ProgressInfo:
 
 
 @dataclass
+class PreprocessInfo:
+    model_name:str
+    fold_idx:int
+    epoch:int
+    batch:int
+    total_batches:int
+    device:str
+    avg_loss:float
+    val_accuracy:float
+    pid:int
+
+
+@dataclass
 class ErrorInfo:
     exception:BaseException
     traceback:str
 
-def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device=None):
+
+def preprocess_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue=None):
     try:
-        return _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device)
+        train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices, train_augment=True)
+        if progress_queue is not None:
+            progress_queue.put(PreprocessInfo(
+                model_name=model_class.__name__,
+                fold_idx=fold_idx,
+                epoch=0,
+                batch=len(train_loader),
+                total_batches=len(train_loader),
+                device='cpu',
+                avg_loss=0.0,
+                val_accuracy=0.0,
+                pid=os.getpid()
+            ))
+        return fold_idx, model_class, train_loader, val_loader
+    except Exception as e:
+        if progress_queue is not None:
+            error_info = ErrorInfo(e, traceback.format_exc())
+            progress_queue.put(error_info)
+        raise e
+
+
+def train_single_fold(fold_idx, model_class, train_loader, val_loader, progress_queue, device=None):
+    try:
+        return _train_single_fold(fold_idx, model_class, train_loader, val_loader, progress_queue, device)
     except Exception as e:
         error_info = ErrorInfo(e, traceback.format_exc())
         progress_queue.put(error_info)
         raise e
 
-def _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, user_device):
-    train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices)
+def _train_single_fold(fold_idx, model_class, train_loader, val_loader, progress_queue, user_device):
     num_batches = len(train_loader)
     model = model_class()
 

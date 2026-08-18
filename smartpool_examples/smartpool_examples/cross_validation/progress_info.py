@@ -1,7 +1,7 @@
 from typing import Dict, Set
 
-from config import EPOCHS
-from model_utils import ErrorInfo as FoldError
+from config import EPOCHS, N_FOLDS
+from model_utils import ErrorInfo as FoldError, PreprocessInfo
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 
@@ -15,6 +15,7 @@ class ProgressInfo:
         )
         self.total_tasks = total_tasks
         self.task_progress_bars: Dict[str, int] = {}
+        self.preprocessed_tasks: Set[str] = set()
         self.finished_tasks: Set[str] = set()
 
     def track(self, progress_queue):
@@ -26,22 +27,33 @@ class ProgressInfo:
 
             task_key = f"{info.model_name}_fold_{info.fold_idx}"
 
+            if isinstance(info, PreprocessInfo):
+                if task_key not in self.task_progress_bars:
+                    desc = f"preprocess {info.model_name} data for fold {info.fold_idx+1}/{N_FOLDS}"
+                    self.task_progress_bars[task_key] = self.progress.add_task(desc, total=100)
+                self.progress.update(self.task_progress_bars[task_key], completed=100)
+                self.progress.update(self.task_progress_bars[task_key], visible=False)
+                self.preprocessed_tasks.add(task_key)
+                continue
+
             if task_key not in self.task_progress_bars:
-                desc = f"train {info.model_name} on {info.device} in process {info.pid} for fold {info.fold_idx+1}/5"
+                desc = f"train {info.model_name} on {info.device} in process {info.pid} for fold {info.fold_idx+1}/{N_FOLDS}"
                 self.task_progress_bars[task_key] = self.progress.add_task(desc, total=100)
+            else:
+                self.progress.update(self.task_progress_bars[task_key], visible=True)
 
             if task_key in self.task_progress_bars:
-                epoch_progress = (info.epoch - 1) / 5
+                epoch_progress = (info.epoch - 1) / EPOCHS
                 batch_progress = info.batch / info.total_batches
-                total_progress = (epoch_progress + batch_progress / 5) * 100
+                total_progress = (epoch_progress + batch_progress / EPOCHS) * 100
 
-                if info.epoch == 5 and info.batch == info.total_batches:
+                if info.epoch == EPOCHS and info.batch == info.total_batches:
                     total_progress = 100.0
                     self.finished_tasks.add(task_key)
 
                 desc = (
                     f"train {info.model_name} on {info.device} "
-                    f"in process {info.pid} for fold {info.fold_idx+1}/5 - "
+                    f"in process {info.pid} for fold {info.fold_idx+1}/{N_FOLDS} - "
                     f"Epoch {info.epoch}/{EPOCHS} "
                     f"Loss: {info.avg_loss:.4f} Val Acc: {info.val_accuracy*100:.2f}%"
                 )

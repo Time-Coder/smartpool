@@ -55,19 +55,19 @@ def plot_results(model_results:Dict[str, Any], stats:Dict[str, Any]):
 
     ax.set_xlabel('Model Type', fontsize=12)
     ax.set_ylabel('Validation Accuracy', fontsize=12)
-    ax.set_title('Handwritten Digit Recognition Models: 5-Fold Cross-Validation Comparison', fontsize=14, pad=20)
+    ax.set_title('CIFAR-10 Image Classification Models: 5-Fold Cross-Validation Comparison', fontsize=14, pad=20)
     ax.set_xticks(x_pos)
     ax.set_xticklabels(model_results.keys())
     ax.legend(loc='lower right')
     ax.grid(True, alpha=0.3)
-    ax.set_ylim(0.8, 1.0)
+    ax.set_ylim(0.5, 1.0)
 
     plt.tight_layout()
     plt.savefig('cross_validation_results.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 def print_results_table(stats:Dict[str, Any]):
-    table = Table(title="5-Fold Cross-Validation Results Summary")
+    table = Table(title="5-Fold Cross-Validation Results Summary (CIFAR-10)")
     table.add_column("Model", style="cyan")
     table.add_column("Mean Accuracy", style="magenta")
     table.add_column("Std Deviation", style="green")

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .infer_session import InferSession
     from .infer_session_task import InferSessionTask
     from .model_info import ModelInfo
+    from .infer_model import InferModel
 
 
 class InferSessionPool(Pool):
@@ -79,6 +80,54 @@ class InferSessionPool(Pool):
             InferSessionPool._model_infos[model_path] = ModelInfo(model_path)
 
         return InferSessionPool._model_infos[model_path]
+
+    @classmethod
+    def config(
+        cls, pool_name: str="default", *,
+        max_workers: int = 0,
+        thread_name_prefix: str = "InferSessionPool.worker:",
+        session_options: Optional[ort.SessionOptions] = None,
+        chunk_timeout: float = 0.1
+    ) -> None:
+        Pool.config(
+            cls, pool_name,
+            max_workers=max_workers,
+            thread_name_prefix=thread_name_prefix,
+            session_options=session_options,
+            chunk_timeout=chunk_timeout
+        )
+
+    @classmethod
+    def task(cls, *args, **kwargs):
+        raise NotImplementedError("InferSessionPool.task is not implemented")
+
+    @staticmethod
+    def model(
+        model_path: str,
+        pool_name: str = "default",
+        output_names: Optional[List[str]] = None,
+        cpu_mode_res: Optional[Resource] = None,
+        gpu_mode_res: Optional[Resource] = None,
+        check_args: bool = True,
+        providers: Optional[List[Union[str, Tuple[str, Dict]]]] = None,
+        run_options: Optional[ort.RunOptions] = None,
+        use_io_binding: bool = False,
+        copy_outputs_to_cpu: bool = True,
+        chunksize: int = 1
+    )->InferModel:
+        from .infer_model import InferModel
+        return InferModel(
+            model_path, pool_name,
+            output_names,
+            cpu_mode_res,
+            gpu_mode_res,
+            check_args,
+            providers,
+            run_options,
+            use_io_binding,
+            copy_outputs_to_cpu,
+            chunksize
+        )
 
     @property
     def session_options(self) -> ort.SessionOptions:
@@ -173,10 +222,10 @@ class InferSessionPool(Pool):
         from .infer_session_task import InferSessionTask
 
         model_info: ModelInfo = self.model_info(model_path)
-        merged_kwargs, has_ortvalue = model_info.merge_args(args, kwargs, check_args)
+        merged_kwargs, has_ortvalue = model_info._merge_args(args, kwargs, check_args)
 
         if check_args:
-            model_info.check_outputs(output_names)
+            model_info._check_outputs(output_names)
             self._check_providers(providers)
 
         if cpu_mode_res is None:

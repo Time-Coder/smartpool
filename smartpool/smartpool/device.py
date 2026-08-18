@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -43,6 +44,17 @@ class Device:
         else:
             self.device_prefix = torch_device
             self.device_id = -1
+
+    def __copy__(self) -> "Device":
+        new_device = Device(self.torch_device, self.gpu_index, self.dml_id)
+        new_device._ort_provider = self._ort_provider
+        return new_device
+
+    def __deepcopy__(self, memo: Dict[int, Any]) -> "Device":
+        new_device = Device(self.torch_device, self.gpu_index, self.dml_id)
+        memo[id(self)] = new_device
+        new_device._ort_provider = copy.deepcopy(self._ort_provider, memo)
+        return new_device
 
     def __eq__(self, other) -> bool:
         if isinstance(other, Device):

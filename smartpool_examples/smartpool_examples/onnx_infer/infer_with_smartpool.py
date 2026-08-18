@@ -8,7 +8,6 @@ from progress_info import ProgressInfo
 from smartpool import DataSize, InferSessionPool, Resource, ThreadPool
 
 preprocess = ThreadPool.task(
-    pool_name="pre_post",
     cpu_mode_res=Resource(
         cpu_cores=1,
         cpu_mem=15*DataSize.MB
@@ -17,7 +16,6 @@ preprocess = ThreadPool.task(
 )(preprocess)
 
 postprocess = ThreadPool.task(
-    pool_name="pre_post",
     cpu_mode_res=Resource(
         cpu_cores=1,
         cpu_mem=81*DataSize.MB
@@ -40,8 +38,14 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         gpu_mem=10*DataSize.MB
     )
 
-    # ThreadPool.config(pool_name="pre_post", max_workers=4)
-    infer_session_pool = InferSessionPool()
+    infer_model = InferSessionPool.model(
+        model_path,
+        cpu_mode_res=cpu_res,
+        gpu_mode_res=gpu_res,
+        use_io_binding=False,
+        check_args=False,
+        chunksize=1
+    )
 
     futures = []
     for image_path in image_paths:
@@ -51,7 +55,7 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         # preprocess_future.result()
 
         img, blob, scale, pad = preprocess_future.unpack(4)
-        infer_future = infer_session_pool.submit(model_path, args=(blob,), cpu_mode_res=cpu_res, gpu_mode_res=gpu_res, use_io_binding=False, check_args=False, chunksize=1)
+        infer_future = infer_model(blob)
         infer_future.add_start_callback(progress_info.start_one_infer)
         infer_future.add_done_callback(progress_info.finish_one_infer)
         # infer_future.result()

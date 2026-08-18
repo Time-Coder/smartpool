@@ -58,6 +58,46 @@ class ThreadPool(Pool):
             need_module_deps=False
         )
 
+    @classmethod
+    def config(
+        cls, pool_name: str="default", *,
+        max_workers:int=0,
+        thread_name_prefix:str="ThreadPool.worker:",
+        initializer:Optional[Callable[..., Any]]=None,
+        initargs:Tuple[Any, ...]=(),
+        initkwargs:Optional[Dict[str, Any]]=None,
+        use_torch:bool=False
+    ):
+        Pool.config(
+            cls, pool_name,
+            max_workers=max_workers,
+            thread_name_prefix=thread_name_prefix,
+            initializer=initializer,
+            initargs=initargs,
+            initkwargs=initkwargs,
+            use_torch=use_torch
+        )
+
+    @classmethod
+    def task(
+        cls, func:Callable=None, *,
+        pool_name:str="default",
+        cpu_mode_res:Optional[Resource]=None,
+        gpu_mode_res:Optional[Resource]=None,
+        check_args:bool=True,
+        use_torch:Optional[bool]=None,
+        device_changeable:bool=False
+    ):
+        return Pool.task(
+            cls, func,
+            pool_name=pool_name,
+            cpu_mode_res=cpu_mode_res,
+            gpu_mode_res=gpu_mode_res,
+            check_args=check_args,
+            use_torch=use_torch,
+            device_changeable=device_changeable
+        )
+
     def submit(
         self, func:Callable[..., Any],
         args:Optional[Tuple[Any, ...]]=None,

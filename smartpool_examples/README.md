@@ -17,7 +17,7 @@ python -m smartpool_examples.count_prime
 
 ### 2. Cross-Validation for Deep Learning models (`cross_validation`)
 
-Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management.
+Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management. Runs 5-fold cross-validation of four CNN models (VGG16-BN, ResNet-32, WideResNet-28-10, ResNeXt-29) for CIFAR-10 image classification. Each of the 40 tasks either preprocesses one fold's data or trains one model on one fold; SmartPool feeds each training task its preprocessed data through dependency resolution (`Future.unpack`).
 
 #### Running the Example
 
@@ -51,6 +51,7 @@ python -m smartpool_examples.cross_validation --pool ray
 
 - GPU memory management and core allocation
 - Automatic device selection (CPU vs GPU)
+- Preprocessing → training pipeline with dependency resolution
 - Cross-validation pipeline parallelization
 - Resource monitoring during training
 - Performance comparison with external frameworks

@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 
-class PreActBlock(nn.Module):
+class WideBasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
         self.bn1 = nn.BatchNorm2d(in_channels)
@@ -25,30 +25,41 @@ class PreActBlock(nn.Module):
         out += self.shortcut(identity)
         return out
 
-class ResNetV2(nn.Module):
+
+class WideResNet2810(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        base_width = 16
+        widen_factor = 10
 
-        self.layer1 = self._make_layer(32, 64, 2, stride=2)
-        self.layer2 = self._make_layer(64, 128, 2, stride=2)
+        w0 = base_width
+        w1 = base_width * widen_factor
+        w2 = base_width * 2 * widen_factor
+        w3 = base_width * 4 * widen_factor
 
-        self.bn = nn.BatchNorm2d(128)
+        self.conv1 = nn.Conv2d(3, w0, 3, padding=1, bias=False)
+
+        self.layer1 = self._make_layer(w0, w1, 4, stride=1)
+        self.layer2 = self._make_layer(w1, w2, 4, stride=2)
+        self.layer3 = self._make_layer(w2, w3, 4, stride=2)
+
+        self.bn = nn.BatchNorm2d(w3)
         self.relu = nn.ReLU(inplace=True)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(128, 10)
+        self.fc = nn.Linear(w3, 10)
 
     def _make_layer(self, in_channels, out_channels, blocks, stride=1):
         layers = []
-        layers.append(PreActBlock(in_channels, out_channels, stride))
+        layers.append(WideBasicBlock(in_channels, out_channels, stride))
         for _ in range(1, blocks):
-            layers.append(PreActBlock(out_channels, out_channels))
+            layers.append(WideBasicBlock(out_channels, out_channels))
         return nn.Sequential(*layers)
 
     def forward(self, x):
         x = self.conv1(x)
         x = self.layer1(x)
         x = self.layer2(x)
+        x = self.layer3(x)
         x = self.relu(self.bn(x))
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)

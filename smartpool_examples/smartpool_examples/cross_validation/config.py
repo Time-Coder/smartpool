@@ -4,9 +4,10 @@ self_folder = os.path.dirname(os.path.abspath(__file__))
 
 # Training parameters
 BATCH_SIZE = 128
-EPOCHS = 5
+EPOCHS = 15
 LEARNING_RATE = 0.001
 
 # Data settings
 DATA_ROOT = f'{self_folder}/data'
-DATASET_NAME = 'MNIST'
+DATASET_NAME = 'CIFAR-10'
+N_FOLDS = 5

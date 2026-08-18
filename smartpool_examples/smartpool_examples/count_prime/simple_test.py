@@ -27,7 +27,7 @@ def count_prime(start: int, stop: int) -> int:
 BASE = 1_000
 STEP = 500
 N_TASKS = 3000
-USE_SMARTPOOL = False
+USE_SMARTPOOL = True
 
 
 def build_tasks(n_tasks: int = N_TASKS, step: int = STEP, base: int = BASE):
