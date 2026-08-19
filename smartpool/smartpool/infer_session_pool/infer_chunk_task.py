@@ -217,3 +217,5 @@ class InferChunkTask(InferSessionTask):
         src_res.cpu_mem += target_res.cpu_mem
         src_res.gpu_cores += target_res.gpu_cores
         src_res.gpu_mem += target_res.gpu_mem
+        src_res.result_cpu_mem += target_res.result_cpu_mem
+        src_res.result_gpu_mem += target_res.result_gpu_mem

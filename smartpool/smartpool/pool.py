@@ -453,6 +453,8 @@ class Pool(ABC):
             cpu_mem=aggregate_func(res.cpu_mem for res in resources),
             gpu_cores=aggregate_func(res.gpu_cores for res in resources),
             gpu_mem=aggregate_func(res.gpu_mem for res in resources),
+            result_cpu_mem=aggregate_func(res.result_cpu_mem for res in resources),
+            result_gpu_mem=aggregate_func(res.result_gpu_mem for res in resources),
         )
 
     def map(
@@ -787,6 +789,95 @@ class Pool(ABC):
     @abstractmethod
     def _release_resource(self, task:Task)->None:
         pass
+
+    @staticmethod
+    def _weakrefable_leaves(obj) -> List:
+        leaves = []
+        seen = set()
+        stack = [obj]
+        while stack:
+            item = stack.pop()
+            if id(item) in seen:
+                continue
+
+            seen.add(id(item))
+            try:
+                weakref.ref(item)
+            except TypeError:
+                if isinstance(item, (tuple, list)):
+                    stack.extend(item)
+                elif isinstance(item, dict):
+                    stack.extend(item.values())
+
+                continue
+
+            leaves.append(item)
+
+        return leaves
+
+    def _register_result_finalizer(self, result, result_cpu_mem: int, result_gpu_mem: int, gpu_index: int = -1)->None:
+        if result_cpu_mem <= 0 and result_gpu_mem <= 0:
+            return
+
+        state = {"done": False}
+
+        def release_once()->None:
+            with self._sys_info_lock:
+                if state["done"]:
+                    return
+
+                state["done"] = True
+                self._sys_info.cpu_mem_free += result_cpu_mem
+                if gpu_index >= 0 and result_gpu_mem > 0:
+                    self._sys_info.gpu_infos[gpu_index].mem_free += result_gpu_mem
+
+        try:
+            weakref.ref(result)
+        except TypeError:
+            leaves = Pool._weakrefable_leaves(result)
+            if not leaves:
+                release_once()
+                return
+
+            import threading
+
+            counter = {"n": len(leaves)}
+            counter_lock = threading.Lock()
+
+            def leaf_died(*_args)->None:
+                with counter_lock:
+                    counter["n"] -= 1
+                    last = counter["n"] <= 0
+
+                if last:
+                    release_once()
+
+            for leaf in leaves:
+                weakref.finalize(leaf, leaf_died)
+        else:
+            weakref.finalize(result, release_once)
+
+    def _hold_result_mem(self, task: Task, result_cpu_mem: int, result_gpu_mem: int)->None:
+        if result_cpu_mem <= 0 and result_gpu_mem <= 0:
+            return
+
+        gpu_index: int = task.device.gpu_index if task.device is not None else -1
+        sub_tasks:Optional[List[Task]] = getattr(task, "_sub_tasks", None)
+        if not sub_tasks:
+            self._register_result_finalizer(task.future._result, result_cpu_mem, result_gpu_mem, gpu_index)
+            return
+
+        remaining_cpu_mem, remaining_gpu_mem = result_cpu_mem, result_gpu_mem
+        for sub_task in sub_tasks:
+            sub_res = sub_task.effective_res
+            sub_result_cpu_mem = min(sub_res.result_cpu_mem, remaining_cpu_mem)
+            sub_result_gpu_mem = min(sub_res.result_gpu_mem, remaining_gpu_mem)
+            self._register_result_finalizer(sub_task.future._result, sub_result_cpu_mem, sub_result_gpu_mem, gpu_index)
+            remaining_cpu_mem -= sub_result_cpu_mem
+            remaining_gpu_mem -= sub_result_gpu_mem
+
+        if remaining_cpu_mem > 0 or remaining_gpu_mem > 0:
+            self._register_result_finalizer(task.future._result, remaining_cpu_mem, remaining_gpu_mem, gpu_index)
 
     def _estimate_cpu_cores_needed(self, res: Resource) -> float:
         return res.cpu_cores

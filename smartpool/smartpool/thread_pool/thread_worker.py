@@ -94,3 +94,5 @@ class ThreadWorker(Worker):
 
             thread_pool._on_task_done(task.id, success, result)
             self._active_task = None
+            task = None
+            result = None

@@ -132,3 +132,6 @@ class ChunkTask(Task):
 
         if target_res.gpu_mem > src_res.gpu_mem:
             src_res.gpu_mem = target_res.gpu_mem
+
+        src_res.result_cpu_mem += target_res.result_cpu_mem
+        src_res.result_gpu_mem += target_res.result_gpu_mem

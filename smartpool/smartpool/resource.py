@@ -13,7 +13,8 @@ class DataSize:
 class Resource:
 
     def __init__(self, *, cpu_cores:float=1, cpu_cores_in_python: Optional[float] = None, cpu_cores_out_of_python: float = 0,
-                 cpu_mem: int = 0, gpu_cores: float = 0, gpu_mem: int = 0):
+                 cpu_mem: int = 0, gpu_cores: float = 0, gpu_mem: int = 0,
+                 result_cpu_mem: int = 0, result_gpu_mem: int = 0):
 
         if cpu_cores_in_python is None:
             cpu_cores_in_python = cpu_cores
@@ -23,6 +24,8 @@ class Resource:
         self.cpu_mem = cpu_mem
         self.gpu_cores = gpu_cores
         self.gpu_mem = gpu_mem
+        self.result_cpu_mem = result_cpu_mem
+        self.result_gpu_mem = result_gpu_mem
 
     @property
     def cpu_cores(self) -> float:

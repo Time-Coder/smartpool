@@ -498,11 +498,16 @@ class InferSessionPool(Pool):
         with self._sys_info_lock:
             res = task.effective_res
             self._sys_info.cpu_cores_free += res.cpu_cores
-            self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem
+            result_cpu_mem = min(res.result_cpu_mem, task.estimated_need_cpu_mem)
+            self._sys_info.cpu_mem_free += task.estimated_need_cpu_mem - result_cpu_mem
+            result_gpu_mem = 0
             gpu_index = task.device.gpu_index
             if gpu_index != -1:
                 self._sys_info.gpu_infos[gpu_index].n_cores_free += res.gpu_cores
-                self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem
+                result_gpu_mem = min(res.result_gpu_mem, res.gpu_mem)
+                self._sys_info.gpu_infos[gpu_index].mem_free += res.gpu_mem - result_gpu_mem
+
+        self._hold_result_mem(task, result_cpu_mem, result_gpu_mem)
 
     def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
         for session in self._sessions.values():

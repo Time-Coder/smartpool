@@ -134,14 +134,19 @@ class ProcessPool(Pool):
 
             worker:ProcessWorker = task.worker
             hold_cpu_mem = worker.cached_rss - task.mem_before_enter
-            released_cpu_mem = task.estimated_need_cpu_mem - hold_cpu_mem
+            result_cpu_mem = min(res.result_cpu_mem, max(0, task.estimated_need_cpu_mem - hold_cpu_mem))
+            released_cpu_mem = task.estimated_need_cpu_mem - hold_cpu_mem - result_cpu_mem
             self._sys_info.cpu_mem_free += released_cpu_mem
 
+            result_gpu_mem = 0
             if task.device.gpu_index != -1:
                 gpu_index = task.device.gpu_index
                 gpu_info = self._sys_info.gpu_infos[gpu_index]
                 gpu_info.n_cores_free += res.gpu_cores
-                gpu_info.mem_free += res.gpu_mem
+                result_gpu_mem = min(res.result_gpu_mem, res.gpu_mem)
+                gpu_info.mem_free += res.gpu_mem - result_gpu_mem
+
+        self._hold_result_mem(task, result_cpu_mem, result_gpu_mem)
 
     def _put_task(self, task:Task)->None:
         self._take_resource(task)

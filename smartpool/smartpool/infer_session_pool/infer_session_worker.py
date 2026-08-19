@@ -77,3 +77,5 @@ class InferSessionWorker(Worker):
             success, result = task.exec()
             infer_session_pool._remove_provider_running_device(task.provider)
             infer_session_pool._on_task_done(task.id, success, result)
+            task = None
+            result = None

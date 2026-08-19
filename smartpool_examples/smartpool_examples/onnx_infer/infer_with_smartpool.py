@@ -10,7 +10,8 @@ from smartpool import DataSize, InferSessionPool, Resource, ThreadPool
 preprocess = ThreadPool.task(
     cpu_mode_res=Resource(
         cpu_cores=1,
-        cpu_mem=15*DataSize.MB
+        cpu_mem=15*DataSize.MB,
+        result_cpu_mem=6*DataSize.MB
     ),
     check_args=False
 )(preprocess)
@@ -28,14 +29,17 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
     cpu_res = Resource(
         cpu_cores_in_python=0,
         cpu_cores_out_of_python=1,
-        cpu_mem=81*DataSize.MB
+        cpu_mem=81*DataSize.MB,
+        result_cpu_mem=3*DataSize.MB
     )
     gpu_res = Resource(
         cpu_cores_in_python=0,
         cpu_cores_out_of_python=1,
         cpu_mem=128*DataSize.MB,
         gpu_cores=100,
-        gpu_mem=10*DataSize.MB
+        gpu_mem=10*DataSize.MB,
+        result_cpu_mem=3*DataSize.MB,
+        result_gpu_mem=3*DataSize.MB
     )
 
     infer_model = InferSessionPool.model(
@@ -67,7 +71,5 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         postprocess_future.add_done_callback(progress_info.finish_one_postprocess)
         # postprocess_future.result()
 
-        futures.append(postprocess_future)
-
-    for future in as_completed(futures):
+    for future in futures:
         future.result()
