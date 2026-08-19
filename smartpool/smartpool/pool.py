@@ -86,6 +86,7 @@ class Pool(ABC):
         self._can_move_to_gpu_tasks: Dict[str, Task] = {}
         self._not_ready_tasks: Dict[str, Task] = {}
         self._delayed_tasks: Dict[str, Task] = {}
+        self._postprocessing: bool = False
         self._lock: threading.RLock = threading.RLock()
         self._shutdown: bool = False
         self._chunk_timeout: float = chunk_timeout
@@ -202,7 +203,8 @@ class Pool(ABC):
             if chunk_task.submitted:
                 continue
 
-            chunk_task.submit()
+            with self._lock:
+                chunk_task.submit()
 
     def _put_in_chunk(self, task: Task) -> Future:
         import threading
@@ -611,40 +613,43 @@ class Pool(ABC):
             self._on_task_done(task_id, success, result)
 
     def _postprocess_after_task_done(self)->None:
-        moved_tasks = []
-        for task_id, task in self._can_move_to_gpu_tasks.items():
-            if self._try_move_to_gpu(task):
-                moved_tasks.append(task_id)
+        if self._postprocessing:
+            return
 
-        for task_id in moved_tasks:
-            del self._can_move_to_gpu_tasks[task_id]
+        self._postprocessing = True
+        try:
+            moved_tasks = []
+            for task_id, task in self._can_move_to_gpu_tasks.items():
+                if self._try_move_to_gpu(task):
+                    moved_tasks.append(task_id)
 
-        should_remove_from_delayed = []
-        for task_id, delayed_task in self._delayed_tasks.items():
-            if (
-                self._workers_working_count >= self._max_workers or
-                self._sys_info.cpu_cores_free < 1
-            ):
-                break
+            for task_id in moved_tasks:
+                del self._can_move_to_gpu_tasks[task_id]
 
-            if delayed_task.future.cancelled():
-                should_remove_from_delayed.append(task_id)
-                if task_id in self._tasks:
-                    del self._tasks[task_id]
+            for task_id, delayed_task in list(self._delayed_tasks.items()):
+                if (
+                    self._workers_working_count >= self._max_workers or
+                    self._sys_info.cpu_cores_free < 1
+                ):
+                    break
 
-                if task_id in self._can_move_to_gpu_tasks:
-                    del self._can_move_to_gpu_tasks[task_id]
+                if delayed_task.future.cancelled():
+                    self._delayed_tasks.pop(task_id, None)
+                    if task_id in self._tasks:
+                        del self._tasks[task_id]
 
-                continue
+                    if task_id in self._can_move_to_gpu_tasks:
+                        del self._can_move_to_gpu_tasks[task_id]
 
-            if not self._try_assign_task(delayed_task):
-                continue
+                    continue
 
-            should_remove_from_delayed.append(task_id)
-            self._put_task(delayed_task)
+                if not self._try_assign_task(delayed_task):
+                    continue
 
-        for task_id in should_remove_from_delayed:
-            del self._delayed_tasks[task_id] 
+                self._delayed_tasks.pop(task_id, None)
+                self._put_task(delayed_task)
+        finally:
+            self._postprocessing = False 
 
     def _sorted_idle_workers(self, exclude: Worker) -> Tuple[List[Worker], int]:
         workers: List[Worker] = []

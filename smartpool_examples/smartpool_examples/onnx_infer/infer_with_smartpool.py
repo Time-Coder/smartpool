@@ -70,6 +70,7 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         postprocess_future.add_start_callback(progress_info.start_one_postprocess)
         postprocess_future.add_done_callback(progress_info.finish_one_postprocess)
         # postprocess_future.result()
+        futures.append(postprocess_future)
 
     for future in futures:
         future.result()
