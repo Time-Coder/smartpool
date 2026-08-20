@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 
-class BasicBlock(nn.Module):
+class _ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False)
@@ -14,7 +14,7 @@ class BasicBlock(nn.Module):
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels)
+                nn.BatchNorm2d(out_channels),
             )
 
     def forward(self, x):
@@ -26,33 +26,31 @@ class BasicBlock(nn.Module):
         return out
 
 
-class ResNet32(nn.Module):
-    def __init__(self):
+class AudioCNN_Medium(nn.Module):
+    """Medium audio CNN: 2 residual stages + global pooling."""
+
+    def __init__(self, num_classes=50):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 16, 3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.relu = nn.ReLU(inplace=True)
-
-        self.layer1 = self._make_layer(16, 16, 5, stride=1)
-        self.layer2 = self._make_layer(16, 32, 5, stride=2)
-        self.layer3 = self._make_layer(32, 64, 5, stride=2)
-
+        self.stem = nn.Sequential(
+            nn.Conv2d(1, 32, 3, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+        )
+        self.layer1 = _ResBlock(32, 64, stride=2)  # 32x32
+        self.layer2 = _ResBlock(64, 128, stride=2)  # 16x16
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(64, 10)
-
-    def _make_layer(self, in_channels, out_channels, blocks, stride=1):
-        layers = []
-        layers.append(BasicBlock(in_channels, out_channels, stride))
-        for _ in range(1, blocks):
-            layers.append(BasicBlock(out_channels, out_channels))
-        return nn.Sequential(*layers)
+        self.classifier = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(128, num_classes),
+        )
 
     def forward(self, x):
-        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.stem(x)
         x = self.layer1(x)
         x = self.layer2(x)
-        x = self.layer3(x)
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
-        x = self.fc(x)
+        x = self.classifier(x)
         return x

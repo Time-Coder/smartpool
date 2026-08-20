@@ -14,7 +14,7 @@ from typing import Literal, TypeAlias
 
 import typer
 
-app = typer.Typer(help="Use smartpool to do 5-fold cross validation for 4 deep learning models for CIFAR-10 image classification task.")
+app = typer.Typer(help="Use smartpool to do 5-fold cross validation for 4 deep learning models for ESC-50 audio classification task.")
 
 PoolChoice: TypeAlias = Literal[
     "smartpool",
@@ -43,7 +43,7 @@ def main(
     import os
     os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 
-    print(f"Use {pool} to do 5-fold cross validation for 4 deep learning models for CIFAR-10 image classification task.")
+    print(f"Use {pool} to do 5-fold cross validation for 4 deep learning models for ESC-50 audio classification task.")
     print("Use `python -m smartpool_examples.cross_validation --help` to see all options.")
     print(f"See source code at folder {os.path.dirname(os.path.abspath(__file__))}")
     print("\npreparing data...")
@@ -55,8 +55,8 @@ def main(
         print("PyTorch is not installed. Follow https://pytorch.org/ instructions to install PyTorch.")
         return
 
-    if importlib.util.find_spec("torchvision") is None:
-        print("torchvision is not installed. Use `pip install torchvision` to install torchvision.")
+    if importlib.util.find_spec("pyarrow") is None:
+        print("pyarrow is not installed. Use `pip install pyarrow` to read ESC-50 parquet data.")
         return
 
     import os
@@ -65,13 +65,12 @@ def main(
 
     import numpy as np
     from config import N_FOLDS
-    from sklearn.model_selection import KFold
 
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
 
     import models
-    from data_utils import prepare_data
+    from data_utils import prepare_metadata
     from progress_info import ProgressInfo
     from visualization import plot_results, print_results_table
 
@@ -83,36 +82,40 @@ def main(
         if isinstance(cls, type) and issubclass(cls, nn.Module) and cls != nn.Module
     ]
 
-    dataset = prepare_data()
-    kfold = KFold(n_splits=N_FOLDS, shuffle=True, random_state=42)
+    meta_rows = prepare_metadata()
 
-    task_templates = []
-    for fold_idx, (train_indices, val_indices) in enumerate(kfold.split(dataset)):
-        for model_class in model_classes:
-            task_templates.append((fold_idx, model_class, train_indices.copy(), val_indices.copy(), dataset))
+    # ESC-50 official fold split: fold 1..5, each fold has 400 samples (50 classes x 8)
+    train_splits = []
+    for fold_idx in range(1, N_FOLDS + 1):
+        train_meta = [row for row in meta_rows if row['fold'] != fold_idx]
+        val_meta = [row for row in meta_rows if row['fold'] == fold_idx]
+        train_splits.append((fold_idx, train_meta, val_meta))
+
+    total_preprocess = len(meta_rows)
+    total_tasks = len(train_splits) * len(model_classes)
 
     start_time = time.perf_counter()
-    progress_info = ProgressInfo(len(task_templates))
+    progress_info = ProgressInfo(total_tasks, total_preprocess_tasks=total_preprocess)
 
     with progress_info:
         if pool == "smartpool":
             from train_with_smartpool import train_with_smartpool
-            model_results = train_with_smartpool(task_templates, max_workers, progress_info)
+            model_results = train_with_smartpool(meta_rows, train_splits, model_classes, progress_info, max_workers)
         elif pool == "concurrent":
             from train_with_concurrent import train_with_concurrent
-            model_results = train_with_concurrent(task_templates, max_workers, progress_info)
+            model_results = train_with_concurrent(meta_rows, train_splits, model_classes, progress_info, max_workers)
         elif pool == "multiprocessing":
             from train_with_multiprocessing import train_with_multiprocessing
-            model_results = train_with_multiprocessing(task_templates, max_workers, progress_info)
+            model_results = train_with_multiprocessing(meta_rows, train_splits, model_classes, progress_info, max_workers)
         elif pool == "joblib":
             from train_with_joblib import train_with_joblib
-            model_results = train_with_joblib(task_templates, max_workers, progress_info)
+            model_results = train_with_joblib(meta_rows, train_splits, model_classes, progress_info, max_workers)
         elif pool == "ray":
             from train_with_ray import train_with_ray
-            model_results = train_with_ray(task_templates, max_workers, progress_info)
+            model_results = train_with_ray(meta_rows, train_splits, model_classes, progress_info, max_workers)
         elif pool == "sequentially":
             from train_sequentially import train_sequentially
-            model_results = train_sequentially(task_templates, max_workers, progress_info)
+            model_results = train_sequentially(meta_rows, train_splits, model_classes, progress_info, max_workers)
 
     stop_time = time.perf_counter()
     print(f"train completed in {stop_time - start_time:.2f} seconds")

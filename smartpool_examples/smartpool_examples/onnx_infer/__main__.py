@@ -15,7 +15,6 @@ class Method(Enum):
     SmartPool = "smartpool"
     Sequentially = "sequentially"
     Ultralytics = "ultralytics"
-    Ray = "ray"
 
 @app.command()
 def main(
@@ -71,9 +70,6 @@ def main(
                 infer_sequentially_with_ultralytics,
             )
             infer_sequentially_with_ultralytics(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
-        elif method == Method.Ray:
-            from infer_with_ray import infer_with_ray
-            infer_with_ray(MODEL_PATH, image_paths, OUTPUT_FOLDER, progress_info)
 
     elapsed = time.perf_counter() - start_time
     print(f"\ninference completed in {elapsed:.2f} seconds")

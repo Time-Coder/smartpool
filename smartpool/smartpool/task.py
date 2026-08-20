@@ -98,6 +98,7 @@ class Task:
         if not self.use_torch or device.torch_device == "cpu":
             return True
 
+        from .pool import Pool
         return device.torch_device.startswith(Pool._torch_best_backend())
 
     def _future_done_callback_hook(self, result: Any)->None:

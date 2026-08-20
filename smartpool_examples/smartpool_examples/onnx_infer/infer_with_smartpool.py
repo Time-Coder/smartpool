@@ -46,9 +46,7 @@ def infer_with_smartpool(model_path: str, image_paths: List[str], output_dir: st
         model_path,
         cpu_mode_res=cpu_res,
         gpu_mode_res=gpu_res,
-        use_io_binding=False,
         check_args=False,
-        chunksize=1
     )
 
     futures = []

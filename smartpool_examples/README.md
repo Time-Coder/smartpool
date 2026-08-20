@@ -17,7 +17,7 @@ python -m smartpool_examples.count_prime
 
 ### 2. Cross-Validation for Deep Learning models (`cross_validation`)
 
-Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management. Runs 5-fold cross-validation of four CNN models (VGG16-BN, ResNet-32, WideResNet-28-10, ResNeXt-29) for CIFAR-10 image classification. Each of the 40 tasks either preprocesses one fold's data or trains one model on one fold; SmartPool feeds each training task its preprocessed data through dependency resolution (`Future.unpack`).
+Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management. Runs 5-fold cross-validation of four lightweight CNN models (AudioCNN-Small, AudioCNN-Medium, AudioCNN-Large, AudioCNN-Res) for ESC-50 environmental sound classification. The preprocessing stage submits one task per audio file (2,000 tasks total) to decode the WAV and extract a 64×64 log-mel spectrogram saved to disk; the training stage then runs one task per fold per model (20 tasks) reading the preprocessed features from disk.
 
 #### Running the Example
 
@@ -51,7 +51,7 @@ python -m smartpool_examples.cross_validation --pool ray
 
 - GPU memory management and core allocation
 - Automatic device selection (CPU vs GPU)
-- Preprocessing → training pipeline with dependency resolution
+- Per-sample audio preprocessing pipeline (decoding + log-mel feature extraction)
 - Cross-validation pipeline parallelization
 - Resource monitoring during training
 - Performance comparison with external frameworks
@@ -75,6 +75,32 @@ python -m smartpool_examples.onnx_infer --max-workers 4
 - COCO-format image preprocessing (resize, normalize, letterbox)
 - Softmax + top-5 postprocessing
 - Progress bars for downloads and inference steps
+
+
+### 4. YOLO License Plate OCR (`yolo_plate_ocr`)
+
+Runs a multi-stage vehicle and license plate recognition pipeline:
+YOLOv8 vehicle detection + ByteTrack tracking, vehicle cropping, YOLOv8 Pose
+plate corner detection, perspective rectification, PaddleOCR ONNX recognition, and final image
+annotation.
+
+#### Running the Example
+
+```bash
+python -m smartpool_examples.yolo_plate_ocr --method smartpool
+python -m smartpool_examples.yolo_plate_ocr --method sequentially
+python -m smartpool_examples.yolo_plate_ocr --method ultralytics
+```
+
+#### What it Demonstrates
+
+- Multi-stage inference pipeline orchestration
+- SmartPool `InferSessionPool.model` ONNX inference for YOLO and PaddleOCR recognition
+- ONNX Runtime sequential and Ultralytics YOLO + ONNX OCR sequential baselines
+- Vehicle Track ID propagation across downstream plate detection and OCR
+- Four-corner plate keypoint handling and perspective transform
+- Automatic sample/model download with cache checks
+- Rich progress bars for tracking, OCR, and result saving
 
 
 ## License

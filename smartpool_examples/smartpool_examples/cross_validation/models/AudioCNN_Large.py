@@ -1,11 +1,17 @@
 import torch.nn as nn
 
 
-class VGG16BN(nn.Module):
-    def __init__(self):
+class AudioCNN_Large(nn.Module):
+    """Large audio CNN: deeper stack with wider channels."""
+
+    def __init__(self, num_classes=50):
         super().__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(3, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.Conv2d(1, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),  # 32x32
+
+            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
             nn.MaxPool2d(2),  # 16x16
 
@@ -15,24 +21,15 @@ class VGG16BN(nn.Module):
 
             nn.Conv2d(128, 256, 3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, 3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, 3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
             nn.MaxPool2d(2),  # 4x4
 
-            nn.Conv2d(256, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),  # 2x2
-
-            nn.Conv2d(512, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),  # 1x1
+            nn.AdaptiveAvgPool2d((1, 1)),
         )
         self.classifier = nn.Sequential(
-            nn.Linear(512, 512),
+            nn.Linear(256, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.5),
-            nn.Linear(512, 10)
+            nn.Linear(256, num_classes),
         )
 
     def forward(self, x):

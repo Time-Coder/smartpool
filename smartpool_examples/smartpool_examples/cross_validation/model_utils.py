@@ -6,8 +6,9 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from config import EPOCHS, LEARNING_RATE
-from data_utils import create_data_loaders
+from config import BATCH_SIZE, EPOCHS, LEARNING_RATE, N_CLASSES
+from data_utils import load_features
+from torch.utils.data import DataLoader, TensorDataset
 
 from smartpool import best_device, move_optimizer_to
 
@@ -51,40 +52,25 @@ class ErrorInfo:
     traceback:str
 
 
-def preprocess_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue=None):
+def train_single_fold(fold_idx, model_class, train_meta, val_meta, progress_queue, device=None):
     try:
-        train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices, train_augment=True)
-        if progress_queue is not None:
-            progress_queue.put(PreprocessInfo(
-                model_name=model_class.__name__,
-                fold_idx=fold_idx,
-                epoch=0,
-                batch=len(train_loader),
-                total_batches=len(train_loader),
-                device='cpu',
-                avg_loss=0.0,
-                val_accuracy=0.0,
-                pid=os.getpid()
-            ))
-        return fold_idx, model_class, train_loader, val_loader
-    except Exception as e:
-        if progress_queue is not None:
-            error_info = ErrorInfo(e, traceback.format_exc())
-            progress_queue.put(error_info)
-        raise e
-
-
-def train_single_fold(fold_idx, model_class, train_loader, val_loader, progress_queue, device=None):
-    try:
-        return _train_single_fold(fold_idx, model_class, train_loader, val_loader, progress_queue, device)
+        return _train_single_fold(fold_idx, model_class, train_meta, val_meta, progress_queue, device)
     except Exception as e:
         error_info = ErrorInfo(e, traceback.format_exc())
         progress_queue.put(error_info)
         raise e
 
-def _train_single_fold(fold_idx, model_class, train_loader, val_loader, progress_queue, user_device):
+def _train_single_fold(fold_idx, model_class, train_meta, val_meta, progress_queue, user_device):
+    train_data, train_targets = load_features(train_meta)
+    val_data, val_targets = load_features(val_meta)
+
+    train_dataset = TensorDataset(train_data, train_targets)
+    val_dataset = TensorDataset(val_data, val_targets)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True)
+
     num_batches = len(train_loader)
-    model = model_class()
+    model = model_class(num_classes=N_CLASSES)
 
     device = user_device
     if user_device is None:

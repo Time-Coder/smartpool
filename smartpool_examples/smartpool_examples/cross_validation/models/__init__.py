@@ -1,6 +1,6 @@
-from .ResNet32 import ResNet32
-from .ResNeXt29 import ResNeXt29
-from .VGG16BN import VGG16BN
-from .WideResNet2810 import WideResNet2810
+from .AudioCNN_Medium import AudioCNN_Medium
+from .AudioCNN_Res import AudioCNN_Res
+from .AudioCNN_Large import AudioCNN_Large
+from .AudioCNN_Small import AudioCNN_Small
 
-__all__ = ['VGG16BN', 'ResNet32', 'WideResNet2810', 'ResNeXt29']
+__all__ = ['AudioCNN_Small', 'AudioCNN_Medium', 'AudioCNN_Large', 'AudioCNN_Res']

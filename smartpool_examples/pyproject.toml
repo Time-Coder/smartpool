@@ -24,6 +24,7 @@ dependencies = [
     "rich",
     "typer",
     "joblib",
+    "pyarrow",
     "opencv-python",
     "ultralytics",
     "onnxslim",

@@ -6,7 +6,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 
 class ProgressInfo:
-    def __init__(self, total_tasks: int):
+    def __init__(self, total_tasks: int, total_preprocess_tasks: int = 0):
         self.progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -14,6 +14,9 @@ class ProgressInfo:
             TimeRemainingColumn(),
         )
         self.total_tasks = total_tasks
+        self.total_preprocess_tasks = total_preprocess_tasks
+        self.preprocess_bar_id = None
+        self.preprocessed_count = 0
         self.task_progress_bars: Dict[str, int] = {}
         self.preprocessed_tasks: Set[str] = set()
         self.finished_tasks: Set[str] = set()
@@ -28,11 +31,13 @@ class ProgressInfo:
             task_key = f"{info.model_name}_fold_{info.fold_idx}"
 
             if isinstance(info, PreprocessInfo):
-                if task_key not in self.task_progress_bars:
-                    desc = f"preprocess {info.model_name} data for fold {info.fold_idx+1}/{N_FOLDS}"
-                    self.task_progress_bars[task_key] = self.progress.add_task(desc, total=100)
-                self.progress.update(self.task_progress_bars[task_key], completed=100)
-                self.progress.update(self.task_progress_bars[task_key], visible=False)
+                if self.preprocess_bar_id is None:
+                    self.preprocess_bar_id = self.progress.add_task(
+                        "preprocessing audio features for all folds...",
+                        total=self.total_preprocess_tasks
+                    )
+                self.preprocessed_count += 1
+                self.progress.update(self.preprocess_bar_id, completed=self.preprocessed_count)
                 self.preprocessed_tasks.add(task_key)
                 continue
 
