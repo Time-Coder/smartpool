@@ -15,36 +15,40 @@ Demonstrates basic usage of smartpool.ProcessPool.
 python -m smartpool_examples.count_prime
 ```
 
-### 2. Cross-Validation for Deep Learning models (`cross_validation`)
+### 2. Image Classification Cross-Validation (`classify_image_cross_validation`)
 
-Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management. Runs 5-fold cross-validation of four lightweight CNN models (AudioCNN-Small, AudioCNN-Medium, AudioCNN-Large, AudioCNN-Res) for ESC-50 environmental sound classification. The preprocessing stage submits one task per audio file (2,000 tasks total) to decode the WAV and extract a 64×64 log-mel spectrogram saved to disk; the training stage then runs one task per fold per model (20 tasks) reading the preprocessed features from disk.
+Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management. Runs 5-fold cross-validation of seven CNN models (LeNet5, MLP, ModernCNN, ResNet, ResNetV2, ResNeXt, ResNeXtV2) for MNIST handwritten digit classification.
+
+#### Running the Example
+
+```bash
+python -m smartpool_examples.classify_image_cross_validation
+```
+
+### 3. Audio Classification Cross-Validation (`classify_audio_cross_validation`)
+
+Demonstrates SmartPool's capabilities for machine learning workloads with GPU resource management. Runs 5-fold cross-validation of four lightweight CNN models (AudioCNN-Small, AudioCNN-Medium, AudioCNN-Large, AudioCNN-Res) for ESC-50 environmental sound classification. The preprocessing stage submits one task per audio file (2,000 tasks total) to decode the WAV and extract a 128×128 log-mel spectrogram saved to disk; the training stage then runs one task per fold per model (20 tasks) reading the preprocessed features from disk.
 
 #### Running the Example
 
 ```bash
 # Using ProcessPool  
-python -m smartpool_examples.cross_validation --pool smartpool.ProcessPool
+python -m smartpool_examples.classify_audio_cross_validation --backend smartpool
 
-# Using ThreadPool
-python -m smartpool_examples.cross_validation --pool smartpool.ThreadPool
+# Using concurrent backend
+python -m smartpool_examples.classify_audio_cross_validation --backend concurrent
 
-# Using multiprocessing.Pool
-python -m smartpool_examples.cross_validation --pool multiprocessing.Pool
+# Using multiprocessing backend
+python -m smartpool_examples.classify_audio_cross_validation --backend multiprocessing
 
-# Using concurrent.futures.ProcessPoolExecutor
-python -m smartpool_examples.cross_validation --pool concurrent.futures.ProcessPoolExecutor
+# Using joblib backend
+python -m smartpool_examples.classify_audio_cross_validation --backend joblib
 
-# Using concurrent.futures.ThreadPoolExecutor
-python -m smartpool_examples.cross_validation --pool concurrent.futures.ThreadPoolExecutor
+# Using Ray backend
+python -m smartpool_examples.classify_audio_cross_validation --backend ray
 
-# Using joblib.Parallel(backend='loky')
-python -m smartpool_examples.cross_validation --pool joblib.Parallel(backend='loky')
-
-# Using joblib.Parallel(backend='threading')
-python -m smartpool_examples.cross_validation --pool joblib.Parallel(backend='threading')
-
-# Using Ray
-python -m smartpool_examples.cross_validation --pool ray
+# Running sequentially
+python -m smartpool_examples.classify_audio_cross_validation --backend sequentially
 ```
 
 #### What it Demonstrates
@@ -57,7 +61,7 @@ python -m smartpool_examples.cross_validation --pool ray
 - Performance comparison with external frameworks
 
 
-### 3. ONNX Inference (`onnx_infer`)
+### 4. ONNX Inference (`onnx_infer`)
 
 Runs batched ONNX model inference using `InferSessionPool` for concurrent GPU/CPU execution.
 Automatically manages inference sessions across worker threads.
@@ -77,7 +81,7 @@ python -m smartpool_examples.onnx_infer --max-workers 4
 - Progress bars for downloads and inference steps
 
 
-### 4. YOLO License Plate OCR (`yolo_plate_ocr`)
+### 5. YOLO License Plate OCR (`yolo_plate_ocr`)
 
 Runs a multi-stage vehicle and license plate recognition pipeline:
 YOLOv8 vehicle detection + ByteTrack tracking, vehicle cropping, YOLOv8 Pose

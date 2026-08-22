@@ -1,12 +1,13 @@
 from pathlib import Path
-from typing import Optional
+from functools import partial
+from typing import Optional, Sequence
 
 import cv2
 import numpy as np
 
 from smartpool import DataSize, InferSessionPool, Resource, ThreadPool
 
-from .inference import (
+from inference import (
     annotate,
     create_tracker,
     decode_yolo_detections,
@@ -14,7 +15,6 @@ from .inference import (
     decode_yolo_pose,
     expand_box,
     load_ocr_keys,
-    preprocess_frame,
     preprocess_image,
     preprocess_ocr_image,
     save_warped_plates,
@@ -24,39 +24,153 @@ from .inference import (
 )
 from .progress_info import PipelineProgress
 
-PREPROCESS_POOL = "yolo_plate_ocr_preprocess"
-POSTPROCESS_POOL = "yolo_plate_ocr_postprocess"
-PLATE_POOL = "yolo_plate_ocr_plate"
-RENDER_POOL = "yolo_plate_ocr_render"
+CALCULATION_POOL = "calculation"
+IO_POOL = "IO"
 
 
-@ThreadPool.task(
-    pool_name=PREPROCESS_POOL,
-    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=24 * DataSize.MB, result_cpu_mem=8 * DataSize.MB),
-    check_args=False,
-)
-def preprocess_task(frame_index, output_name, image):
-    return preprocess_frame(frame_index, output_name, image)
+preprocess_image = ThreadPool.task(
+    pool_name=CALCULATION_POOL,
+    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=24 * DataSize.MB, result_cpu_mem=8 * DataSize.MB)
+)(preprocess_image)
 
+async_imwrite = ThreadPool.task(pool_name=IO_POOL)(cv2.imwrite)
 
 @ThreadPool.task(
-    pool_name=POSTPROCESS_POOL,
-    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=64 * DataSize.MB, result_cpu_mem=8 * DataSize.MB),
-    check_args=False,
+    pool_name=CALCULATION_POOL,
+    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=64 * DataSize.MB, result_cpu_mem=8 * DataSize.MB)
 )
-def postprocess_vehicle_task(frame_index, output_name, image, output, ratio, pad, tracker, vehicle_conf):
+def postprocess_vehicle(image, output, ratio, pad, tracker, vehicle_conf):
     boxes = decode_yolo_detections(output, image.shape, ratio, pad, vehicle_conf, {2, 3, 5, 7})
     vehicles = track_vehicle_boxes(tracker, boxes, image)
-    return frame_index, output_name, image, vehicles
+    return vehicles
+
+@ThreadPool.task(
+    pool_name=CALCULATION_POOL,
+    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=64 * DataSize.MB, result_cpu_mem=8 * DataSize.MB)
+)
+def preprocess_ocr_candidate(crop_image, corners_crop):
+    warped = warp_plate(crop_image, corners_crop)
+    ocr_blob = preprocess_ocr_image(warped)
+    return ocr_blob
 
 
 @ThreadPool.task(
-    pool_name=PLATE_POOL,
+    pool_name=CALCULATION_POOL,
+    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=64 * DataSize.MB, result_cpu_mem=8 * DataSize.MB),
+)
+def process_yolo_pose(
+    plate_output,
+    crop_image,
+    crop_box,
+    ratio,
+    pad,
+    plate_conf,
+    ocr_infer_model,
+    ocr_keys,
+    vehicle,
+    save_plate,
+    progress
+):
+    x1, y1, x2, y2 = crop_box
+    plates = []
+    candidates = decode_yolo_pose(plate_output, crop_image.shape, ratio, pad, plate_conf)
+    for idx, (confidence, corners_crop) in enumerate(candidates, start=1):
+        corners_image = corners_crop + np.asarray([x1, y1], dtype=np.float32)
+        ocr_blob_future = preprocess_ocr_candidate(crop_image, corners_crop)
+        ocr_output = ocr_infer_model(ocr_blob_future)[0]
+        text, _ = decode_ocr_output(ocr_output, ocr_keys)
+        plate = PlateResult(
+            vehicle=vehicle,
+            crop_box=crop_box,
+            corners_crop=corners_crop,
+            corners_image=corners_image,
+            warped=warped,
+            text=text,
+            confidence=confidence,
+        )
+        plates.append(plate)
+
+        if save_plate:
+            text = plate.text or "unknown"
+            filename = f"{image_stem}_track{plate.vehicle.track_id}_plate{idx}_{text}.jpg"
+            write_future = async_imwrite(str(plate_dir / filename), plate.warped)
+
+    return plates
+
+@ThreadPool.task(
+    pool_name=CALCULATION_POOL,
     cpu_mode_res=Resource(cpu_cores=1, cpu_mem=128 * DataSize.MB, result_cpu_mem=16 * DataSize.MB),
-    check_args=False,
+)
+def save_warped_plates(output_dir: Path, image_stem: str, plates: Sequence[PlateResult]):
+    plate_dir = output_dir / "plates"
+    plate_dir.mkdir(parents=True, exist_ok=True)
+    write_futures = []
+    for idx, plate in enumerate(plates, start=1):
+        text = plate.text or "unknown"
+        filename = f"{image_stem}_track{plate.vehicle.track_id}_plate{idx}_{text}.jpg"
+        write_future = async_imwrite(str(plate_dir / filename), plate.warped)
+        write_futures.append(write_future)
+
+    return write_futures
+
+@ThreadPool.task(
+    pool_name=CALCULATION_POOL,
+    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=128 * DataSize.MB, result_cpu_mem=16 * DataSize.MB),
+)
+def detect_and_ocr_plate(
+    output_name,
+    image,
+    vehicle,
+    plate_infer_model,
+    ocr_infer_model,
+    ocr_keys,
+    plate_conf,
+    crop_padding,
+    save_plates,
+    output_dir,
+    progress
+):
+    height, width = image.shape[:2]
+    crop_box = expand_box(vehicle.box, width, height, crop_padding)
+    x1, y1, x2, y2 = crop_box
+    crop_image = image[y1:y2, x1:x2]
+    if crop_image.size == 0:
+        return
+
+    preprocess_future = preprocess_image(crop_image)
+    progress.attach_callbacks(preprocess_future, "preprocess vehicle")
+    
+    blob, ratio, pad = preprocess_future.unpack(3)
+    plate_infer_future = plate_infer_model(blob)
+    progress.attach_callbacks(plate_infer_future, "infer plate")
+
+    plate_output = plate_infer_future[0]
+
+    if save_plates:
+        plate_dir = output_dir / "plates"
+        plate_dir.mkdir(parents=True, exist_ok=True)
+    
+    plates_future = process_yolo_pose(
+        plate_output,
+        crop_image,
+        crop_box,
+        ratio,
+        pad,
+        plate_conf,
+        ocr_infer_model,
+        ocr_keys,
+        vehicle,
+        save_plates,
+        progress
+    )
+
+    return plates_future
+
+@ThreadPool.task(
+    pool_name=CALCULATION_POOL,
+    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=128 * DataSize.MB, result_cpu_mem=16 * DataSize.MB),
 )
 def detect_and_ocr_plates_task(
-    frame_index,
     output_name,
     image,
     vehicles,
@@ -67,62 +181,48 @@ def detect_and_ocr_plates_task(
     crop_padding,
     save_plates,
     output_dir,
+    progress
 ):
-    plates = []
+    plates_futures = []
+    write_futures = []
+    progress.increase_total("preprocess vehicle start", len(vehicles))
+    progress.increase_total("preprocess vehicle done", len(vehicles))
+    progress.increase_total("infer plate start", len(vehicles))
+    progress.increase_total("infer plate done", len(vehicles))
     for vehicle in vehicles:
         height, width = image.shape[:2]
         crop_box = expand_box(vehicle.box, width, height, crop_padding)
         x1, y1, x2, y2 = crop_box
-        crop = image[y1:y2, x1:x2]
-        if crop.size == 0:
+        crop_image = image[y1:y2, x1:x2]
+        if crop_image.size == 0:
             continue
 
-        blob, ratio, pad = preprocess_image(crop)
-        infer_future = plate_infer_model(blob)
-        output = infer_future[0].result()
-        candidates = decode_yolo_pose(output, crop.shape, ratio, pad, plate_conf)
-        for confidence, corners_crop in candidates:
-            corners_image = corners_crop + np.asarray([x1, y1], dtype=np.float32)
-            warped = warp_plate(crop, corners_crop)
-            ocr_blob = preprocess_ocr_image(warped)
-            ocr_future = ocr_infer_model(ocr_blob)
-            text, _ = decode_ocr_output(ocr_future[0].result(), ocr_keys)
-            plates.append(
-                PlateResult(
-                    vehicle=vehicle,
-                    crop_box=crop_box,
-                    corners_crop=corners_crop,
-                    corners_image=corners_image,
-                    warped=warped,
-                    text=text,
-                    confidence=confidence,
-                )
-            )
+        preprocess_future = preprocess_image(crop_image)
+        progress.attach_callbacks(preprocess_future, "preprocess vehicle")
+        
+        blob, ratio, pad = preprocess_future.unpack(3)
+        plate_infer_future = plate_infer_model(blob)
+        progress.attach_callbacks(plate_infer_future, "infer plate")
 
-    if save_plates:
-        save_warped_plates(output_dir, output_name.replace("/", "_"), plates)
+        plate_output = plate_infer_future[0]
+        plates_future = process_yolo_pose(
+            plate_output,
+            crop_image,
+            crop_box,
+            ratio,
+            pad,
+            plate_conf,
+            ocr_infer_model,
+            ocr_keys,
+            vehicle
+        )
 
-    return frame_index, output_name, image, vehicles, plates
+        plates_futures.append(plates_future)
+        if save_plates:
+            write_future = save_warped_plates(output_dir, output_name.replace("/", "_"), plates_future)
+            write_futures.append(write_future)
 
-
-@ThreadPool.task(
-    pool_name=RENDER_POOL,
-    cpu_mode_res=Resource(cpu_cores=1, cpu_mem=64 * DataSize.MB, result_cpu_mem=8 * DataSize.MB),
-    check_args=False,
-)
-def render_task(frame_index, output_name, image, vehicles, plates, output_dir, write_image):
-    annotated = annotate(image, vehicles, plates)
-    if write_image:
-        cv2.imwrite(str(output_dir / output_name), annotated)
-    return frame_index, output_name, annotated, len(vehicles), len(plates)
-
-
-def configure_pools(max_workers: int = 4):
-    ThreadPool.config(pool_name=PREPROCESS_POOL, max_workers=max_workers)
-    ThreadPool.config(pool_name=POSTPROCESS_POOL, max_workers=1)
-    ThreadPool.config(pool_name=PLATE_POOL, max_workers=max_workers)
-    ThreadPool.config(pool_name=RENDER_POOL, max_workers=max_workers)
-    InferSessionPool.config(pool_name="yolo_plate_ocr_infer", max_workers=max_workers)
+    return plates_futures, write_futures
 
 
 def create_infer_model(model_path: Path, gpu_mem: int = 64 * DataSize.MB):
@@ -146,12 +246,9 @@ def create_infer_model(model_path: Path, gpu_mem: int = 64 * DataSize.MB):
         pool_name="yolo_plate_ocr_infer",
         cpu_mode_res=cpu_res,
         gpu_mode_res=gpu_res,
-        check_args=False,
     )
 
-
 def submit_frame(
-    frame_index,
     output_name,
     image,
     vehicle_infer_model,
@@ -165,47 +262,45 @@ def submit_frame(
     output_dir,
     save_plates,
     write_image,
+    progress
 ):
-    preprocess_future = preprocess_task(frame_index, output_name, image)
-    frame_index_f, output_name_f, image_f, blob_f, ratio_f, pad_f = preprocess_future.unpack(6)
-    vehicle_infer_future = vehicle_infer_model(blob_f)
-    vehicle_output_f = vehicle_infer_future[0]
-    vehicle_future = postprocess_vehicle_task(
-        frame_index_f,
-        output_name_f,
-        image_f,
-        vehicle_output_f,
-        ratio_f,
-        pad_f,
+    preprocess_future = preprocess_image(image)
+    progress.attach_callbacks(preprocess_future, "preprocess hole image")
+
+    blob, ratio, pad = preprocess_future.unpack(3)
+    vehicle_infer_future = vehicle_infer_model(blob)
+    progress.attach_callbacks(vehicle_infer_future, "infer vehicles")
+
+    vehicle_output = vehicle_infer_future[0]
+    vehicles_future = postprocess_vehicle(
+        image,
+        vehicle_output,
+        ratio,
+        pad,
         tracker,
-        vehicle_conf,
+        vehicle_conf
     )
-    plate_future = detect_and_ocr_plates_task(
-        *vehicle_future.unpack(4),
+    progress.attach_callbacks(vehicles_future, "extract vehicles")
+
+    plates_future = detect_and_ocr_plates_task(
+        output_name,
+        image,
+        vehicles_future,
         plate_infer_model,
         ocr_infer_model,
         ocr_keys,
         plate_conf,
         crop_padding,
         save_plates,
-        output_dir,
+        output_dir
     )
-    render_future = render_task(
-        *plate_future.unpack(5),
-        output_dir,
-        write_image,
-    )
-    return preprocess_future, vehicle_infer_future, vehicle_future, plate_future, render_future
+    annotated_future = annotate(image, vehicles_future, plates_future)
 
+    if write_image:
+        imwrite_future = async_imwrite(str(output_dir / output_name), annotated_future)
+        return imwrite_future
 
-def attach_callbacks(futures, progress: PipelineProgress):
-    preprocess_future, vehicle_infer_future, vehicle_future, plate_future, render_future = futures
-    vehicle_infer_future.add_start_callback(progress.start_one_vehicle)
-    vehicle_future.add_done_callback(lambda _: progress.finish_one_vehicle())
-    plate_future.add_start_callback(progress.start_one_plate)
-    plate_future.add_done_callback(lambda _: progress.finish_one_plate())
-    render_future.add_start_callback(progress.start_one_save)
-    render_future.add_done_callback(lambda _: progress.finish_one_save())
+    return annotated_future
 
 
 def infer_with_smartpool(
@@ -224,7 +319,6 @@ def infer_with_smartpool(
 ):
     from .data_utils import is_video_file, iter_images
 
-    configure_pools()
     output_dir.mkdir(parents=True, exist_ok=True)
     vehicle_infer_model = create_infer_model(vehicle_model_path)
     plate_infer_model = create_infer_model(plate_model_path)
@@ -278,12 +372,12 @@ def infer_images_with_smartpool(
     tracker = create_tracker()
     final_futures = []
     with progress:
-        for frame_index, image_path in enumerate(image_paths):
+        for image_path in image_paths:
             image = cv2.imread(str(image_path))
             if image is None:
                 continue
-            futures = submit_frame(
-                frame_index,
+
+            future = submit_frame(
                 image_path.name,
                 image,
                 vehicle_infer_model,
@@ -297,9 +391,9 @@ def infer_images_with_smartpool(
                 output_dir,
                 save_plates,
                 True,
+                progress
             )
-            attach_callbacks(futures, progress)
-            final_futures.append(futures[-1])
+            final_futures.append(future)
 
         total_vehicles = 0
         total_plates = 0

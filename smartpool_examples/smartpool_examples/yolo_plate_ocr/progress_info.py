@@ -1,52 +1,40 @@
-from typing import Optional
+from typing import Dict
+from functools import partial
 
 from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeRemainingColumn
 
 
 class PipelineProgress:
-    def __init__(self, total: Optional[int]):
+    def __init__(self):
         self.progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("{task.completed}/{task.total}"),
             TimeRemainingColumn(),
         )
-        self.vehicle_start_task: TaskID = self.progress.add_task("vehicle start", total=total)
-        self.vehicle_done_task: TaskID = self.progress.add_task("vehicle done", total=total)
-        self.plate_start_task: TaskID = self.progress.add_task("plate start", total=total)
-        self.plate_done_task: TaskID = self.progress.add_task("plate done", total=total)
-        self.save_start_task: TaskID = self.progress.add_task("render start", total=total)
-        self.save_done_task: TaskID = self.progress.add_task("render done", total=total)
+        self._tasks: Dict[str, TaskID] = {}
+        self._tasks_total: Dict[str, int] = {}
 
-    def start_one_vehicle(self):
-        self.progress.update(self.vehicle_start_task, advance=1)
+    def set_total(self, task_name:str, total:int):
+        if task_name not in self._tasks:
+            self._tasks[task_name] = self.progress.add_task(task_name, total=total)
+        else:
+            self.progress.update(self._tasks[task_name], total=total)
 
-    def finish_one_vehicle(self):
-        self.progress.update(self.vehicle_done_task, advance=1)
+        self._tasks_total[task_name] = total
 
-    def start_one_plate(self):
-        self.progress.update(self.plate_start_task, advance=1)
+    def increase_total(self, task_name:str, total:int):
+        if task_name not in self._tasks:
+            self._tasks[task_name] = self.progress.add_task(task_name, total=total)
+        else:
+            self.progress.update(self._tasks[task_name], total=self._tasks_total[task_name]+total)
 
-    def finish_one_plate(self):
-        self.progress.update(self.plate_done_task, advance=1)
+    def advance(self, task_name:str, *args):
+        self.progress.update(self._tasks[task_name], advance=1)
 
-    def start_one_save(self):
-        self.progress.update(self.save_start_task, advance=1)
-
-    def finish_one_save(self):
-        self.progress.update(self.save_done_task, advance=1)
-
-    def advance_vehicle(self):
-        self.start_one_vehicle()
-        self.finish_one_vehicle()
-
-    def advance_plate(self):
-        self.start_one_plate()
-        self.finish_one_plate()
-
-    def advance_save(self):
-        self.start_one_save()
-        self.finish_one_save()
+    def attach_callbacks(self, future, task_name):
+        future.add_start_callback(partial(self.advance, task_name=f"{task_name} start"))
+        future.add_done_callback(partial(self.advance, task_name=f"{task_name} done"))
 
     def __enter__(self):
         self.progress.__enter__()

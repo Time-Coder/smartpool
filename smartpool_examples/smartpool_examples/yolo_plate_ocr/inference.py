@@ -224,11 +224,6 @@ def track_vehicle_boxes(tracker, boxes: DetectionBoxes, image) -> List[VehicleTr
     return vehicles
 
 
-def preprocess_frame(frame_index, output_name, image):
-    blob, ratio, pad = preprocess_image(image)
-    return frame_index, output_name, image, blob, ratio, pad
-
-
 def postprocess_vehicle_onnx(frame_index, output_name, image, output, ratio, pad, tracker, vehicle_conf):
     boxes = decode_yolo_detections(output, image.shape, ratio, pad, vehicle_conf, VEHICLE_CLASS_IDS)
     vehicles = track_vehicle_boxes(tracker, boxes, image)
