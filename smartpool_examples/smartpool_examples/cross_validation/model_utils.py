@@ -1,14 +1,12 @@
 import os
 import traceback
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from config import BATCH_SIZE, EPOCHS, LEARNING_RATE, N_CLASSES
-from data_utils import load_features
-from torch.utils.data import DataLoader, TensorDataset
+from config import EPOCHS, LEARNING_RATE
+from data_utils import create_data_loaders
 
 from smartpool import best_device, move_optimizer_to
 
@@ -34,43 +32,22 @@ class ProgressInfo:
 
 
 @dataclass
-class PreprocessInfo:
-    model_name:str
-    fold_idx:int
-    epoch:int
-    batch:int
-    total_batches:int
-    device:str
-    avg_loss:float
-    val_accuracy:float
-    pid:int
-
-
-@dataclass
 class ErrorInfo:
     exception:BaseException
     traceback:str
 
-
-def train_single_fold(fold_idx, model_class, train_meta, val_meta, progress_queue, device=None):
+def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device=None):
     try:
-        return _train_single_fold(fold_idx, model_class, train_meta, val_meta, progress_queue, device)
+        return _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device)
     except Exception as e:
         error_info = ErrorInfo(e, traceback.format_exc())
         progress_queue.put(error_info)
         raise e
 
-def _train_single_fold(fold_idx, model_class, train_meta, val_meta, progress_queue, user_device):
-    train_data, train_targets = load_features(train_meta)
-    val_data, val_targets = load_features(val_meta)
-
-    train_dataset = TensorDataset(train_data, train_targets)
-    val_dataset = TensorDataset(val_data, val_targets)
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, pin_memory=True)
-
+def _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, user_device):
+    train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices)
     num_batches = len(train_loader)
-    model = model_class(num_classes=N_CLASSES)
+    model = model_class()
 
     device = user_device
     if user_device is None:

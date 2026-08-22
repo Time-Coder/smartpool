@@ -1,6 +1,9 @@
-from .AudioCNN_Medium import AudioCNN_Medium
-from .AudioCNN_Res import AudioCNN_Res
-from .AudioCNN_Large import AudioCNN_Large
-from .AudioCNN_Small import AudioCNN_Small
+from .LeNet5 import LeNet5
+from .MLP import MLP
+from .ModernCNN import ModernCNN
+from .ResNet import ResNet
+from .ResNetV2 import ResNetV2
+from .ResNeXt import ResNeXt
+from .ResNeXtV2 import ResNeXtV2
 
-__all__ = ['AudioCNN_Small', 'AudioCNN_Medium', 'AudioCNN_Large', 'AudioCNN_Res']
+__all__ = ['LeNet5', 'MLP', 'ModernCNN', 'ResNet', 'ResNetV2', 'ResNeXt', 'ResNeXtV2']

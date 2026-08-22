@@ -1,12 +1,12 @@
 from typing import Dict, Set
 
-from config import EPOCHS, N_FOLDS
-from model_utils import ErrorInfo as FoldError, PreprocessInfo
+from config import EPOCHS
+from model_utils import ErrorInfo as FoldError
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 
 class ProgressInfo:
-    def __init__(self, total_tasks: int, total_preprocess_tasks: int = 0):
+    def __init__(self, total_tasks: int):
         self.progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -14,11 +14,7 @@ class ProgressInfo:
             TimeRemainingColumn(),
         )
         self.total_tasks = total_tasks
-        self.total_preprocess_tasks = total_preprocess_tasks
-        self.preprocess_bar_id = None
-        self.preprocessed_count = 0
         self.task_progress_bars: Dict[str, int] = {}
-        self.preprocessed_tasks: Set[str] = set()
         self.finished_tasks: Set[str] = set()
 
     def track(self, progress_queue):
@@ -30,35 +26,22 @@ class ProgressInfo:
 
             task_key = f"{info.model_name}_fold_{info.fold_idx}"
 
-            if isinstance(info, PreprocessInfo):
-                if self.preprocess_bar_id is None:
-                    self.preprocess_bar_id = self.progress.add_task(
-                        "preprocessing audio features for all folds...",
-                        total=self.total_preprocess_tasks
-                    )
-                self.preprocessed_count += 1
-                self.progress.update(self.preprocess_bar_id, completed=self.preprocessed_count)
-                self.preprocessed_tasks.add(task_key)
-                continue
-
             if task_key not in self.task_progress_bars:
-                desc = f"train {info.model_name} on {info.device} in process {info.pid} for fold {info.fold_idx+1}/{N_FOLDS}"
+                desc = f"train {info.model_name} on {info.device} in process {info.pid} for fold {info.fold_idx+1}/5"
                 self.task_progress_bars[task_key] = self.progress.add_task(desc, total=100)
-            else:
-                self.progress.update(self.task_progress_bars[task_key], visible=True)
 
             if task_key in self.task_progress_bars:
-                epoch_progress = (info.epoch - 1) / EPOCHS
+                epoch_progress = (info.epoch - 1) / 5
                 batch_progress = info.batch / info.total_batches
-                total_progress = (epoch_progress + batch_progress / EPOCHS) * 100
+                total_progress = (epoch_progress + batch_progress / 5) * 100
 
-                if info.epoch == EPOCHS and info.batch == info.total_batches:
+                if info.epoch == 5 and info.batch == info.total_batches:
                     total_progress = 100.0
                     self.finished_tasks.add(task_key)
 
                 desc = (
                     f"train {info.model_name} on {info.device} "
-                    f"in process {info.pid} for fold {info.fold_idx+1}/{N_FOLDS} - "
+                    f"in process {info.pid} for fold {info.fold_idx+1}/5 - "
                     f"Epoch {info.epoch}/{EPOCHS} "
                     f"Loss: {info.avg_loss:.4f} Val Acc: {info.val_accuracy*100:.2f}%"
                 )
