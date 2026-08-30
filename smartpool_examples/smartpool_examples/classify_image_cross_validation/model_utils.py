@@ -5,21 +5,33 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from config import EPOCHS, LEARNING_RATE
-from data_utils import create_data_loaders
+from .config import EPOCHS, LEARNING_RATE
+from .data_utils import create_data_loaders
 
 from smartpool import best_device, move_optimizer_to
 
 
 @dataclass
-class TrainingResult:
-    fold_idx:int
+class StartInfo:
     model_name:str
+    fold_idx:int
+
+
+@dataclass
+class StopInfo:
+    model_name:str
+    fold_idx:int
+
+
+@dataclass
+class TrainingResult:
+    model_name:str
+    fold_idx:int
     val_accuracy:float
 
 
 @dataclass
-class ProgressInfo:
+class ProgressChangedInfo:
     model_name:str
     fold_idx:int
     epoch:int
@@ -33,16 +45,25 @@ class ProgressInfo:
 
 @dataclass
 class ErrorInfo:
+    model_name:str
+    fold_idx:int
     exception:BaseException
     traceback:str
 
+
 def train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device=None):
     try:
-        return _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device)
+        start_info = StartInfo(model_class.__name__, fold_idx)
+        progress_queue.put(start_info)
+        result = _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, device)
+        stop_info = StopInfo(model_class.__name__, fold_idx)
+        progress_queue.put(stop_info)
+        return result
     except Exception as e:
-        error_info = ErrorInfo(e, traceback.format_exc())
+        error_info = ErrorInfo(model_class.__name__, fold_idx, e, traceback.format_exc())
         progress_queue.put(error_info)
         raise e
+
 
 def _train_single_fold(fold_idx, model_class, train_indices, val_indices, dataset, progress_queue, user_device):
     train_loader, val_loader = create_data_loaders(dataset, train_indices, val_indices)
@@ -59,7 +80,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-    initial_progress = ProgressInfo(
+    initial_progress = ProgressChangedInfo(
         model_name=model_class.__name__,
         fold_idx=fold_idx,
         epoch=1,
@@ -96,7 +117,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
 
             epoch_loss += loss.item()
 
-            progress_info = ProgressInfo(
+            progress_info = ProgressChangedInfo(
                 model_name=model_class.__name__,
                 fold_idx=fold_idx,
                 epoch=epoch + 1,
@@ -136,7 +157,7 @@ def _train_single_fold(fold_idx, model_class, train_indices, val_indices, datase
         last_val_accuracy = val_accuracy
         model.train()
 
-        final_progress = ProgressInfo(
+        final_progress = ProgressChangedInfo(
             model_name=model_class.__name__,
             fold_idx=fold_idx,
             epoch=epoch + 1,

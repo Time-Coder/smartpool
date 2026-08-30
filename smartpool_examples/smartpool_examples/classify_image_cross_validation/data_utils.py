@@ -1,7 +1,7 @@
 import os
 import urllib.request
 
-from config import BATCH_SIZE, DATA_ROOT
+from .config import BATCH_SIZE, DATA_ROOT
 from rich.progress import (
     BarColumn, DownloadColumn, Progress, TextColumn,
     TimeRemainingColumn, TransferSpeedColumn,

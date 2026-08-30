@@ -69,10 +69,10 @@ def main(
     self_folder = os.path.dirname(os.path.abspath(__file__)).replace("\\", "/")
     sys.path.append(self_folder)
 
-    import models
-    from data_utils import prepare_data
-    from progress_info import ProgressInfo
-    from visualization import plot_results, print_results_table
+    from . import models
+    from .data_utils import prepare_data
+    from .progress_info import ProgressInfo
+    from .visualization import plot_results, print_results_table
 
     if max_workers == 0:
         max_workers = os.cpu_count() // 2
@@ -95,22 +95,22 @@ def main(
 
     with progress_info:
         if pool == "smartpool":
-            from train_with_smartpool import train_with_smartpool
+            from .train_with_smartpool import train_with_smartpool
             model_results = train_with_smartpool(task_templates, max_workers, progress_info)
         elif pool == "concurrent":
-            from train_with_concurrent import train_with_concurrent
+            from .train_with_concurrent import train_with_concurrent
             model_results = train_with_concurrent(task_templates, max_workers, progress_info)
         elif pool == "multiprocessing":
-            from train_with_multiprocessing import train_with_multiprocessing
+            from .train_with_multiprocessing import train_with_multiprocessing
             model_results = train_with_multiprocessing(task_templates, max_workers, progress_info)
         elif pool == "joblib":
-            from train_with_joblib import train_with_joblib
+            from .train_with_joblib import train_with_joblib
             model_results = train_with_joblib(task_templates, max_workers, progress_info)
         elif pool == "ray":
-            from train_with_ray import train_with_ray
+            from .train_with_ray import train_with_ray
             model_results = train_with_ray(task_templates, max_workers, progress_info)
         elif pool == "sequentially":
-            from train_sequentially import train_sequentially
+            from .train_sequentially import train_sequentially
             model_results = train_sequentially(task_templates, max_workers, progress_info)
 
     stop_time = time.perf_counter()

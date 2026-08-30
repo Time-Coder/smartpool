@@ -108,15 +108,16 @@ class NvidiaGPUInfo(GPUInfo):
 
     def _fetch_utilization(self) -> Optional[float]:
         with self._lock:
-            try:
-                util = pynvml.nvmlDeviceGetUtilizationRates(self._get_handle())
-            except Exception:
-                pynvml.nvmlShutdown()
-                pynvml.nvmlInit()
-                self._handle = None
-                util = pynvml.nvmlDeviceGetUtilizationRates(self._get_handle())
+            for i in range(5):
+                try:
+                    util = pynvml.nvmlDeviceGetUtilizationRates(self._get_handle())
+                    return util.gpu / 100.0
+                except Exception as e:
+                    pynvml.nvmlShutdown()
+                    pynvml.nvmlInit()
+                    self._handle = None
 
-            return util.gpu / 100.0
+            raise e
 
     def _fetch_temperature(self) -> Optional[int]:
         with self._lock:

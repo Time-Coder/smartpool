@@ -16,13 +16,13 @@ class ProcessWorker(Worker):
 
     def __init__(self, process_pool:ProcessPool):
         if process_pool._use_torch:
-            from torch.multiprocessing.queue import SimpleQueue
+            from torch.multiprocessing.queue import Queue, SimpleQueue
         else:
-            from multiprocessing.queues import SimpleQueue
+            from multiprocessing.queues import Queue, SimpleQueue
 
         Worker.__init__(
             self, process_pool,
-            task_queue_cls=SimpleQueue,
+            task_queue_cls=Queue,
             task_queue_kwargs={"ctx": process_pool._ctx}
         )
 
@@ -34,6 +34,8 @@ class ProcessWorker(Worker):
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
         self.process_info:Optional[psutil.Process] = None
+
+        self.start()
 
     @property
     def process(self)->mp.Process:
@@ -98,5 +100,18 @@ class ProcessWorker(Worker):
     def join(self)->None:
         if self.executor is not None and self.executor._popen is not None:
             self.executor.join()
+            self._dispose_task_queue()
 
         self._clear()
+
+    def _dispose_task_queue(self)->None:
+        if self._task_queue is None:
+            return
+
+        try:
+            self._task_queue.cancel_join_thread()
+        finally:
+            try:
+                self._task_queue.close()
+            except Exception:
+                pass

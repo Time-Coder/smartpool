@@ -23,6 +23,7 @@ class ThreadWorker(Worker):
         )
         self._streams: Dict[str, Stream] = {}
         self._active_task: Optional[Task] = None
+        self.start()
 
     @property
     def thread(self)->threading.Thread:

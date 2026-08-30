@@ -26,6 +26,8 @@ class InterpreterWorker(Worker):
         else:
             self.change_device_cmd_queue:Optional[Queue[Optional[str]]] = None
 
+        self.start()
+
     @property
     def thread(self)->threading.Thread:
         return self.executor

@@ -24,15 +24,12 @@ class ProcessPool(Pool):
         chunk_timeout:float=0.1,
         use_torch:bool=False
     ):
-        import queue
-        import threading
-
         if use_torch:
             import torch.multiprocessing as mp
-            from torch.multiprocessing.queue import SimpleQueue
+            from torch.multiprocessing.queue import Queue, SimpleQueue
         else:
             import multiprocessing as mp
-            from multiprocessing.queues import SimpleQueue
+            from multiprocessing.queues import Queue, SimpleQueue
 
         from .process_worker import ProcessWorker
 
@@ -42,10 +39,6 @@ class ProcessPool(Pool):
 
         self._ctx = mp.get_context(mp_context)
         self._process_name_prefix:str = process_name_prefix
-
-        self._feeding_queue:queue.SimpleQueue[Task] = queue.SimpleQueue()
-        self._feeding_thread = threading.Thread(target=self._feeding, daemon=True, name="feeding")
-        self._feeding_thread.start()
 
         Pool.__init__(
             self, max_workers=max_workers,
@@ -153,28 +146,14 @@ class ProcessPool(Pool):
         self._register_gpu_candidate(task)
         worker:ProcessWorker = task.worker
         worker.is_working = True
-        self._feeding_queue.put(task)
 
-    def _feeding(self)->None:
-        while True:
-            task = self._feeding_queue.get()
-            if task is None:
-                break
+        if task.future.cancelled():
+            self._on_task_cancelled(task)
+            return
 
-            if task.future.cancelled():
-                self._on_task_cancelled(task)
-                continue
-
-            try:
-                task.worker.imported_modules.update(task.module_deps)
-                task.worker.add_task(task)
-            except Exception as e:
-                self._on_task_cancelled(task)
-                task.future.set_exception(e)
-
-    def _stop_feeding(self) -> None:
-        self._feeding_queue.put(None)
-
-    def _join_feeding(self) -> None:
-        if self._feeding_thread is not None and self._feeding_thread.is_alive():
-            self._feeding_thread.join()
+        try:
+            worker.imported_modules.update(task.module_deps)
+            worker.add_task(task)
+        except Exception as e:
+            self._on_task_cancelled(task)
+            task.future.set_exception(e)
