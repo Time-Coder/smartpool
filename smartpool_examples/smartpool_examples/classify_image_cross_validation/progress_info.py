@@ -26,6 +26,10 @@ class ProgressInfo:
         )
         # Per-task timing: dict mapping task_key -> duration_in_seconds
         self.task_time_span: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        # Per-task device timeline: dict mapping task_key -> [[timestamp, device], ...]
+        # only device transition points (CPU <-> CUDA) are recorded; timestamps share
+        # the same monotonic clock as task_time_span.
+        self.device_timeline: Dict[str, list] = defaultdict(list)
 
     def track(self, progress_queue):
         """Consume the progress queue and drive the rich progress display.
@@ -54,6 +58,10 @@ class ProgressInfo:
                 if len(self.finished_tasks) == self.total_tasks:
                     break
             elif isinstance(info, ProgressChangedInfo):
+                timeline = self.device_timeline[task_key]
+                if not timeline or timeline[-1][1] != info.device:
+                    timeline.append([time.perf_counter(), info.device])
+
                 if task_key not in self.task_progress_bars:
                     desc = f"train {info.model_name} on {info.device} in process {info.pid} for fold {info.fold_idx+1}/5"
                     self.task_progress_bars[task_key] = self.progress.add_task(desc, total=100)

@@ -1,12 +1,10 @@
 from collections import defaultdict
-from typing import Optional, Dict
 
 from .model_utils import train_single_fold
 from .progress_info import ProgressInfo
 
 
-def train_with_smartpool(task_templates, max_workers, progress_info: ProgressInfo,
-                         device_timeline: Optional[Dict] = None):
+def train_with_smartpool(task_templates, max_workers, progress_info: ProgressInfo):
     import multiprocessing as mp
     from smartpool import DataSize, ProcessPool, Resource
 
