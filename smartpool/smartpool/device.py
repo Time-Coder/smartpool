@@ -96,14 +96,19 @@ class Device:
                         continue
 
                     user_provider_options = provider[1]
-                    if "device_id" in user_provider_options:
-                        device_id: int = user_provider_options["device_id"]
+                    # Work on a copy. The resolved device_id has to end up in the
+                    # provider options because InferSessionPool keys its session
+                    # cache on them, but mutating the caller's dict is a side
+                    # effect that can make two submits disagree on the cache key.
+                    user_options: Dict[str, Any] = dict(user_provider_options)
+                    if "device_id" in user_options:
+                        device_id: int = user_options["device_id"]
                         if device_id != options["device_id"]:
                             continue
                     else:
-                        user_provider_options["device_id"] = options["device_id"]
+                        user_options["device_id"] = options["device_id"]
 
-                    self._ort_provider = (user_provider_name, user_provider_options)
+                    self._ort_provider = (user_provider_name, user_options)
                     return self._ort_provider
 
         self._ort_provider = None

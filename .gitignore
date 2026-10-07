@@ -4,6 +4,7 @@ dist
 *.egg-info
 .lingma
 test_*
+!smartpool/tests/test_*.py
 result*.json
 data
 *.png

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set, Tuple, Type, Union
 
@@ -17,6 +18,7 @@ class Worker(ABC):
 
     _total_working_count_lock:threading.Lock = threading.Lock()
     _total_working_count:int = 0
+    _last_all_idle_at:Optional[float] = None
 
     def __init__(
         self, pool:Pool,
@@ -35,6 +37,8 @@ class Worker(ABC):
         self._task_queue: Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]] = None
         self.executor: Optional[Union[mp.Process, threading.Thread]] = None
         self._memory_taken: bool = False
+        self._memory_taken_amount: int = 0
+        self._current_task_id: Optional[str] = None
 
     @property
     def task_queue(self)->Optional[QueueLike[Optional[Tuple[str, Callable[..., Any], Tuple[Any, ...], Dict[str, Any]]]]]:
@@ -55,7 +59,27 @@ class Worker(ABC):
     def add_task(self, task: Task)->None:
         self.start()
         task.future.set_running_or_notify_cancel()
+        self._current_task_id = task.id
         self.task_queue.put(task.info())
+
+    def is_alive(self)->bool:
+        """Whether the executor backing this worker is still running.
+
+        The pool polls this so a worker that died mid-task (segfault, OOM kill,
+        unpicklable task payload) fails its future instead of leaving it pending
+        forever. Thread-backed workers run user code in-process, so they cannot
+        die this way and are always reported alive.
+        """
+        return True
+
+    def abandon(self)->None:
+        """Drop a worker whose executor died, so the next task gets a fresh one.
+
+        Releases the worker's memory reservation and clears the dead executor.
+        The caller is responsible for failing the task the worker was running.
+        """
+        self._release_worker_memory()
+        self._clear()
 
     def _working_changed_hook(self):
         pass
@@ -80,17 +104,28 @@ class Worker(ABC):
             with Worker._total_working_count_lock:
                 Worker._total_working_count -= 1
                 self.pool._workers_working_count -= 1
+                if Worker._total_working_count == 0:
+                    Worker._last_all_idle_at = time.monotonic()
 
     @staticmethod
     def total_working_count()->int:
         with Worker._total_working_count_lock:
             return Worker._total_working_count
 
+    @staticmethod
+    def recently_all_idle(seconds:float=1.0)->bool:
+        with Worker._total_working_count_lock:
+            ended_at = Worker._last_all_idle_at
+        return ended_at is not None and time.monotonic() - ended_at < seconds
+
     def _clear(self)->None:
         self.executor = None
-        self._is_working = False
+        self._current_task_id = None
+        # Go through the property so the global and per-pool working counts stay
+        # consistent if a working worker is ever cleared.
+        self.is_working = False
 
-    def change_device(self, device:Device)->None:
+    def change_device(self, device:Device, task_id:Optional[str]=None)->None:
         pass
 
     @property
@@ -101,15 +136,21 @@ class Worker(ABC):
         if self._memory_taken:
             return
         self._memory_taken = True
+        # Remember the exact amount charged. Refunding a freshly sampled RSS
+        # instead would leak the difference whenever the worker grew after it was
+        # charged, which inflates cpu_mem_free over a pool's lifetime.
+        self._memory_taken_amount = self.memory
         with self.pool._sys_info_lock:
-            self.pool._sys_info.cpu_mem_free -= self.memory
+            self.pool._sys_info.cpu_mem_free -= self._memory_taken_amount
 
     def _release_worker_memory(self) -> None:
         if not self._memory_taken:
             return
         self._memory_taken = False
+        amount = self._memory_taken_amount
+        self._memory_taken_amount = 0
         with self.pool._sys_info_lock:
-            self.pool._sys_info.cpu_mem_free += self.memory
+            self.pool._sys_info.cpu_mem_free += amount
 
     @abstractmethod
     def start(self):
@@ -138,12 +179,30 @@ class Worker(ABC):
         return len(self.imported_modules & task.module_deps) / len(self.imported_modules)
 
     @staticmethod
-    def _changing_device(cmd_queue:QueueLike[Optional[str]], current_thread_id):
+    def _changing_device(cmd_queue:QueueLike, current_thread_id, state:dict):
+        """Apply device-change commands that belong to the task now running.
+
+        Commands carry the task id they were issued for. Without that check, a
+        command addressed to a task that has already finished can be applied to
+        whichever task the worker picks up next, so a task can begin on a device
+        other than the one it was admitted on. A bare device string is still
+        accepted and applies to whatever task is current.
+        """
         from .utils import _set_best_device
+
         while True:
-            device = cmd_queue.get()
-            if device is None:
+            item = cmd_queue.get()
+            if item is None:
                 break
+
+            if isinstance(item, tuple):
+                task_id, device = item
+            else:
+                task_id, device = None, item
+
+            if task_id is not None and state.get("task_id") != task_id:
+                # Stale command, addressed to a task that already finished.
+                continue
 
             _set_best_device(device, current_thread_id)
 
@@ -165,11 +224,13 @@ class Worker(ABC):
 
             initializer(*initargs, **initkwargs)
 
+        device_state:dict = {"task_id": None}
+
         if change_device_cmd_queue is not None:
             import threading
 
             current_thread_id = threading.get_ident()
-            change_device_thread = threading.Thread(target=Worker._changing_device, args=(change_device_cmd_queue, current_thread_id), name="changing_device")
+            change_device_thread = threading.Thread(target=Worker._changing_device, args=(change_device_cmd_queue, current_thread_id, device_state), name="changing_device")
             change_device_thread.start()
 
         while True:
@@ -178,6 +239,10 @@ class Worker(ABC):
                 break
 
             task_id, task_device, func, args, kwargs = task
+            # Publish the task id before setting the device, so a command issued
+            # for this task is applied and one issued for an earlier task is
+            # discarded instead of leaking into this task.
+            device_state["task_id"] = task_id
             _set_best_device(task_device)
 
             try:
@@ -187,6 +252,7 @@ class Worker(ABC):
                 result = e
                 success = False
 
+            device_state["task_id"] = None
             result_queue.put((task_id, success, result))
 
         if change_device_cmd_queue is not None and change_device_thread.is_alive():

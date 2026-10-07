@@ -4,6 +4,7 @@ __version__ = "0.1.7"
 
 from .amd_gpuinfo import AMDGPUInfo
 from .device import Device
+from .exceptions import SmartPoolError, WorkerLostError
 from .futures import Future
 from .gpuinfo import GPUInfo, GPUInfoSnapshot, GPUVendor
 from .gpuinfos import GPUInfos
@@ -44,5 +45,7 @@ __all__ = [
     "NvidiaGPUInfo",
     "IntelGPUInfo",
     "AMDGPUInfo",
+    "SmartPoolError",
+    "WorkerLostError",
     "TRT_CACHE_PATH"
 ]

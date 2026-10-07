@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple
 
 from .resource import Resource
@@ -16,7 +17,7 @@ class ChunkTask(Task):
         self._sub_tasks: List[Task] = []
         self._args_list: List[Tuple[Any, ...]] = []
         self._kwargs_list: List[Dict[str, Any]] = []
-        self.last_add_time: float = 0.0
+        self.last_add_time: float = time.time()
         self.submitted: bool = False
         self._key: Tuple[Callable[..., Any], int] = (func, chunksize)
         Task.__init__(
@@ -62,21 +63,17 @@ class ChunkTask(Task):
         self._update_res(self.cpu_mode_res, sub_task.cpu_mode_res)
         self._update_res(self.gpu_mode_res, sub_task.gpu_mode_res)
 
-        import time
         self.last_add_time = time.time()
         if len(self._sub_tasks) >= self.chunksize:
             self.submit()
 
     def submit(self):
-        if self.submitted:
+        if self.submitted or not self._sub_tasks:
             return
 
         self.submitted = True
         if self._key in self.pool._chunk_tasks:
             del self.pool._chunk_tasks[self._key]
-
-        if not self._sub_tasks:
-            return
 
         if len(self._sub_tasks) == 1:
             task = self._sub_tasks[0]

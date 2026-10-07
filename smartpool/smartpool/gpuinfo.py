@@ -32,22 +32,35 @@ class GPUInfoSnapshot:
         self.display_mode: Optional[bool] = None
         self.n_cores: Optional[int] = None
         self.n_cores_used: Optional[int] = None
+        # Logical reservations held by admitted tasks and retained results.
+        # They are tracked separately from the physical samples above so that
+        # refreshing a sample never silently discards an outstanding reservation.
+        self._mem_reserved: int = 0
+        self._n_cores_reserved: int = 0
+
+    @property
+    def mem_reserved(self) -> int:
+        return self._mem_reserved
+
+    @property
+    def n_cores_reserved(self) -> int:
+        return self._n_cores_reserved
 
     @property
     def mem_free(self) -> int:
-        return self.mem_total - self.mem_used
+        return self.mem_total - self.mem_used - self._mem_reserved
 
     @mem_free.setter
     def mem_free(self, value: int) -> None:
-        self.mem_used = self.mem_total - value
+        self._mem_reserved = self.mem_total - self.mem_used - value
 
     @property
     def n_cores_free(self) -> int:
-        return self.n_cores - self.n_cores_used
+        return self.n_cores - self.n_cores_used - self._n_cores_reserved
 
     @n_cores_free.setter
     def n_cores_free(self, value: int) -> None:
-        self.n_cores_used = self.n_cores - value
+        self._n_cores_reserved = self.n_cores - self.n_cores_used - value
 
 class GPUInfo(ABC):
 

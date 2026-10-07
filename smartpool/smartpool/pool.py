@@ -18,6 +18,7 @@ from typing import (
 )
 
 from .device import Device
+from .exceptions import WorkerLostError
 from .resource import Resource
 
 if TYPE_CHECKING:
@@ -61,7 +62,8 @@ class Pool(ABC):
         worker_cls: Type[Worker],
         use_torch: bool = False,
         chunk_timeout: float = 0.1,
-        need_module_deps: bool = False
+        need_module_deps: bool = False,
+        worker_watchdog_interval: float = 0.5
     ):
         self._init_sys_info()
 
@@ -73,6 +75,11 @@ class Pool(ABC):
             self._torch_gpu_available = False
 
         self._max_tasks_per_child: int = max_tasks_per_child
+        # How often the result collector checks for workers that died mid-task.
+        # Set to 0 to disable the check and block on the result queue instead.
+        self._worker_watchdog_interval: float = worker_watchdog_interval
+        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_stop: threading.Event = threading.Event()
         self._need_module_deps: bool = need_module_deps
         self._use_torch: bool = use_torch
         self._max_workers: int = max_workers
@@ -86,6 +93,9 @@ class Pool(ABC):
         self._can_move_to_gpu_tasks: Dict[str, Task] = {}
         self._not_ready_tasks: Dict[str, Task] = {}
         self._delayed_tasks: Dict[str, Task] = {}
+        # Lower bound used to avoid rescanning a delayed queue while even its
+        # cheapest task cannot fit the currently available CPU capacity.
+        self._min_delayed_cpu_cores: float = float("inf")
         self._postprocessing: bool = False
         self._lock: threading.RLock = threading.RLock()
         self._shutdown: bool = False
@@ -195,10 +205,16 @@ class Pool(ABC):
             if chunk_task is None:
                 break
 
-            if chunk_task.submitted:
-                continue
+            # Wait until the chunk stops growing, then dispatch. A single blind
+            # sleep measured the deadline from the chunk's creation, so a
+            # submission loop slower than chunk_timeout produced batches that
+            # were already full of stragglers and could never reach chunksize.
+            while not chunk_task.submitted:
+                idle_for: float = time.time() - chunk_task.last_add_time
+                if idle_for >= self._chunk_timeout:
+                    break
 
-            time.sleep(self._chunk_timeout)
+                time.sleep(min(self._chunk_timeout - idle_for, 0.005))
 
             if chunk_task.submitted:
                 continue
@@ -221,11 +237,14 @@ class Pool(ABC):
         if key not in self._chunk_tasks:
             chunk_task: ChunkTask = ChunkTask(self, task.func, task.chunksize)
             self._chunk_tasks[key] = chunk_task
+            # Add the sub-task before handing the chunk to the flushing thread.
+            # Enqueuing first would let the flusher observe an empty chunk and
+            # submit() it away, after which add_task() would drop the sub-task.
+            chunk_task.add_task(task)
             self._flush_chunk_queue.put(chunk_task)
         else:
             chunk_task: ChunkTask = self._chunk_tasks[key]
-
-        chunk_task.add_task(task)
+            chunk_task.add_task(task)
 
         return task.future
 
@@ -254,6 +273,11 @@ class Pool(ABC):
 
         if not self._try_assign_task(task):
             self._delayed_tasks[task.id] = task
+            self._min_delayed_cpu_cores = min(
+                self._min_delayed_cpu_cores,
+                task.cpu_mode_res.cpu_cores,
+                task.gpu_mode_res.cpu_cores,
+            )
             return task.future
 
         self._put_task(task)
@@ -264,6 +288,8 @@ class Pool(ABC):
             import threading
             self._result_thread = threading.Thread(target=self._collecting_result, daemon=True, name="collecting_result")
             self._result_thread.start()
+
+        self._ensure_watchdog()
 
         return task.future
 
@@ -402,17 +428,28 @@ class Pool(ABC):
 
     @staticmethod
     def _init_sys_info()->None:
-        if Pool._sys_info is not None:
-            return
-
         import threading
 
         from .sysinfo import SysInfo
+        from .worker import Worker
 
-        Pool._sys_info = SysInfo()
-        Pool._sys_info_lock = threading.Lock()
-        Pool._housekeeping_thread = threading.Thread(target=Pool._housekeeping, daemon=True)
-        Pool._housekeeping_thread.start()
+        first_init = Pool._sys_info is None
+        if first_init:
+            Pool._sys_info = SysInfo()
+            Pool._sys_info_lock = threading.Lock()
+            Pool._housekeeping_thread = threading.Thread(target=Pool._housekeeping, daemon=True)
+            Pool._housekeeping_thread.start()
+
+        if Worker.total_working_count() == 0:
+            with Pool._sys_info_lock:
+                if Worker.recently_all_idle():
+                    Pool._sys_info.update(refresh_cpu=False)
+                else:
+                    # The first pool construction follows smartpool's psutil
+                    # import; later constructions may follow a long idle gap.
+                    # refresh_cpu_now() is non-blocking in both cases.
+                    Pool._sys_info.refresh_cpu_now()
+                    Pool._sys_info.update()
 
     @staticmethod
     def _housekeeping()->None:
@@ -507,6 +544,7 @@ class Pool(ABC):
 
             self._flush()
             self._shutdown = True
+            self._watchdog_stop.set()
 
             if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive() and self._flush_chunk_queue is not None:
                 self._flush_chunk_queue.put(None)
@@ -537,6 +575,9 @@ class Pool(ABC):
             if self._flush_chunk_thread is not None and self._flush_chunk_thread.is_alive():
                 self._flush_chunk_thread.join()
 
+            if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+                self._watchdog_thread.join(timeout=self._worker_watchdog_interval * 2 + 1)
+
     def _stop_feeding(self) -> None:
         pass
 
@@ -561,6 +602,7 @@ class Pool(ABC):
             task.future.set_exception(result)
 
         worker: Worker = task.worker
+        worker._current_task_id = None
         worker.is_working = False
         worker.n_finished_tasks += 1
         if self._max_tasks_per_child is not None and worker.n_finished_tasks >= self._max_tasks_per_child:
@@ -612,6 +654,88 @@ class Pool(ABC):
             task_id, success, result = result_tuple
             self._on_task_done(task_id, success, result)
 
+    def _ensure_watchdog(self)->None:
+        """Start the dead-worker watchdog on first dispatch.
+
+        The watchdog lives on its own thread rather than polling inside
+        _collecting_result because multiprocessing.SimpleQueue.get() takes no
+        timeout, so the collector cannot be woken periodically without touching
+        the result hot path.
+        """
+        if not self._worker_watchdog_interval:
+            return
+
+        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+            return
+
+        import threading
+
+        self._watchdog_stop.clear()
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True, name="worker_watchdog")
+        self._watchdog_thread.start()
+
+    def _watchdog_loop(self)->None:
+        from .worker import Worker
+
+        while not self._shutdown:
+            if self._watchdog_stop.wait(self._worker_watchdog_interval):
+                break
+
+            if Worker.total_working_count() == 0:
+                continue
+
+            try:
+                self._fail_tasks_of_dead_workers()
+            except Exception:
+                # The watchdog must never take the process down.
+                pass
+
+    def _fail_tasks_of_dead_workers(self)->None:
+        """Fail in-flight tasks whose worker process is gone."""
+        while True:
+            dead = None
+            with self._lock:
+                for worker in self._workers:
+                    if not worker.is_working or worker.is_alive():
+                        continue
+
+                    task_id = worker._current_task_id
+                    if task_id is None or task_id not in self._tasks:
+                        continue
+
+                    dead = (worker, task_id)
+                    break
+
+            if dead is None:
+                return
+
+            self._on_worker_lost(*dead)
+
+    def _on_worker_lost(self, worker: Worker, task_id:str)->None:
+        exit_code = None
+        process = getattr(worker, "process", None)
+        if process is not None:
+            try:
+                exit_code = process.exitcode
+            except Exception:
+                exit_code = None
+
+        with self._lock:
+            if task_id not in self._tasks:
+                return
+
+        error = WorkerLostError(
+            f"worker {getattr(worker, 'index', '?')} exited while running task "
+            f"{task_id} (exitcode={exit_code})"
+        )
+        try:
+            self._on_task_done(task_id, False, error)
+        finally:
+            try:
+                worker.abandon()
+            except Exception:
+                pass
+
     def _postprocess_after_task_done(self)->None:
         if self._postprocessing:
             return
@@ -626,12 +750,33 @@ class Pool(ABC):
             for task_id in moved_tasks:
                 del self._can_move_to_gpu_tasks[task_id]
 
+            # Delayed tasks can require fractional or zero CPU capacity;
+            # admission is checked against each task's declared resources.
+            min_delayed_cpu_cores = getattr(self, "_min_delayed_cpu_cores", float("inf"))
+            if min_delayed_cpu_cores == float("inf") and self._delayed_tasks:
+                requirements = []
+                for task in self._delayed_tasks.values():
+                    cpu_res = getattr(task, "cpu_mode_res", None)
+                    gpu_res = getattr(task, "gpu_mode_res", None)
+                    if cpu_res is not None and gpu_res is not None:
+                        requirements.append(min(cpu_res.cpu_cores, gpu_res.cpu_cores))
+                min_delayed_cpu_cores = min(requirements) if requirements else 0
+
+            # These are necessary conditions only. Do not apply them while
+            # every worker is idle: _choose_task_device() may reconcile CPU
+            # after the cooldown and can reclaim idle worker memory.
+            from .worker import Worker
+            can_early_stop = Worker.total_working_count() > 0
             for task_id, delayed_task in list(self._delayed_tasks.items()):
-                if (
-                    self._workers_working_count >= self._max_workers or
-                    self._sys_info.cpu_cores_free < 1
-                ):
+                if self._workers_working_count >= self._max_workers:
                     break
+
+                # A stale CPU sample can leave a large queue behind. If no
+                # delayed task can fit even by its cheaper CPU reservation,
+                # defer the whole scan until a resource is released.
+                if can_early_stop:
+                    if min_delayed_cpu_cores > self._sys_info.cpu_cores_free:
+                        break
 
                 if delayed_task.future.cancelled():
                     self._delayed_tasks.pop(task_id, None)
@@ -648,6 +793,9 @@ class Pool(ABC):
 
                 self._delayed_tasks.pop(task_id, None)
                 self._put_task(delayed_task)
+
+            if not self._delayed_tasks:
+                self._min_delayed_cpu_cores = float("inf")
         finally:
             self._postprocessing = False 
 
@@ -669,7 +817,15 @@ class Pool(ABC):
 
         with self._sys_info_lock:
             if Worker.total_working_count() == 0:
-                self._sys_info.update()
+                if Worker.recently_all_idle():
+                    self._sys_info.update(refresh_cpu=False)
+                else:
+                    # The pool has been idle for a while, so the cached percentage
+                    # may be stale. Refresh it without blocking the submitting
+                    # thread; the housekeeping thread keeps the psutil baseline
+                    # current, so a non-blocking sample is already meaningful.
+                    self._sys_info.refresh_cpu_now()
+                    self._sys_info.update()
 
             cpu_cores_needed = self._estimate_cpu_cores_needed(res)
             if cpu_cores_needed > self._sys_info.cpu_cores_free:
@@ -745,7 +901,8 @@ class Pool(ABC):
     def _choose_task_worker(self, task: Task, res: Resource) -> Optional[Worker]:
         best_worker:Optional[Worker] = None
         task.modules_overlap_ratio = 0.0
-        max_overlap_size = 0.0
+        best_coverage = 0.0
+        best_assigned = 0
         if self._workers_working_count < len(self._workers):
             for worker in self._workers:
                 if worker.is_working:
@@ -760,19 +917,25 @@ class Pool(ABC):
                     task.worker = worker
                     return worker
 
-                current_overlap_ratio = worker.overlap_modules_ratio(task)
-                if hasattr(worker, "cached_rss"):
-                    current_overlap_size = current_overlap_ratio * worker.cached_rss
-                    if best_worker is None or current_overlap_size > max_overlap_size:
-                        task.modules_overlap_ratio = current_overlap_ratio
-                        max_overlap_size = current_overlap_size
-                        best_worker = worker
-                else:
-                    if best_worker is None or current_overlap_ratio > task.modules_overlap_ratio:
-                        task.modules_overlap_ratio = current_overlap_ratio
-                        best_worker = worker
+                coverage = (len(worker.imported_modules & task.module_deps) /
+                            len(task.module_deps)) if task.module_deps else 0.0
+                # Rank by task-dependency coverage first. Ties are broken towards
+                # the worker that has been assigned the fewest packages: when no
+                # worker holds this task's package yet every candidate scores the
+                # same, and picking by creation order would keep piling new module
+                # families onto the earliest worker instead of spreading them.
+                assigned = len(worker.imported_modules)
+                if (
+                    best_worker is None or
+                    coverage > best_coverage or
+                    (coverage == best_coverage and assigned < best_assigned)
+                ):
+                    task.modules_overlap_ratio = worker.overlap_modules_ratio(task)
+                    best_coverage = coverage
+                    best_assigned = assigned
+                    best_worker = worker
 
-                if task.modules_overlap_ratio == 1:
+                if coverage == 1 and best_assigned <= len(task.module_deps):
                     break
 
         if best_worker is not None:
@@ -939,7 +1102,7 @@ class Pool(ABC):
                 return False
 
             worker:Worker = task.worker
-            worker.change_device(best_gpu.device)
+            worker.change_device(best_gpu.device, task.id)
             task.device = best_gpu.device
             task.estimated_need_cpu_mem += extra_cpu_mem_needed
             best_gpu.n_cores_free -= gpu_res.gpu_cores

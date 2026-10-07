@@ -1,4 +1,5 @@
 import contextlib
+import gc
 import json
 import platform
 import re
@@ -21,6 +22,7 @@ class AMDGPUInfo(GPUInfo):
     _vram_ranges: Dict[int, int] = {}
     _device_info: List[Dict] = []
     _wsl_fallback: bool = False
+    _atexit_registered: bool = False
 
     # GPU model name -> Shader Processor (Stream Processor) count lookup table
     _GPU_NAME_TO_CU_COUNT: Dict[str, int] = {
@@ -99,6 +101,11 @@ class AMDGPUInfo(GPUInfo):
                     cls._init_mac()
             finally:
                 cls._initialized = True
+
+        if not cls._atexit_registered:
+            import atexit
+            atexit.register(cls.shutdown)
+            cls._atexit_registered = True
 
     @classmethod
     def _init_windows(cls) -> None:
@@ -209,18 +216,24 @@ class AMDGPUInfo(GPUInfo):
             return
 
         with cls._lock:
-            cls._initialized = False
+            # ADLX owns the objects returned by GetSystemServices and
+            # GetPerformanceMonitoringServices. Release those wrappers before
+            # Terminate(); the reverse order can leave amdadlx64.dll with live
+            # C++ objects and crash during interpreter teardown.
+            helper = cls._adlx_helper
+            cls._gpu_list = None
+            cls._perf_monitoring = None
+            cls._system = None
             cls._vram_ranges.clear()
             cls._device_info.clear()
+            cls._adlx_helper = None
+            cls._initialized = False
 
-            if cls._adlx_helper:
+            gc.collect()
+            if helper:
                 with contextlib.suppress(Exception):
-                    cls._adlx_helper.Terminate()
+                    helper.Terminate()
 
-                cls._adlx_helper = None
-                cls._system = None
-                cls._gpu_list = None
-                cls._perf_monitoring = None
 
     @property
     def vendor(self) -> GPUVendor:

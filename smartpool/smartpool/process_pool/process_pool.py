@@ -22,7 +22,8 @@ class ProcessPool(Pool):
         *,
         max_tasks_per_child:Optional[int]=None,
         chunk_timeout:float=0.1,
-        use_torch:bool=False
+        use_torch:bool=False,
+        worker_watchdog_interval:float=0.5
     ):
         if use_torch:
             import torch.multiprocessing as mp
@@ -54,7 +55,8 @@ class ProcessPool(Pool):
             use_torch=use_torch,
             worker_cls=ProcessWorker,
             chunk_timeout=chunk_timeout,
-            need_module_deps=True
+            need_module_deps=True,
+            worker_watchdog_interval=worker_watchdog_interval
         )
 
     @classmethod

@@ -41,7 +41,7 @@ class InterpreterWorker(Worker):
             self.change_device_cmd_queue.put(device)
 
     def _clear(self)->None:
-        Worker._clear()
+        Worker._clear(self)
         self.interp = None
         self.imported_modules.clear()
 

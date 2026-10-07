@@ -49,6 +49,10 @@ class InferChunkTask(InferSessionTask):
             output_names=None,
             chunksize=chunksize
         )
+        # A batch can use one device-to-host copy when every child requests
+        # ordinary NumPy outputs. Keep the old OrtValue path for mixed or
+        # device-resident child results.
+        self.copy_outputs_to_cpu = True
         self.future.add_done_callback(self._fan_out_batch_results)
 
     @staticmethod
@@ -115,6 +119,7 @@ class InferChunkTask(InferSessionTask):
         self.future.add_future(sub_task.future)
         self._sub_tasks.append(sub_task)
         self._kwargs_list.append(sub_task.kwargs)
+        self.copy_outputs_to_cpu = self.copy_outputs_to_cpu and sub_task.copy_outputs_to_cpu
         self._update_res(self.cpu_mode_res, sub_task.cpu_mode_res)
         self._update_res(self.gpu_mode_res, sub_task.gpu_mode_res)
 
@@ -177,6 +182,13 @@ class InferChunkTask(InferSessionTask):
             batch_output_dict[node_name] = batch_output
             full_output_names.append(node_name)
 
+        # Capture the placement once. Reading session.device_type per sub-task is
+        # a race: a concurrent eviction resets it to "", which would make
+        # OrtValue.ortvalue_from_numpy fail for device-resident sub-results.
+        session = self.session
+        device_type: str = session.device_type if session is not None else ""
+        device_id: int = session.device_id if session is not None else 0
+
         for i, task in enumerate(self._sub_tasks):
             if task.future.done():
                 continue
@@ -198,8 +210,8 @@ class InferChunkTask(InferSessionTask):
                         import onnxruntime as ort
                         outputs.append(ort.OrtValue.ortvalue_from_numpy(
                             slice_np,
-                            device_type=self.session.device_type,
-                            device_id=self.session.device_id
+                            device_type=device_type,
+                            device_id=device_id
                         ))
 
                 if not task.future.done():
@@ -210,12 +222,26 @@ class InferChunkTask(InferSessionTask):
 
     @staticmethod
     def _update_res(src_res: Resource, target_res: Resource) -> None:
+        # A chunk is dispatched to a single worker, so its capacity requirement is
+        # the maximum over its sub-tasks, not the sum. Summing gpu_cores/gpu_mem
+        # here would let a full-width chunk declare more than one device can
+        # provide, leaving the chunk permanently inadmissible.
+        # Result footprints are different: every sub-result is held at once, so
+        # those do accumulate.
         if target_res.cpu_cores_in_python > src_res.cpu_cores_in_python:
             src_res.cpu_cores_in_python = target_res.cpu_cores_in_python
 
-        src_res.cpu_cores_out_of_python += target_res.cpu_cores_out_of_python
-        src_res.cpu_mem += target_res.cpu_mem
-        src_res.gpu_cores += target_res.gpu_cores
-        src_res.gpu_mem += target_res.gpu_mem
+        if target_res.cpu_cores_out_of_python > src_res.cpu_cores_out_of_python:
+            src_res.cpu_cores_out_of_python = target_res.cpu_cores_out_of_python
+
+        if target_res.cpu_mem > src_res.cpu_mem:
+            src_res.cpu_mem = target_res.cpu_mem
+
+        if target_res.gpu_cores > src_res.gpu_cores:
+            src_res.gpu_cores = target_res.gpu_cores
+
+        if target_res.gpu_mem > src_res.gpu_mem:
+            src_res.gpu_mem = target_res.gpu_mem
+
         src_res.result_cpu_mem += target_res.result_cpu_mem
         src_res.result_gpu_mem += target_res.result_gpu_mem

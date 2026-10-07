@@ -171,7 +171,10 @@ class InferSessionPool(Pool):
 
         with self._not_thread_safe_providers_lock:
             if provider_name in self._not_thread_safe_providers:
-                self._not_thread_safe_providers[provider_name].remove(device_id)
+                # discard(), not remove(): a task can be released twice when its
+                # result is delivered by both run_async's callback and the
+                # io-binding worker, and a KeyError there would abort the run.
+                self._not_thread_safe_providers[provider_name].discard(device_id)
 
     def _can_use_provider(self, provider: Tuple[str, Dict[str, Any]])->bool:
         provider_name: str = provider[0]
@@ -331,11 +334,14 @@ class InferSessionPool(Pool):
                 key=key
             )
             self._chunk_tasks[key] = chunk_task
+            # Add the sub-task before handing the chunk to the flushing thread.
+            # Enqueuing first would let the flusher observe an empty chunk and
+            # submit() it away, after which add_task() would drop the sub-task.
+            chunk_task.add_task(task)
             self._flush_chunk_queue.put(chunk_task)
         else:
             chunk_task: InferChunkTask = self._chunk_tasks[key]
-
-        chunk_task.add_task(task)
+            chunk_task.add_task(task)
 
         return task.future
 

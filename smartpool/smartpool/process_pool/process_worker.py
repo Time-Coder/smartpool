@@ -26,10 +26,13 @@ class ProcessWorker(Worker):
             task_queue_kwargs={"ctx": process_pool._ctx}
         )
 
-        if process_pool._torch_gpu_available:
-            self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=process_pool._ctx)
-        else:
-            self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = None
+        # The device-change queue is always created. It is the channel through
+        # which a migration signal reaches the child, and Worker.run needs the
+        # handle at spawn time, so it cannot be created lazily on first use.
+        # Gating it on torch being available made device_changeable=True a silent
+        # no-op on a pool built without use_torch: the scheduler reserved the GPU,
+        # marked the task migrated, and the worker never heard about it.
+        self.change_device_cmd_queue:Optional[SimpleQueue[Optional[str]]] = SimpleQueue(ctx=process_pool._ctx)
 
         self._is_rss_dirty:bool = True
         self._cached_rss:int = 0
@@ -66,9 +69,9 @@ class ProcessWorker(Worker):
     def _working_changed_hook(self):
         self._is_rss_dirty = True
 
-    def change_device(self, device:str)->None:
+    def change_device(self, device:str, task_id:Optional[str]=None)->None:
         if self.change_device_cmd_queue is not None:
-            self.change_device_cmd_queue.put(device)
+            self.change_device_cmd_queue.put((task_id, device))
 
     def _clear(self)->None:
         Worker._clear(self)
@@ -103,6 +106,40 @@ class ProcessWorker(Worker):
             self._dispose_task_queue()
 
         self._clear()
+
+    def is_alive(self)->bool:
+        process = self.executor
+        if process is None:
+            return False
+
+        try:
+            return process.is_alive()
+        except Exception:
+            return False
+
+    def abandon(self)->None:
+        process = self.executor
+        if process is not None:
+            try:
+                if process.is_alive():
+                    process.terminate()
+            except Exception:
+                pass
+
+        # Drop the queues rather than closing them in place. start() reuses the
+        # cached task queue, and handing a closed handle to the next process
+        # raises OSError("handle is closed") during spawn.
+        self._dispose_task_queue()
+        self._task_queue = None
+        if self.change_device_cmd_queue is not None:
+            try:
+                self.change_device_cmd_queue.close()
+            except Exception:
+                pass
+
+            self.change_device_cmd_queue = None
+
+        Worker.abandon(self)
 
     def _dispose_task_queue(self)->None:
         if self._task_queue is None:
